@@ -122,6 +122,10 @@ draft() {
   gh release create "$tag" --repo "$repo" "${flags[@]}" \
     "$dist"/ancilo-*.tar.gz "$dist"/*.dmg "$dist/Ancilo.app.tar.gz" "$dist/latest.json" \
     "$dist"/MANIFEST-*.txt "$dist/THIRD_PARTY_NOTICES.txt"
+  # A draft may come back as "untagged-…": the tag must be the version.
+  local id
+  id=$(gh api "repos/$repo/releases" --jq ".[] | select(.draft and .target_commitish == \"$commit\") | .id" | head -1)
+  [ -n "$id" ] && gh api -X PATCH "repos/$repo/releases/$id" -f tag_name="$tag" --jq '"tag: \(.tag_name)"'
   echo
   echo "Draft ready: https://github.com/$repo/releases – check it, then publish it."
 }
