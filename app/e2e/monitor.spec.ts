@@ -39,8 +39,10 @@ test("the status bar shows how the computer is doing and warns with fixes when i
   await expect(acted).toContainText("Memory was running out, so Ancilo unloaded", { timeout: 15_000 });
   await acted.getByRole("button", { name: "OK" }).click();
   await expect(acted).toHaveCount(0);
-  // In tests the Activity Monitor is not really opened.
-  await card.getByRole("button", { name: "Open Activity Monitor" }).click();
+  // Only macOS has an Activity Monitor (in tests it is not really opened).
+  const monitor = card.getByRole("button", { name: "Open Activity Monitor" });
+  if (process.platform === "darwin") await monitor.click();
+  else await expect(monitor).toHaveCount(0);
   await card.getByRole("button", { name: "Later" }).click();
   await expect(card).toHaveCount(0);
 
