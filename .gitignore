@@ -26,3 +26,6 @@ app/src-tauri/binaries/
 /.devnotes/
 /AGENTS.md
 /CLAUDE.md
+
+# Release results of packaging/release-local.sh
+/results/

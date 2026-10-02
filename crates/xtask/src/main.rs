@@ -412,19 +412,40 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("release-gate") => {
-            // xtask release-gate <commit> <junit.xml>… (each with a COMMIT file beside it)
+            // xtask release-gate <commit> [--accept <file>] <junit.xml>…
+            // (each junit.xml with a COMMIT file beside it). `--accept`: a
+            // pre-release's known gaps – one criterion or milestone per line,
+            // with the reason; everything else still blocks.
             let commit = args
                 .get(1)
-                .context("usage: xtask release-gate <commit> <junit.xml>…")?;
-            let files: Vec<PathBuf> = args[2..].iter().map(PathBuf::from).collect();
+                .context("usage: xtask release-gate <commit> [--accept <file>] <junit.xml>…")?;
+            let mut rest = &args[2..];
+            let mut accepted = Vec::new();
+            if rest.first().map(String::as_str) == Some("--accept") {
+                let file = rest.get(1).context("--accept needs a file")?;
+                accepted = parse_accepted(&std::fs::read_to_string(file)?)?;
+                rest = &rest[2..];
+            }
+            let files: Vec<PathBuf> = rest.iter().map(PathBuf::from).collect();
             let problems = release_gate(&root, commit, &files)?;
-            for p in &problems {
+            let (open, known) = split_accepted(problems, &accepted);
+            for p in &known {
+                println!("accepted (pre-release): {p}");
+            }
+            for p in &open {
                 eprintln!("{p}");
             }
-            if !problems.is_empty() {
-                bail!("release blocked: {} problems", problems.len());
+            if !open.is_empty() {
+                bail!("release blocked: {} problems", open.len());
             }
-            println!("release gate ok: every criterion of every milestone passed on {commit}");
+            if known.is_empty() {
+                println!("release gate ok: every criterion of every milestone passed on {commit}");
+            } else {
+                println!(
+                    "release gate ok for a pre-release: {} known gaps, everything else passed on {commit}",
+                    known.len()
+                );
+            }
             Ok(())
         }
         Some("eval-report") => {
@@ -521,6 +542,40 @@ fn case_matches(cov: &Coverage, class: &str, name: &str) -> bool {
 /// Everything that stops a release: blocked or draft criteria, criteria
 /// without tests, tests without a result, failed or skipped tests, results
 /// from another commit.
+/// The known gaps of a pre-release: `<criterion or milestone>  <reason>` per
+/// line (`#` starts a comment). Every gap needs its reason.
+fn parse_accepted(text: &str) -> Result<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (id, reason) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+        if reason.trim().is_empty() {
+            bail!("accepted gap {id} has no reason");
+        }
+        out.push((id.to_string(), reason.trim().to_string()));
+    }
+    Ok(out)
+}
+
+/// Splits the gate's problems into those still open and the accepted ones.
+fn split_accepted(
+    problems: Vec<String>,
+    accepted: &[(String, String)],
+) -> (Vec<String>, Vec<String>) {
+    let mut open = Vec::new();
+    let mut known = Vec::new();
+    for p in problems {
+        let id = p.split(':').next().unwrap_or_default();
+        match accepted.iter().find(|(a, _)| a == id) {
+            Some((_, reason)) => known.push(format!("{p} – {reason}")),
+            None => open.push(p),
+        }
+    }
+    (open, known)
+}
+
 fn release_gate(root: &Path, commit: &str, junit: &[PathBuf]) -> Result<Vec<String>> {
     let mut problems = Vec::new();
     let mut cases = Vec::new();
@@ -1322,6 +1377,34 @@ mod tests {
     }
 
     // covers: M9-AC-07
+    #[test]
+    fn a_pre_release_names_its_known_gaps_and_nothing_else_passes() {
+        let accepted =
+            parse_accepted("# v0.1.0\nM9-AC-04  Homebrew follows later\n\nM9-AC-01 no VM yet\n")
+                .unwrap();
+        assert_eq!(accepted.len(), 2);
+        assert!(
+            parse_accepted("M2-AC-04").is_err(),
+            "a gap needs its reason"
+        );
+        let (open, known) = split_accepted(
+            vec![
+                "M9-AC-04: brew_installs failed".into(),
+                "M9-AC-01: fresh_mac has no result".into(),
+                "M1-AC-03: add_model failed".into(),
+            ],
+            &accepted,
+        );
+        assert_eq!(open, ["M1-AC-03: add_model failed"]);
+        assert_eq!(
+            known,
+            [
+                "M9-AC-04: brew_installs failed – Homebrew follows later",
+                "M9-AC-01: fresh_mac has no result – no VM yet"
+            ]
+        );
+    }
+
     #[test]
     fn the_release_workflow_gates_signs_and_only_drafts() {
         // The release workflow (signing on the maintainer's Mac) is added to
