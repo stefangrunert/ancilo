@@ -95,6 +95,9 @@ build() {
   ' "$version" "$repo" "$bundle/macos/Ancilo.app.tar.gz.sig" "$dist/latest.json"
   say "notarize, staple and check the app like a download"
   packaging/sign.sh "$dist" app
+  # The notarized DMG once more under a name that never changes: the website
+  # links to releases/latest/download/Ancilo.dmg and never needs an update.
+  cp "$(ls "$dist"/Ancilo_*.dmg)" "$dist/Ancilo.dmg"
   echo "$commit" > "$dist/COMMIT"
 }
 
@@ -120,7 +123,7 @@ draft() {
   $prerelease && flags+=(--prerelease)
   say "draft release $tag"
   gh release create "$tag" --repo "$repo" "${flags[@]}" \
-    "$dist"/ancilo-*.tar.gz "$dist"/*.dmg "$dist/Ancilo.app.tar.gz" "$dist/latest.json" \
+    "$dist"/ancilo-*.tar.gz "$dist"/Ancilo_*.dmg "$dist/Ancilo.dmg" "$dist/Ancilo.app.tar.gz" "$dist/latest.json" \
     "$dist"/MANIFEST-*.txt "$dist/THIRD_PARTY_NOTICES.txt"
   # A draft may come back as "untagged-…": the tag must be the version.
   local id
