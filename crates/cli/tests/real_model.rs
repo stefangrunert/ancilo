@@ -32,8 +32,14 @@ const STANDARD_MODELS: &[&str] = &[
     "hf.co/second-state/All-MiniLM-L6-v2-Embedding-GGUF:Q4_K_M",
 ];
 
-/// A large model already on the machine (LM Studio), used when present.
+/// Models above this size are "large": only with `ANCILO_REAL_LARGE=1`.
+const LARGE_BYTES: u64 = 16 << 30;
+
+/// A large model already on the machine (LM Studio) – only on request
+/// (`ANCILO_REAL_LARGE=1`): it takes most of the memory and the processor of
+/// a working computer for a long time.
 fn local_large_model() -> Option<PathBuf> {
+    std::env::var_os("ANCILO_REAL_LARGE")?;
     let p = PathBuf::from(std::env::var_os("HOME")?)
         .join(".lmstudio/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-Q8_0.gguf");
     p.is_file().then_some(p)
@@ -237,17 +243,29 @@ async fn connect_or_start() -> (String, String, Option<ancilo_daemon::DaemonHand
             .trim()
             .to_string();
         ensure_standard_models(&info.url, &token).await;
+        standard_resources(&info.url, &token).await;
         return (info.url, token, None);
     }
     let config = Config {
         port: 0,
+        // The daemon runs inside this test; MCP clients (the Claude plugin,
+        // Codex) must start the real `ancilo`, not the test binary.
+        ancilo_bin: Some(env!("CARGO_BIN_EXE_ancilo").into()),
         ..Config::default()
     };
     let d = ancilo_daemon::start(paths, config, DaemonOptions::default())
         .await
         .unwrap();
     ensure_standard_models(d.url(), &d.token).await;
+    standard_resources(d.url(), &d.token).await;
     (d.url().to_string(), d.token.clone(), Some(d))
+}
+
+/// The standard level ("balanced"): models load only into free memory and
+/// nothing is preloaded at start – the tests run on a working computer.
+/// (Set explicitly: an earlier run may have left another level.)
+async fn standard_resources(url: &str, token: &str) {
+    call(url, token, "set_resources", json!({"level": "balanced"})).await;
 }
 
 /// Chat models that are downloaded, largest first (waits for models that
@@ -272,6 +290,11 @@ async fn chat_models(url: &str, token: &str) -> Vec<(String, u64)> {
         .iter()
         .filter(|m| {
             m["embedding"] == false && matches!(m["status"].as_str(), Some("ready" | "running"))
+        })
+        // Large models only on request (see `local_large_model`).
+        .filter(|m| {
+            std::env::var_os("ANCILO_REAL_LARGE").is_some()
+                || m["size_bytes"].as_u64().unwrap_or(0) <= LARGE_BYTES
         })
         .map(|m| {
             (
@@ -659,16 +682,20 @@ async fn claude_code_delegates_when_it_fits() {
     let plugin = plugin_dir(home().home());
     let p = project.path().to_path_buf();
     let c = plugin.clone();
+    let said = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let s2 = said.clone();
     let fitting = tasks_during(&url, &token, async {
         let (p, c) = (p.clone(), c.clone());
-        tokio::task::spawn_blocking(move || run_claude(&c, &p, "Write unittest tests for calc.py in test_calc.py. This is routine work – hand it to the local model."))
+        let out = tokio::task::spawn_blocking(move || run_claude(&c, &p, "Write unittest tests for calc.py in test_calc.py. This is routine work – hand it to the local model."))
             .await
             .unwrap();
+        *s2.lock().unwrap() = out;
     })
     .await;
     assert!(
         !fitting.is_empty(),
-        "Claude Code did not delegate a fitting task"
+        "Claude Code did not delegate a fitting task – it said: {}",
+        said.lock().unwrap()
     );
     let unfitting = tasks_during(&url, &token, async {
         let (p, c) = (p.clone(), c.clone());
