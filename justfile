@@ -30,10 +30,18 @@ test: deps
     cargo build -q -p ancilo-testkit --bins
     cargo nextest run --workspace --no-fail-fast --profile ci
 
-# Tests against real llama.cpp and real (small) models.
+# Tests against real llama.cpp and real small models – the product checks a
+# release needs (about 10–15 minutes; large models only with ANCILO_REAL_LARGE=1).
 test-real:
     cargo build -q -p ancilo-testkit --bins
-    cargo nextest run --workspace --no-fail-fast --profile real --run-ignored only -E 'not (binary(fresh_mac) | binary(homebrew) | binary(network) | binary(trusted) | test(reproducible_release_builds))'
+    cargo nextest run --workspace --no-fail-fast --profile real --run-ignored only -E 'not (binary(fresh_mac) | binary(homebrew) | binary(network) | binary(trusted) | test(reproducible_release_builds) | test(reliability_pipeline_improves_real_models))'
+
+# The reliability benchmark (M2-AC-04): tunes and measures the reliability
+# pipeline on held-out sets for every small model – about 45 minutes. For work
+# on the pipeline, not for every release.
+bench-reliability:
+    cargo build -q -p ancilo-testkit --bins
+    cargo nextest run -p ancilo --test real_model --no-fail-fast --profile real --run-ignored only -E 'test(reliability_pipeline_improves_real_models)'
 
 # Every acceptance criterion of an active milestone needs a test.
 trace:

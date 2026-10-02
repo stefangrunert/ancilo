@@ -62,7 +62,8 @@ ancilo ui                                 # open the app in the browser
 just build        # release build of the `ancilo` binary
 just verify       # formatting, lints, all deterministic tests, app checks
 just app-e2e      # the app in Chromium and WebKit against a real daemon with fakes
-just test-real    # tests with real models (downloads small models)
+just test-real    # product checks with real small models (~10–15 min; downloads them once)
+just bench-reliability  # the reliability benchmark (~45 min) – when working on the pipeline
 ```
 
 `just verify` runs offline and without a GPU: every external dependency – Hugging Face, models, web search providers, Claude Code and Codex – has a deterministic fake.
