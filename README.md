@@ -64,9 +64,10 @@ just verify       # formatting, lints, all deterministic tests, app checks
 just app-e2e      # the app in Chromium and WebKit against a real daemon with fakes
 just test-real    # product checks with real small models (~10–15 min; downloads them once)
 just bench-reliability  # the reliability benchmark (~45 min) – when working on the pipeline
+just release      # build, sign, notarize and draft a release (maintainers)
 ```
 
-`just verify` runs offline and without a GPU: every external dependency – Hugging Face, models, web search providers, Claude Code and Codex – has a deterministic fake.
+`just verify` runs offline and without a GPU: every external dependency – Hugging Face, models, web search providers, Claude Code and Codex – has a deterministic fake. How the test tiers and releases fit together: [Contributing](CONTRIBUTING.md).
 
 ## License
 

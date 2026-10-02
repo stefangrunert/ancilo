@@ -102,5 +102,10 @@ package *OUT:
     packaging/package.sh {{OUT}}
 
 # Two independent builds of the same commit must ship identical files (M9-AC-08).
+# A release – also a quick fix – in one command (~20–30 min): build, sign,
+# notarize, wait for green CI on the commit, draft on GitHub. See CONTRIBUTING.md.
+release:
+    packaging/release.sh
+
 repro-check:
     packaging/repro-check.sh

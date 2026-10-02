@@ -1405,27 +1405,36 @@ mod tests {
         );
     }
 
+    // covers: M9-AC-07
     #[test]
-    fn the_release_workflow_gates_signs_and_only_drafts() {
-        // The release workflow (signing on the maintainer's Mac) is added to
-        // the public repository with the first release.
-        let Ok(wf) = std::fs::read_to_string(repo_root().join(".github/workflows/release.yml"))
-        else {
-            return;
-        };
+    fn a_release_is_one_command_from_a_checked_commit_and_only_a_draft() {
+        let script = std::fs::read_to_string(repo_root().join("packaging/release.sh")).unwrap();
+        let body = script
+            .split("\npreflight\n")
+            .nth(1)
+            .expect("the steps at the end");
         let at = |s: &str| {
-            wf.find(s)
-                .unwrap_or_else(|| panic!("release.yml lacks {s}"))
+            body.find(s)
+                .unwrap_or_else(|| panic!("release.sh does not run {s}"))
         };
-        // Order: verify → package → sign → artifact checks → gate → draft release.
-        assert!(at("run: just verify") < at("run: just package dist"));
-        assert!(at("run: just package dist") < at("run: packaging/sign.sh dist"));
-        assert!(at("run: packaging/sign.sh dist") < at("Artifact checks"));
-        assert!(at("Artifact checks") < at("xtask -- release-gate"));
-        assert!(at("xtask -- release-gate") < at("gh release create"));
-        assert!(wf.contains("--draft"), "the owner publishes");
-        assert!(wf.contains("updater pubkey missing"));
-        assert!(wf.contains("latest.json"));
+        // Order: preflight → build (signed, notarized) → green CI → draft.
+        assert!(
+            script.contains("\npreflight\nbuild\nci_green\ndraft"),
+            "the steps, in order"
+        );
+        assert!(at("build") < at("ci_green") && at("ci_green") < at("draft"));
+        for must in [
+            "git status --porcelain",          // only from a clean checkout
+            "merge-base --is-ancestor",        // only a pushed commit
+            "CHANGELOG.md has no section",     // notes for every release
+            "packaging/sign.sh \"$dist\" cli", // the CLI signed and notarized
+            "packaging/sign.sh \"$dist\" app", // the app signed, notarized, checked like a download
+            "latest.json",                     // the updater finds it
+            "conclusion\" = \"success\"",      // never from a red CI
+            "--draft",                         // the maintainer publishes
+        ] {
+            assert!(script.contains(must), "release.sh lacks {must}");
+        }
         let sign = std::fs::read_to_string(repo_root().join("packaging/sign.sh")).unwrap();
         assert!(sign.contains("not releasing unsigned") && sign.contains("exit 1"));
     }

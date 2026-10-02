@@ -10,9 +10,25 @@ Thanks for your interest in Ancilo!
 ## Development
 
 ```bash
-just verify       # the gate for every commit: formatting, clippy, tests, app checks, traceability
+just verify       # the gate for every commit: formatting, clippy, tests, app checks (~5 min, offline)
 just app-e2e      # app end-to-end tests (Chromium, WebKit)
 ```
+
+Tests come in three tiers – the quick ones decide, the slow ones never block a fix:
+
+| Tier | What | When | Time |
+|---|---|---|---|
+| **Every commit** | `just verify`, `just app-e2e` – deterministic, offline, every external service faked; GitHub CI runs them on every push | always | minutes |
+| **Real world** | `just test-real` – real llama.cpp and small real models, Claude Code and Codex delegating for real | regularly, and when touching models, delegation or the API | ~10–15 min |
+| **Benchmarks and artifacts** | `just bench-reliability` (~45 min), reproducible builds, a fresh Mac in a VM, Homebrew, every acceptance criterion (`xtask release-gate`) | before larger releases, or when working on that area | hours |
+
+## Releasing
+
+```bash
+just release
+```
+
+One command, about 20–30 minutes (most of it Apple's notarization): it checks the checkout, builds the CLI archive and the app, signs and notarizes both, waits for green CI on the commit and creates a **draft** release on GitHub, which the maintainer publishes. A quick fix is a commit, a version bump and `just release` – nothing more. Version numbers follow [Semantic Versioning](https://semver.org); 0.x versions are pre-releases.
 
 - Rust: `cargo fmt`, `clippy -D warnings`; tests with `cargo nextest`.
 - App: React + TypeScript in `app/`; API types are generated from the daemon (`just app-api`).
