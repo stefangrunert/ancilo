@@ -28,7 +28,7 @@ Tests come in three tiers – the quick ones decide, the slow ones never block a
 just release
 ```
 
-One command, about 20–30 minutes (most of it Apple's notarization): it checks the checkout, builds the CLI archive and the app, signs and notarizes both, waits for green CI on the commit and creates a **draft** release on GitHub, which the maintainer publishes. A quick fix is a commit, a version bump and `just release` – nothing more. Version numbers follow [Semantic Versioning](https://semver.org); 0.x versions are pre-releases.
+One command, about 20–30 minutes (most of it Apple's notarization): it checks the checkout, builds the CLI archive and the app, signs and notarizes both, waits for green CI on the commit and creates a **draft** release on GitHub, which the maintainer publishes. A quick fix is a commit, a version bump and `just release` – nothing more. Version numbers follow [Semantic Versioning](https://semver.org). Only versions with a suffix (`1.0.0-rc.1`) are marked as pre-releases on GitHub – the app looks for updates at the latest release, which never points at a pre-release.
 
 - Rust: `cargo fmt`, `clippy -D warnings`; tests with `cargo nextest`.
 - App: React + TypeScript in `app/`; API types are generated from the daemon (`just app-api`).

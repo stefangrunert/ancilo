@@ -31,9 +31,11 @@ version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 tag="v$version"
 commit=$(git rev-parse HEAD)
 dist="$root/dist"
-# 0.x and versions with a suffix (1.0.0-rc.1) are pre-releases.
+# Only versions with a suffix (1.0.0-rc.1) are pre-releases: the updater reads
+# releases/latest, which GitHub never points at a pre-release – 0.x versions
+# are normal releases, or they would never reach anyone as an update.
 prerelease=false
-[[ "$version" == 0.* || "$version" == *-* ]] && prerelease=true
+[[ "$version" == *-* ]] && prerelease=true
 
 say() { printf '\n== %s\n' "$*"; }
 fail() { echo "release stopped: $*" >&2; exit 1; }
