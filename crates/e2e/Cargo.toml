@@ -1,0 +1,27 @@
+[package]
+name = "ancilo-e2e"
+description = "Test harness for the app: a real daemon with fake Hugging Face, fake models and fake Claude Code/Codex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "ancilo-e2e"
+path = "src/main.rs"
+
+[dependencies]
+ancilo-agent.workspace = true
+ancilo-core.workspace = true
+ancilo-daemon.workspace = true
+ancilo-models.workspace = true
+ancilo-tasks.workspace = true
+ancilo-testkit.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

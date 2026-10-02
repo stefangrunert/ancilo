@@ -1,0 +1,6 @@
+---
+source: crates/cli/src/fmt.rs
+expression: "error(\"insufficient_resources\",\n\"'b' needs about 40.0 GB, but only 20.0 GB of 96.0 GB are free (a loaded). Stop another model first.\")"
+---
+error: 'b' needs about 40.0 GB, but only 20.0 GB of 96.0 GB are free (a loaded). Stop another model first.
+  hint: `ancilo list` shows loaded models; `ancilo stop <model>` frees memory

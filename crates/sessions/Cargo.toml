@@ -1,0 +1,32 @@
+[package]
+name = "ancilo-sessions"
+description = "Ancilo coding sessions: chat with the local coding agent, reviewed changes, terminals"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ancilo-agent.workspace = true
+ancilo-core.workspace = true
+ancilo-gateway.workspace = true
+ancilo-models.workspace = true
+ancilo-storage.workspace = true
+axum.workspace = true
+chrono.workspace = true
+futures.workspace = true
+portable-pty = "0.9"
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+ancilo-testkit.workspace = true
+
+[lints]
+workspace = true

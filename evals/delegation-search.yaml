@@ -1,0 +1,106 @@
+# M5-AC-06: does search help delegation? Each task describes a bug in the
+# user's words; the code uses other words, and the file sits among 80
+# unrelated modules named the same way (no telling file names). `grep` for
+# the task's words finds little – the place has to be found by meaning.
+# Run with and without `search` and compare.
+name: delegation-search
+tasks:
+  - id: free-delivery
+    kind: fix
+    filler: { modules: 80, seed: 1 }
+    files:
+      lib/billing/ledger_91.py: |
+        def postage(order_total):
+            """Cost of sending the parcel."""
+            if order_total > 500:
+                return 0
+            return 4.9
+    task: "Customers who order for more than 50 should not pay for delivery, but they still do. Fix it."
+    checks:
+      - command: "python3 -c 'from lib.billing.ledger_91 import postage; assert postage(60) == 0 and postage(40) == 4.9'"
+
+  - id: celsius
+    kind: fix
+    filler: { modules: 80, seed: 2 }
+    files:
+      lib/display/series_92.py: |
+        def show(kelvin):
+            """Text for the outdoor sensor."""
+            return f"{kelvin:.1f}°"
+    task: "The weather screen shows temperatures that are far too high. It should show degrees Celsius. Fix it."
+    checks:
+      - command: "python3 -c 'from lib.display.series_92 import show; assert show(300.0).startswith(\"26.9\"), show(300.0)'"
+
+  - id: password-length
+    kind: fix
+    filler: { modules: 80, seed: 3 }
+    files:
+      lib/accounts/profile_93.py: |
+        def acceptable(secret):
+            """Whether a new secret may be used."""
+            return len(secret) >= 4
+    task: "Very short passwords are accepted when people sign up. Require at least 12 characters."
+    checks:
+      - command: "python3 -c 'from lib.accounts.profile_93 import acceptable; assert not acceptable(\"abcdefghijk\") and acceptable(\"abcdefghijkl\")'"
+
+  - id: last-page
+    kind: fix
+    filler: { modules: 80, seed: 4 }
+    files:
+      lib/catalog/window_94.py: |
+        def pages(items, per):
+            """Cut a list for the shop's overview."""
+            return [items[i:i + per] for i in range(0, len(items) - per, per)]
+    task: "The last page of the product list is missing items. Fix it."
+    checks:
+      - command: "python3 -c 'from lib.catalog.window_94 import pages; assert pages(list(range(10)), 4) == [[0,1,2,3],[4,5,6,7],[8,9]]'"
+
+  - id: backoff
+    kind: fix
+    filler: { modules: 80, seed: 5 }
+    files:
+      lib/net/token_95.py: |
+        def pause(attempt):
+            """Delay until the next try."""
+            return 0
+    task: "When the payment service is down we retry immediately and hammer it. Wait one second before the first retry and twice as long after each further failure."
+    checks:
+      - command: "python3 -c 'from lib.net.token_95 import pause; assert [pause(i) for i in range(4)] == [1, 2, 4, 8]'"
+
+  - id: email-domain
+    kind: fix
+    filler: { modules: 80, seed: 6 }
+    files:
+      lib/accounts/entry_96.py: |
+        def plausible(addr):
+            """Quick check before we send the welcome message."""
+            return "@" in addr
+    task: "Addresses like someone@example are accepted at registration although they have no domain ending such as .com. Reject them."
+    checks:
+      - command: "python3 -c 'from lib.accounts.entry_96 import plausible as p; assert p(\"a@example.com\") and not p(\"a@example\") and not p(\"example.com\")'"
+
+  - id: german-dates
+    kind: fix
+    filler: { modules: 80, seed: 7 }
+    files:
+      lib/billing/journal_97.py: |
+        def when(d):
+            """The date line printed on each invoice."""
+            return d.strftime("%m/%d/%Y")
+    task: "Invoices show the date as month/day/year; our customers in Germany expect day.month.year, like 30.09.2026."
+    checks:
+      - command: "python3 -c 'import datetime; from lib.billing.journal_97 import when; assert when(datetime.date(2026, 9, 30)) == \"30.09.2026\"'"
+
+  - id: summer-discount
+    kind: fix
+    filler: { modules: 80, seed: 8 }
+    files:
+      lib/sales/bucket_98.py: |
+        RATE = 0.05
+
+        def reduced(price):
+            """Price during the seasonal campaign."""
+            return round(price * (1 - RATE), 2)
+    task: "The summer promotion should take 15 percent off, but orders only get 5 percent off. Fix it."
+    checks:
+      - command: "python3 -c 'from lib.sales.bucket_98 import reduced; assert reduced(100) == 85'"

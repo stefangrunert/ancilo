@@ -1,0 +1,221 @@
+# Eval-Set II (M3): delegated tasks as Claude Code / Codex would hand them over.
+# Each task runs in a fresh git repository with the given files; checks decide
+# whether the result is right (files, content, commands that must succeed).
+name: delegation
+tasks:
+  - id: py-write-tests
+    kind: tests
+    files:
+      calc.py: |
+        def add(a, b):
+            return a + b
+    task: "Write unit tests for the function `add` in calc.py in a new file test_calc.py, using the unittest module: at least three test cases, including negative numbers."
+    checks:
+      - file_contains: { path: test_calc.py, text: "import unittest" }
+      - command: "python3 -m unittest test_calc -q"
+
+  - id: py-rename-function
+    kind: refactor
+    files:
+      users.py: |
+        def get_usr(user_id):
+            return {"id": user_id}
+      app.py: |
+        from users import get_usr
+
+        def show(user_id):
+            return get_usr(user_id)["id"]
+    task: "Rename the function `get_usr` to `get_user` everywhere (definition in users.py and all uses in app.py)."
+    checks:
+      - command: "! grep -rq get_usr --include=*.py ."
+      - command: "python3 -c 'import app; assert app.show(7) == 7'"
+
+  - id: js-jsdoc
+    kind: docs
+    files:
+      utils.js: |
+        function slugify(text) {
+          return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-");
+        }
+        module.exports = { slugify };
+    task: "Add a JSDoc comment to the function `slugify` in utils.js describing what it does, its parameter and its return value. Do not change the code itself."
+    checks:
+      - file_contains: { path: utils.js, text: "/**" }
+      - file_contains: { path: utils.js, text: "@param" }
+      - file_contains: { path: utils.js, text: "@returns" }
+      - file_contains: { path: utils.js, text: 'replace(/[^a-z0-9]+/g, "-")' }
+
+  - id: fix-off-by-one
+    kind: fix
+    files:
+      stats.py: |
+        def total(xs):
+            s = 0
+            for i in range(1, len(xs)):
+                s += xs[i]
+            return s
+      test_stats.py: |
+        import unittest
+        from stats import total
+
+        class T(unittest.TestCase):
+            def test_total(self):
+                self.assertEqual(total([1, 2, 3]), 6)
+
+        if __name__ == "__main__":
+            unittest.main()
+    task: "The function `total` in stats.py skips the first element. Fix it so that test_stats.py passes."
+    checks:
+      - command: "python3 -m unittest test_stats -q"
+
+  - id: readme-install-section
+    kind: docs
+    files:
+      README.md: |
+        # mytool
+
+        A small tool.
+
+        ## Usage
+
+        Run `mytool --help`.
+    task: "Add a section '## Installation' to README.md, before '## Usage', explaining that the tool is installed with `pip install .`."
+    checks:
+      - file_contains: { path: README.md, text: "## Installation" }
+      - file_contains: { path: README.md, text: "pip install ." }
+      - command: "python3 -c \"t=open('README.md').read(); assert t.index('## Installation') < t.index('## Usage')\""
+
+  - id: summarise-config
+    kind: summary
+    allow: read
+    files:
+      config.py: |
+        TIMEOUT_SECONDS = 30
+        RETRIES = 5
+
+        def load(path):
+            """Reads settings from a TOML file; missing keys fall back to the defaults above."""
+            ...
+    task: "Summarise in two sentences what config.py defines. Do not change any file."
+    checks:
+      - summary_contains: "30"
+      - unchanged: [config.py]
+
+  - id: extract-constant
+    kind: refactor
+    files:
+      timing.py: |
+        def hours_to_seconds(h):
+            return h * 3600
+
+        def seconds_to_hours(s):
+            return s / 3600
+    task: "In timing.py, replace the magic number 3600 by a module-level constant SECONDS_PER_HOUR = 3600 and use it in both functions."
+    checks:
+      - file_contains: { path: timing.py, text: "SECONDS_PER_HOUR = 3600" }
+      - command: "test $(grep -c 3600 timing.py) -eq 1"
+      - command: "python3 -c 'import timing; assert timing.hours_to_seconds(2) == 7200 and timing.seconds_to_hours(7200) == 2'"
+
+  - id: type-hints
+    kind: refactor
+    files:
+      greet.py: |
+        def greet(name, times):
+            return ("Hello, " + name + "! ") * times
+    task: "Add Python type hints to the function `greet` in greet.py (name is a string, times an int, it returns a string)."
+    checks:
+      - file_contains: { path: greet.py, text: "name: str" }
+      - file_contains: { path: greet.py, text: "times: int" }
+      - file_contains: { path: greet.py, text: "-> str" }
+      - command: "python3 -c 'import greet; assert greet.greet(\"A\", 2) == \"Hello, A! Hello, A! \"'"
+
+  - id: json-add-key
+    kind: other
+    files:
+      settings.json: |
+        {
+          "name": "demo",
+          "port": 8080
+        }
+    task: "Add the key \"debug\" with the value false to settings.json. Keep the file valid JSON."
+    checks:
+      - command: "python3 -c \"import json; d=json.load(open('settings.json')); assert d == {'name': 'demo', 'port': 8080, 'debug': False}\""
+
+  - id: gitignore
+    kind: other
+    files:
+      main.py: "print('hi')\n"
+    task: "Create a .gitignore for this Python project that ignores __pycache__/ and .venv/."
+    checks:
+      - file_contains: { path: .gitignore, text: "__pycache__/" }
+      - file_contains: { path: .gitignore, text: ".venv/" }
+
+  - id: print-to-logging
+    kind: refactor
+    files:
+      app.py: |
+        def start():
+            print("starting")
+            print("ready")
+    task: "In app.py, replace the print calls with logging.info calls (import logging at the top)."
+    checks:
+      - command: "! grep -q 'print(' app.py"
+      - file_contains: { path: app.py, text: "import logging" }
+      - command: "test $(grep -c 'logging.info' app.py) -eq 2"
+      - command: "python3 -c 'import app; app.start()'"
+
+  - id: run-and-fix
+    kind: fix
+    allow: shell
+    files:
+      shapes.py: |
+        def area(w, h):
+            return w + h
+      test_shapes.py: |
+        import unittest
+        from shapes import area
+
+        class T(unittest.TestCase):
+            def test_area(self):
+                self.assertEqual(area(3, 4), 12)
+
+        if __name__ == "__main__":
+            unittest.main()
+    task: "Run the tests with `python3 -m unittest -q` and fix the code so that they pass."
+    checks:
+      - command: "python3 -m unittest -q"
+      - unchanged: [test_shapes.py]
+
+  - id: add-function-with-test
+    kind: tests
+    files:
+      mathutils.py: |
+        def square(n):
+            return n * n
+    task: "Add a function `is_even(n)` to mathutils.py that returns True for even integers, and a unittest test file test_mathutils.py that tests is_even and square."
+    checks:
+      - command: "python3 -c 'from mathutils import is_even; assert is_even(4) and not is_even(3)'"
+      - command: "python3 -m unittest test_mathutils -q"
+
+  - id: bump-version
+    kind: other
+    files:
+      pyproject.toml: |
+        [project]
+        name = "demo"
+        version = "0.1.0"
+    task: "Update the version in pyproject.toml from 0.1.0 to 0.2.0."
+    checks:
+      - file_contains: { path: pyproject.toml, text: 'version = "0.2.0"' }
+      - command: "! grep -q 0.1.0 pyproject.toml"
+
+  - id: module-docstring
+    kind: docs
+    files:
+      textutil.py: |
+        def shout(s):
+            return s.upper() + "!"
+    task: "Add a module docstring at the top of textutil.py saying that the module contains small string helpers."
+    checks:
+      - command: "python3 -c 'import textutil; assert textutil.__doc__ and \"string\" in textutil.__doc__.lower()'"
+      - command: "python3 -c 'import textutil; assert textutil.shout(\"a\") == \"A!\"'"

@@ -1,0 +1,468 @@
+{
+ "version": 1,
+ "updated": "2026-10-01",
+ "note": "Quality: Ancilo's estimate from 1 (basic) to 10 (excellent) per purpose, from size, generation and – where 'tested' – Ancilo's own evals. Measurements on your machine beat this.",
+ "models": [
+  {
+   "id": "qwen3.5-0.8b",
+   "name": "Qwen3.5 0.8B",
+   "address": "hf.co/unsloth/Qwen3.5-0.8B-GGUF",
+   "maker": "Qwen (Alibaba)",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "documents"
+   ],
+   "params_b": 0.75,
+   "active_params_b": 0.75,
+   "quality": {
+    "chat": 2,
+    "code": 1,
+    "documents": 2
+   },
+   "sizes": {
+    "Q4_K_M": 532517120,
+    "Q8_0": 811843840
+   },
+   "license": "apache-2.0",
+   "released": "2026-03",
+   "tested": false,
+   "summary": {
+    "de": "Winzig und sehr schnell – für einfache Fragen auf Rechnern mit wenig Speicher.",
+    "en": "Tiny and very fast – for simple questions on computers with little memory."
+   }
+  },
+  {
+   "id": "qwen3.5-2b",
+   "name": "Qwen3.5 2B",
+   "address": "hf.co/unsloth/Qwen3.5-2B-GGUF",
+   "maker": "Qwen (Alibaba)",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "documents"
+   ],
+   "params_b": 1.88,
+   "active_params_b": 1.88,
+   "quality": {
+    "chat": 3,
+    "code": 2,
+    "documents": 3
+   },
+   "sizes": {
+    "Q4_K_M": 1280835840,
+    "Q8_0": 2012012800
+   },
+   "license": "apache-2.0",
+   "released": "2026-02",
+   "tested": false,
+   "summary": {
+    "de": "Klein und schnell – gut für kurze Texte und einfache Fragen.",
+    "en": "Small and fast – good for short texts and simple questions."
+   }
+  },
+  {
+   "id": "gemma-4-e2b",
+   "name": "Gemma 4 E2B",
+   "address": "hf.co/unsloth/gemma-4-E2B-it-GGUF",
+   "maker": "Google",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "documents"
+   ],
+   "params_b": 4.65,
+   "active_params_b": 2.0,
+   "quality": {
+    "chat": 3,
+    "code": 2,
+    "documents": 3
+   },
+   "sizes": {
+    "Q4_K_M": 3106738272,
+    "Q8_0": 5048352864
+   },
+   "license": "apache-2.0",
+   "released": "2026-04",
+   "tested": false,
+   "summary": {
+    "de": "Googles kompaktes Modell – sparsam und gut in vielen Sprachen.",
+    "en": "Google's compact model – frugal and good in many languages."
+   }
+  },
+  {
+   "id": "qwen3.5-4b",
+   "name": "Qwen3.5 4B",
+   "address": "hf.co/unsloth/Qwen3.5-4B-GGUF",
+   "maker": "Qwen (Alibaba)",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "code",
+    "documents"
+   ],
+   "params_b": 4.21,
+   "active_params_b": 4.21,
+   "quality": {
+    "chat": 5,
+    "code": 4,
+    "documents": 5
+   },
+   "sizes": {
+    "Q4_K_M": 2740937888,
+    "Q8_0": 4482403488
+   },
+   "license": "apache-2.0",
+   "released": "2026-03",
+   "tested": true,
+   "summary": {
+    "de": "Schneller Allrounder für Chat, Schreiben und kleine Programmieraufgaben – von Ancilo getestet.",
+    "en": "Fast all-rounder for chat, writing and small coding tasks – tested by Ancilo."
+   }
+  },
+  {
+   "id": "gemma-4-e4b",
+   "name": "Gemma 4 E4B",
+   "address": "hf.co/unsloth/gemma-4-E4B-it-GGUF",
+   "maker": "Google",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "documents"
+   ],
+   "params_b": 7.52,
+   "active_params_b": 4.0,
+   "quality": {
+    "chat": 5,
+    "code": 4,
+    "documents": 5
+   },
+   "sizes": {
+    "Q4_K_M": 4977171584,
+    "Q8_0": 8192953472
+   },
+   "license": "apache-2.0",
+   "released": "2026-04",
+   "tested": false,
+   "summary": {
+    "de": "Googles mittleres Kompaktmodell – solide beim Schreiben, gut in vielen Sprachen.",
+    "en": "Google's mid-size compact model – solid for writing, good in many languages."
+   }
+  },
+  {
+   "id": "qwen3.5-9b",
+   "name": "Qwen3.5 9B",
+   "address": "hf.co/unsloth/Qwen3.5-9B-GGUF",
+   "maker": "Qwen (Alibaba)",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "code",
+    "documents"
+   ],
+   "params_b": 8.95,
+   "active_params_b": 8.95,
+   "quality": {
+    "chat": 6,
+    "code": 6,
+    "documents": 6
+   },
+   "sizes": {
+    "Q4_K_M": 5680522464,
+    "Q8_0": 9527502048
+   },
+   "license": "apache-2.0",
+   "released": "2026-02",
+   "tested": false,
+   "summary": {
+    "de": "Spürbar klüger als die kleinen Modelle und noch flott – guter Alltagshelfer.",
+    "en": "Noticeably smarter than the small models and still quick – a good everyday helper."
+   }
+  },
+  {
+   "id": "gemma-4-12b",
+   "name": "Gemma 4 12B",
+   "address": "hf.co/unsloth/gemma-4-12b-it-GGUF",
+   "maker": "Google",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "documents"
+   ],
+   "params_b": 11.91,
+   "active_params_b": 11.91,
+   "quality": {
+    "chat": 7,
+    "code": 5,
+    "documents": 7
+   },
+   "sizes": {
+    "Q4_K_M": 7121861440,
+    "Q8_0": 12669647680
+   },
+   "license": "apache-2.0",
+   "released": "2026-05",
+   "tested": false,
+   "summary": {
+    "de": "Stark beim Schreiben und Zusammenfassen, auch auf Deutsch.",
+    "en": "Strong at writing and summarising, in German too."
+   }
+  },
+  {
+   "id": "gpt-oss-20b",
+   "name": "gpt-oss 20B",
+   "address": "hf.co/unsloth/gpt-oss-20b-GGUF",
+   "maker": "OpenAI",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "code"
+   ],
+   "params_b": 20.91,
+   "active_params_b": 3.6,
+   "quality": {
+    "chat": 6,
+    "code": 7,
+    "documents": 6
+   },
+   "sizes": {
+    "Q4_K_M": 11624759488,
+    "Q8_0": 12109567168
+   },
+   "license": "apache-2.0",
+   "released": "2025-08",
+   "tested": false,
+   "summary": {
+    "de": "OpenAIs offenes Modell – schnell, stark im Englischen und beim Programmieren.",
+    "en": "OpenAI's open model – fast, strong in English and at coding."
+   }
+  },
+  {
+   "id": "gemma-4-26b-a4b",
+   "name": "Gemma 4 26B A4B",
+   "address": "hf.co/unsloth/gemma-4-26B-A4B-it-GGUF",
+   "maker": "Google",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "code",
+    "documents"
+   ],
+   "params_b": 25.23,
+   "active_params_b": 3.8,
+   "quality": {
+    "chat": 8,
+    "code": 7,
+    "documents": 8
+   },
+   "sizes": {
+    "UD-Q4_K_XL": 17010980576,
+    "Q8_0": 26859861728
+   },
+   "license": "apache-2.0",
+   "released": "2026-04",
+   "tested": false,
+   "summary": {
+    "de": "Großes Modell, das trotzdem schnell antwortet – sehr gut für Texte und Fragen.",
+    "en": "A large model that still answers quickly – very good for texts and questions."
+   }
+  },
+  {
+   "id": "qwen3.6-35b-a3b",
+   "name": "Qwen3.6 35B A3B",
+   "address": "hf.co/unsloth/Qwen3.6-35B-A3B-GGUF",
+   "maker": "Qwen (Alibaba)",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "code",
+    "documents"
+   ],
+   "params_b": 34.66,
+   "active_params_b": 3.0,
+   "quality": {
+    "chat": 8,
+    "code": 8,
+    "documents": 8
+   },
+   "sizes": {
+    "UD-Q4_K_XL": 22360456160,
+    "Q8_0": 36903140320
+   },
+   "license": "apache-2.0",
+   "released": "2026-04",
+   "tested": true,
+   "summary": {
+    "de": "Sehr gut in allem und dabei schnell – von Ancilo getestet. Braucht viel Speicher.",
+    "en": "Very good at everything and still fast – tested by Ancilo. Needs a lot of memory."
+   }
+  },
+  {
+   "id": "qwen3.6-27b",
+   "name": "Qwen3.6 27B",
+   "address": "hf.co/unsloth/Qwen3.6-27B-GGUF",
+   "maker": "Qwen (Alibaba)",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "code",
+    "documents"
+   ],
+   "params_b": 26.9,
+   "active_params_b": 26.9,
+   "quality": {
+    "chat": 8,
+    "code": 8,
+    "documents": 8
+   },
+   "sizes": {
+    "Q4_K_M": 16817244384,
+    "Q8_0": 28595763424
+   },
+   "license": "apache-2.0",
+   "released": "2026-04",
+   "tested": false,
+   "summary": {
+    "de": "Sehr gründlich bei schwierigen Aufgaben, antwortet aber langsamer.",
+    "en": "Very thorough on hard tasks, but answers more slowly."
+   }
+  },
+  {
+   "id": "qwen3.8-27b",
+   "name": "Qwen3.8 27B",
+   "address": "hf.co/unsloth/Qwen3.8-27B-GGUF",
+   "maker": "Qwen (Alibaba)",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "code",
+    "documents"
+   ],
+   "params_b": 27.32,
+   "active_params_b": 27.32,
+   "quality": {
+    "chat": 9,
+    "code": 9,
+    "documents": 9
+   },
+   "sizes": {
+    "UD-Q4_K_XL": 17559178144,
+    "Q8_0": 29047086048
+   },
+   "license": "apache-2.0",
+   "released": "2026-08",
+   "tested": false,
+   "summary": {
+    "de": "Eines der stärksten Modelle für den eigenen Rechner – braucht einen schnellen Mac.",
+    "en": "One of the strongest models for your own computer – needs a fast Mac."
+   }
+  },
+  {
+   "id": "gemma-4-31b",
+   "name": "Gemma 4 31B",
+   "address": "hf.co/unsloth/gemma-4-31B-it-GGUF",
+   "maker": "Google",
+   "kind": "chat",
+   "purposes": [
+    "chat",
+    "documents"
+   ],
+   "params_b": 30.7,
+   "active_params_b": 30.7,
+   "quality": {
+    "chat": 9,
+    "code": 8,
+    "documents": 9
+   },
+   "sizes": {
+    "Q4_K_M": 18323733440,
+    "Q8_0": 32635677632
+   },
+   "license": "apache-2.0",
+   "released": "2026-04",
+   "tested": false,
+   "summary": {
+    "de": "Googles größtes offenes Modell – hervorragend beim Schreiben, braucht viel Speicher.",
+    "en": "Google's largest open model – excellent at writing, needs a lot of memory."
+   }
+  },
+  {
+   "id": "qwen3-coder-30b-a3b",
+   "name": "Qwen3 Coder 30B A3B",
+   "address": "hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+   "maker": "Qwen (Alibaba)",
+   "kind": "chat",
+   "purposes": [
+    "code"
+   ],
+   "params_b": 30.53,
+   "active_params_b": 3.3,
+   "quality": {
+    "chat": 6,
+    "code": 8,
+    "documents": 6
+   },
+   "sizes": {
+    "Q4_K_M": 18556689568,
+    "Q8_0": 32483935392
+   },
+   "license": "apache-2.0",
+   "released": "2025-07",
+   "tested": false,
+   "summary": {
+    "de": "Spezialist fürs Programmieren – schnell und zuverlässig mit Code.",
+    "en": "A coding specialist – fast and reliable with code."
+   }
+  },
+  {
+   "id": "qwen3-coder-next",
+   "name": "Qwen3 Coder Next",
+   "address": "hf.co/unsloth/Qwen3-Coder-Next-GGUF",
+   "maker": "Qwen (Alibaba)",
+   "kind": "chat",
+   "purposes": [
+    "code"
+   ],
+   "params_b": 79.67,
+   "active_params_b": 3.0,
+   "quality": {
+    "chat": 7,
+    "code": 9,
+    "documents": 7
+   },
+   "sizes": {
+    "UD-Q4_K_XL": 49608478720
+   },
+   "license": "apache-2.0",
+   "released": "2026-02",
+   "tested": false,
+   "summary": {
+    "de": "Sehr starker Programmier-Spezialist für große Macs (64 GB und mehr).",
+    "en": "A very strong coding specialist for large Macs (64 GB and more)."
+   }
+  },
+  {
+   "id": "all-minilm-l6-v2",
+   "name": "All-MiniLM-L6-v2",
+   "address": "hf.co/second-state/All-MiniLM-L6-v2-Embedding-GGUF",
+   "maker": "Sentence Transformers",
+   "kind": "embedding",
+   "purposes": [
+    "documents"
+   ],
+   "params_b": 0.023,
+   "active_params_b": 0.023,
+   "quality": {},
+   "sizes": {
+    "Q8_0": 25008064
+   },
+   "license": "apache-2.0",
+   "released": "2021-08",
+   "tested": true,
+   "summary": {
+    "de": "Macht deine Dokumente durchsuchbar (wird für „Mit eigenen Dokumenten arbeiten“ gebraucht).",
+    "en": "Makes your documents searchable (needed for “work with my own documents”)."
+   }
+  }
+ ]
+}

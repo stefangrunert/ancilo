@@ -1,0 +1,31 @@
+[package]
+name = "ancilo-agent"
+description = "Ancilo agent runtime: the loop, coding tools, permissions, sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ancilo-core.workspace = true
+ancilo-gateway.workspace = true
+globset.workspace = true
+hex.workspace = true
+ignore.workspace = true
+regex.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+similar.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+ancilo-testkit.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,23 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: diagnose
+    attributes:
+      label: Output of `ancilo diagnose`
+      description: Hardware, models, recent errors. Please check it for anything you do not want to share.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version (`ancilo --version`)
+    validations:
+      required: true

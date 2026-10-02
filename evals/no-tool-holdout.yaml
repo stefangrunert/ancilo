@@ -1,0 +1,68 @@
+# Gegenprobe – holdout (M2): questions that must NOT trigger a tool call,
+# never used to develop prompts or heuristics. Only for acceptance (M2-AC-04).
+name: no-tool-holdout
+tools: &tools
+  - type: function
+    function:
+      name: read_file
+      description: Read a text file.
+      parameters: { type: object, properties: { path: { type: string } }, required: [path] }
+  - type: function
+    function:
+      name: write_file
+      description: Create or overwrite a file with the given content.
+      parameters: { type: object, properties: { path: { type: string }, content: { type: string } }, required: [path, content] }
+  - type: function
+    function:
+      name: edit_file
+      description: Replace an exact snippet of text in a file.
+      parameters: { type: object, properties: { path: { type: string }, old_text: { type: string }, new_text: { type: string } }, required: [path, old_text, new_text] }
+  - type: function
+    function:
+      name: grep
+      description: Search file contents with a regular expression.
+      parameters: { type: object, properties: { pattern: { type: string } }, required: [pattern] }
+  - type: function
+    function:
+      name: glob
+      description: Find files by name pattern.
+      parameters: { type: object, properties: { pattern: { type: string } }, required: [pattern] }
+  - type: function
+    function:
+      name: bash
+      description: Run a shell command in the project directory.
+      parameters: { type: object, properties: { command: { type: string } }, required: [command] }
+
+system: &system "You are a coding assistant working in a software project. Use the tools when an action on the project is needed; answer directly when it is not."
+
+tasks:
+  - { id: h-what-is-ci, messages: [{ role: system, content: *system }, { role: user, content: "What is continuous integration?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-explain-closure, messages: [{ role: system, content: *system }, { role: user, content: "Explain what a closure is in JavaScript." }], checks: [{ no_tool_call: true }] }
+  - { id: h-example-match, messages: [{ role: system, content: *system }, { role: user, content: "Show me an example of a match expression in Rust." }], checks: [{ no_tool_call: true }] }
+  - { id: h-git-stash, messages: [{ role: system, content: *system }, { role: user, content: "What does git stash do?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-big-o, messages: [{ role: system, content: *system }, { role: user, content: "What is the time complexity of binary search?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-yaml-json, messages: [{ role: system, content: *system }, { role: user, content: "Convert this YAML to JSON: `name: app\nport: 80`" }], checks: [{ no_tool_call: true }] }
+  - { id: h-limerick, messages: [{ role: system, content: *system }, { role: user, content: "Write a limerick about a bug that only appears on Fridays." }], checks: [{ no_tool_call: true }] }
+  - { id: h-regex-date, messages: [{ role: system, content: *system }, { role: user, content: "Write a regular expression for dates like 2024-05-31." }], checks: [{ no_tool_call: true }] }
+  - { id: h-bash-oneliner, messages: [{ role: system, content: *system }, { role: user, content: "Give me a bash one-liner that counts the lines of all .txt files. Don't run it, just show it." }], checks: [{ no_tool_call: true }] }
+  - { id: h-commit-message, messages: [{ role: system, content: *system }, { role: user, content: "Suggest a good commit message for: fixed a null check in the login handler." }], checks: [{ no_tool_call: true }] }
+  - { id: h-rename-suggestion, messages: [{ role: system, content: *system }, { role: user, content: "Suggest three better names for a variable called `tmp2` that holds the user's age." }], checks: [{ no_tool_call: true }] }
+  - { id: h-inline-review, messages: [{ role: system, content: *system }, { role: user, content: "Is this Python correct? `for i in range(10) print(i)`" }], checks: [{ no_tool_call: true }] }
+  - { id: h-inline-refactor, messages: [{ role: system, content: *system }, { role: user, content: "Rewrite this more idiomatically, just reply with the code: `let mut v = Vec::new(); for x in 0..5 { v.push(x * 2); }`" }], checks: [{ no_tool_call: true }] }
+  - { id: h-tcp-udp, messages: [{ role: system, content: *system }, { role: user, content: "TCP vs UDP – when would I use which?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-docker-vs-vm, messages: [{ role: system, content: *system }, { role: user, content: "How is a Docker container different from a virtual machine?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-de-unterschied, messages: [{ role: system, content: *system }, { role: user, content: "Was ist der Unterschied zwischen einer Liste und einem Tupel in Python?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-de-erklaere, messages: [{ role: system, content: *system }, { role: user, content: "Erkläre kurz, was ein Deadlock ist." }], checks: [{ no_tool_call: true }] }
+  - { id: h-de-beispiel, messages: [{ role: system, content: *system }, { role: user, content: "Zeig mir ein Beispiel für eine async-Funktion in TypeScript." }], checks: [{ no_tool_call: true }] }
+  - { id: h-math, messages: [{ role: system, content: *system }, { role: user, content: "What is 17 times 23?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-units, messages: [{ role: system, content: *system }, { role: user, content: "How many bytes are in a mebibyte?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-http-method, messages: [{ role: system, content: *system }, { role: user, content: "Which HTTP method should I use to partially update a resource?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-semver, messages: [{ role: system, content: *system }, { role: user, content: "In semantic versioning, what does a major version bump mean?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-after-tool-explain, messages: [{ role: system, content: *system }, { role: user, content: "<system-reminder>Tool results were shown above.</system-reminder>\nCan you explain in simple terms what a hash map is?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-plan, messages: [{ role: system, content: *system }, { role: user, content: "Outline, in three bullet points, how you would approach adding caching to a web service. Don't do it yet." }], checks: [{ no_tool_call: true }] }
+  - { id: h-opinion, messages: [{ role: system, content: *system }, { role: user, content: "Which is easier to learn first, Go or Rust? One sentence." }], checks: [{ no_tool_call: true }] }
+  - { id: h-cheer, messages: [{ role: system, content: *system }, { role: user, content: "I finally fixed the bug after three hours!" }], checks: [{ no_tool_call: true }] }
+  - { id: h-typo-fix-inline, messages: [{ role: system, content: *system }, { role: user, content: "Fix the spelling in this sentence and reply with it: 'The fucntion retuns a vlaue.'" }], checks: [{ no_tool_call: true }] }
+  - { id: h-sql-explain, messages: [{ role: system, content: *system }, { role: user, content: "What does a LEFT JOIN do?" }], checks: [{ no_tool_call: true }] }
+  - { id: h-env-var, messages: [{ role: system, content: *system }, { role: user, content: "How do I read an environment variable in Node.js? Show the code only." }], checks: [{ no_tool_call: true }] }
+  - { id: h-cron, messages: [{ role: system, content: *system }, { role: user, content: "What does the cron expression `0 3 * * 1` mean?" }], checks: [{ no_tool_call: true }] }

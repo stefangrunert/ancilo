@@ -1,0 +1,7 @@
+---
+source: crates/cli/src/fmt.rs
+expression: "model_table(&json!([model(\"running\"),\n{\n    \"id\": \"qwen3-embedding-0.6b-q8_0\", \"status\": \"downloading\", \"quant\":\n    \"Q8_0\", \"size_bytes\": 639_000_000, \"ctx_tokens\": 8192, \"roles\": [\"embed\"],\n    \"download\": {\"percent\": 12.0}\n}]))"
+---
+MODEL                      STATUS              QUANT  SIZE     CONTEXT  ROLES
+qwen3.6-35b-a3b-q8_0       running · 71 tok/s  Q8_0   36.9 GB  32k      default
+qwen3-embedding-0.6b-q8_0  downloading 12 %    Q8_0   639 MB   8k       embed

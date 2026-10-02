@@ -1,0 +1,34 @@
+# Homebrew formula for the Ancilo CLI and daemon (with llama.cpp).
+# Rendered by the release job: @VERSION@, @URL@, @SHA256@.
+class Ancilo < Formula
+  desc "Local LLMs made simple: model API, coding agent, delegation for Claude Code and Codex"
+  homepage "https://github.com/stefangrunert/ancilo"
+  url "@URL@"
+  sha256 "@SHA256@"
+  version "@VERSION@"
+  license "Apache-2.0"
+
+  depends_on arch: :arm64
+  depends_on :macos
+
+  def install
+    bin.install "bin/ancilo"
+    # Ancilo finds its llama.cpp next to itself: libexec/ancilo/llama-server.
+    libexec.install "libexec/ancilo"
+    doc.install Dir["share/doc/ancilo/*"]
+  end
+
+  service do
+    run [opt_bin/"ancilo", "daemon", "run"]
+    keep_alive successful_exit: false
+    log_path var/"log/ancilo.log"
+    error_log_path var/"log/ancilo.log"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/ancilo --version")
+    assert_match "version", shell_output("#{libexec}/ancilo/llama-server --version 2>&1")
+    ENV["ANCILO_HOME"] = (testpath/"home").to_s
+    assert_match "not running", shell_output("#{bin}/ancilo daemon status")
+  end
+end

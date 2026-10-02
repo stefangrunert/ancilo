@@ -1,0 +1,13 @@
+---
+source: crates/cli/src/fmt.rs
+expression: "model_detail(&model(\"running\"))"
+---
+Qwen3.6-35B-A3B (qwen3.6-35b-a3b-q8_0)
+  status    running · 71 tok/s
+  quant     Q8_0
+  size      36.9 GB
+  context   32k
+  memory    about 39.1 GB
+  source    Hugging Face · unsloth/Qwen3.6-35B-A3B-GGUF (existing file from LM Studio)
+  file      /Users/x/.lmstudio/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-Q8_0.gguf
+  loaded in 8.4 s

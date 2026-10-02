@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: "Also run on a GitHub-hosted macOS runner"
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The gate: format, lint, deterministic tests, acceptance tracing.
+  verify-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy, rustfmt
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: just verify
+
+  # The app: end-to-end tests in Chromium and WebKit against a real daemon.
+  app-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --prefix app --no-audit --no-fund
+      - run: cd app && npx playwright install --with-deps chromium webkit
+      - run: just app-e2e
+
+  # The same tests with all outbound network blocked (M0-AC-02).
+  verify-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # The post step would upload the cache while the network is blocked.
+          cache: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch and build while online
+        run: |
+          npm ci --prefix tests/contract --no-audit --no-fund
+          cargo fetch --locked || cargo fetch
+          cargo nextest run --workspace --no-run
+          cargo build -p ancilo-testkit --bins
+      - name: Block all outbound network except loopback
+        run: |
+          sudo iptables -A OUTPUT -o lo -j ACCEPT
+          sudo iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+          sudo iptables -A OUTPUT -j REJECT
+          sudo ip6tables -A OUTPUT -o lo -j ACCEPT
+          sudo ip6tables -A OUTPUT -j REJECT
+          ! curl -s --max-time 5 https://huggingface.co > /dev/null
+      - name: Test offline
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: just test
+      - name: Restore network
+        if: always()
+        run: |
+          sudo iptables -F OUTPUT
+          sudo ip6tables -F OUTPUT
+
+  # macOS on demand (hosted macOS minutes are expensive for private repos;
+  # every commit is verified locally on Apple Silicon before push).
+  verify-macos:
+    if: github.event_name == 'workflow_dispatch' && inputs.macos
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy, rustfmt
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: just verify
+      - name: Native shell (clippy, unit tests incl. the updater)
+        run: |
+          cd app/src-tauri
+          cargo clippy --all-targets -- -D warnings
+          cargo test --bin ancilo-app

@@ -1,0 +1,29 @@
+[package]
+name = "ancilo-tasks"
+description = "Ancilo task runner: delegated tasks, queue, worktrees"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ancilo-agent.workspace = true
+ancilo-core.workspace = true
+ancilo-gateway.workspace = true
+ancilo-models.workspace = true
+ancilo-storage.workspace = true
+chrono.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+ancilo-testkit.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

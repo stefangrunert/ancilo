@@ -1,0 +1,10 @@
+---
+source: crates/cli/src/fmt.rs
+expression: "hardware(&json!({\n    \"hardware\":\n    {\"chip\": \"Apple M5 Max\", \"total_ram_bytes\": 137_438_953_472u64, \"gpu\":\n        \"metal\", \"performance_cores\": 12, \"total_cores\": 18,\n        \"free_disk_bytes\": 800_000_000_000u64}, \"model_budget_bytes\":\n    103_079_215_104u64, \"used_bytes\": 42_000_000_000u64,\n    \"free_for_models_bytes\": 61_079_215_104u64\n}))"
+---
+Apple M5 Max
+  memory    128 GB RAM
+  gpu       Apple GPU (Metal, unified memory)
+  models    96 GB usable · 39.1 GB in use · 56.9 GB free
+  cores     12 performance / 18 total
+  disk      800.0 GB free

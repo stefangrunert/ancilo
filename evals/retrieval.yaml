@@ -1,0 +1,202 @@
+# Retrieval eval (M5-AC-03/04): a small multi-language project and questions
+# with the file that answers them. Measured: recall@k and mean reciprocal rank.
+name: retrieval
+files:
+  README.md: |
+    # Shop backend
+
+    A small web shop: Rust API, TypeScript frontend, Python and Go helpers.
+    See docs/deploy.md for deployment.
+  src/auth/token.rs: |
+    use std::time::{Duration, SystemTime};
+
+    /// Claims carried by an access token.
+    pub struct Claims {
+        pub user_id: u64,
+        pub expires_at: SystemTime,
+    }
+
+    /// Access tokens expire after one hour.
+    pub const TOKEN_LIFETIME: Duration = Duration::from_secs(3600);
+
+    /// Issues a signed access token for a user.
+    pub fn issue_token(user_id: u64, secret: &[u8]) -> String {
+        let claims = Claims { user_id, expires_at: SystemTime::now() + TOKEN_LIFETIME };
+        sign(&claims, secret)
+    }
+
+    /// Checks signature and expiry of an access token.
+    pub fn verify_token(token: &str, secret: &[u8]) -> Option<Claims> {
+        let claims = decode(token, secret)?;
+        (claims.expires_at > SystemTime::now()).then_some(claims)
+    }
+  src/auth/password.rs: |
+    /// Hashes a password with Argon2id and a random salt before it is stored.
+    pub fn hash_password(plain: &str) -> String {
+        let salt = random_salt();
+        argon2id(plain.as_bytes(), &salt)
+    }
+
+    /// Compares a login attempt with the stored hash in constant time.
+    pub fn verify_password(plain: &str, stored: &str) -> bool {
+        constant_time_eq(argon2id_with(stored, plain.as_bytes()), stored)
+    }
+  src/db/pool.rs: |
+    /// Settings of the database connection pool.
+    pub struct PoolConfig {
+        /// At most this many open connections to Postgres.
+        pub max_connections: u32,
+        pub idle_timeout_secs: u64,
+    }
+
+    impl Default for PoolConfig {
+        fn default() -> Self {
+            Self { max_connections: 20, idle_timeout_secs: 300 }
+        }
+    }
+
+    pub async fn connect_pool(url: &str, config: &PoolConfig) -> Pool {
+        Pool::builder().max_size(config.max_connections).build(url).await
+    }
+  src/db/migrations.rs: |
+    /// Applies pending schema migrations when the server starts.
+    pub async fn run_migrations(pool: &Pool) -> Result<(), Error> {
+        for m in MIGRATIONS {
+            if !applied(pool, m.version).await? {
+                pool.execute(m.sql).await?;
+            }
+        }
+        Ok(())
+    }
+  src/http/routes.rs: |
+    pub fn router() -> Router {
+        Router::new()
+            .route("/users", get(list_users).post(create_user))
+            .route("/users/:id", get(get_user))
+    }
+
+    /// POST /users – registers a new customer account.
+    async fn create_user(Json(body): Json<NewUser>) -> Result<Json<User>, ApiError> {
+        let hash = hash_password(&body.password);
+        Ok(Json(insert_user(&body.email, &hash).await?))
+    }
+
+    async fn list_users() -> Json<Vec<User>> {
+        Json(all_users().await)
+    }
+  src/http/rate_limit.rs: |
+    /// Token bucket: each client may send `rate` requests per second, with
+    /// bursts up to `burst`.
+    pub struct RateLimiter {
+        rate: f64,
+        burst: f64,
+        buckets: HashMap<IpAddr, Bucket>,
+    }
+
+    impl RateLimiter {
+        /// Whether a request from `ip` is allowed right now.
+        pub fn allow(&mut self, ip: IpAddr, now: Instant) -> bool {
+            let b = self.buckets.entry(ip).or_insert(Bucket::full(self.burst, now));
+            b.refill(self.rate, self.burst, now);
+            b.take()
+        }
+    }
+  src/config.rs: |
+    /// Server configuration, read from environment variables:
+    /// SHOP_PORT, SHOP_DATABASE_URL and SHOP_JWT_SECRET.
+    pub struct Config {
+        pub port: u16,
+        pub database_url: String,
+        pub jwt_secret: String,
+    }
+
+    pub fn load_config() -> Result<Config, String> {
+        Ok(Config {
+            port: env_or("SHOP_PORT", "8080").parse().map_err(|_| "bad port")?,
+            database_url: env_required("SHOP_DATABASE_URL")?,
+            jwt_secret: env_required("SHOP_JWT_SECRET")?,
+        })
+    }
+  web/src/api.ts: |
+    const BASE = "/api";
+
+    /** Adds the bearer token of the logged-in user to a request. */
+    export function authHeader(token: string): Record<string, string> {
+      return { Authorization: `Bearer ${token}` };
+    }
+
+    /** Loads all users for the admin table. */
+    export async function fetchUsers(token: string): Promise<User[]> {
+      const res = await fetch(`${BASE}/users`, { headers: authHeader(token) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+  web/src/components/LoginForm.tsx: |
+    import { useState } from "react";
+
+    export function LoginForm({ onLogin }: { onLogin: (t: string) => void }) {
+      const [email, setEmail] = useState("");
+      const [password, setPassword] = useState("");
+
+      async function handleSubmit(e: React.FormEvent) {
+        e.preventDefault();
+        const res = await fetch("/api/login", { method: "POST", body: JSON.stringify({ email, password }) });
+        onLogin((await res.json()).token);
+      }
+
+      return <form onSubmit={handleSubmit}>…</form>;
+    }
+  scripts/backup.py: |
+    """Nightly database backups."""
+    import datetime
+    import subprocess
+
+    def backup_database(url: str, target_dir: str) -> str:
+        """Dumps the database with pg_dump into a timestamped file."""
+        name = f"{target_dir}/shop-{datetime.date.today()}.sql"
+        subprocess.run(["pg_dump", url, "-f", name], check=True)
+        return name
+
+    def rotate_backups(target_dir: str, keep: int = 7) -> None:
+        """Deletes old backups; only the newest `keep` (a week) are kept."""
+        files = sorted(list_backups(target_dir))
+        for old in files[:-keep]:
+            remove(old)
+  worker/cleanup.go: |
+    package worker
+
+    // CleanupExpiredSessions deletes login sessions that ended more than a day ago.
+    func CleanupExpiredSessions(db *sql.DB) (int64, error) {
+    	res, err := db.Exec("DELETE FROM sessions WHERE ended_at < now() - interval '1 day'")
+    	if err != nil {
+    		return 0, err
+    	}
+    	return res.RowsAffected()
+    }
+  docs/deploy.md: |
+    # Deployment
+
+    ## With Docker
+
+    Build the image and start everything with `docker compose up -d`.
+    The compose file starts the API, Postgres and the worker.
+
+    ## Updating
+
+    Pull the new image and run `docker compose up -d` again; migrations run on start.
+queries:
+  - { q: "where are passwords hashed", expect: [src/auth/password.rs] }
+  - { q: "verify_token", expect: [src/auth/token.rs] }
+  - { q: "how many database connections are allowed", expect: [src/db/pool.rs] }
+  - { q: "requests per second limit for clients", expect: [src/http/rate_limit.rs] }
+  - { q: "which environment variables configure the server", expect: [src/config.rs] }
+  - { q: "frontend code that loads the user list", expect: [web/src/api.ts] }
+  - { q: "login form submit handler", expect: [web/src/components/LoginForm.tsx] }
+  - { q: "how long are backups kept", expect: [scripts/backup.py] }
+  - { q: "remove old sessions", expect: [worker/cleanup.go] }
+  - { q: "how do I deploy with docker", expect: [docs/deploy.md] }
+  - { q: "database schema changes on startup", expect: [src/db/migrations.rs] }
+  - { q: "HTTP endpoint to create a user", expect: [src/http/routes.rs] }
+  - { q: "when does an access token expire", expect: [src/auth/token.rs] }
+  - { q: "authorization header for API calls", expect: [web/src/api.ts] }
+  - { q: "RateLimiter", expect: [src/http/rate_limit.rs] }

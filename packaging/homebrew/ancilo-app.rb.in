@@ -1,0 +1,30 @@
+# Homebrew cask for the Ancilo desktop app (contains the CLI and llama.cpp).
+# Rendered by the release job: @VERSION@, @URL@, @SHA256@.
+cask "ancilo-app" do
+  version "@VERSION@"
+  sha256 "@SHA256@"
+
+  url "@URL@"
+  name "Ancilo"
+  desc "Local LLMs made simple: model API, coding agent, delegation for Claude Code and Codex"
+  homepage "https://github.com/stefangrunert/ancilo"
+
+  depends_on arch: :arm64
+  depends_on macos: ">= :ventura"
+
+  # The app updates itself (signed update archives).
+  auto_updates true
+  # Both provide the `ancilo` command.
+  conflicts_with formula: "ancilo"
+
+  app "Ancilo.app"
+  binary "#{appdir}/Ancilo.app/Contents/MacOS/ancilo"
+
+  uninstall launchctl: "app.ancilo.daemon",
+            quit:      "app.ancilo.desktop"
+
+  zap trash: [
+    "~/Library/Application Support/ancilo",
+    "~/Library/LaunchAgents/app.ancilo.daemon.plist",
+  ]
+end

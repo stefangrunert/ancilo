@@ -1,0 +1,6 @@
+---
+source: crates/cli/src/fmt.rs
+expression: "error(\"insufficient_resources\",\n\"not enough disk space: the download needs 36.9 GB, 20.0 GB are free\")"
+---
+error: not enough disk space: the download needs 36.9 GB, 20.0 GB are free
+  hint: free some disk space, or pick a smaller quantization, e.g. `--quant Q4_K_M`

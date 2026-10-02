@@ -1,0 +1,28 @@
+# Betriebssystem / Editoren
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Rust
+/target/
+
+# Node / Frontend
+node_modules/
+dist/
+
+# Lokale Umgebung
+.env
+.env.*
+*.log
+
+# Release (packaging/): sidecar binaries staged for `tauri build`
+app/src-tauri/binaries/
+
+# Self-hosted GitHub Actions runner (lives here on the owner's Mac; never commit – it holds credentials)
+/actions-runner/
+
+# Project notes and agent instructions stay on the maintainer's machine.
+/.devnotes/
+/AGENTS.md
+/CLAUDE.md

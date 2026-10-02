@@ -1,0 +1,264 @@
+# Eval-Set I (M2): tool calling.
+#
+# A realistic coding tool set. Tasks range from a single obvious call to picking
+# the right tool among many, required and nested arguments, arrays, enums,
+# multi-turn context – and questions that must NOT trigger a tool call.
+# Each task passes only if the call is well-formed AND semantically right.
+name: tool-calling
+tools: &tools
+  - type: function
+    function:
+      name: read_file
+      description: Read a text file. Use offset/limit for large files.
+      parameters:
+        type: object
+        properties:
+          path: { type: string, description: Path relative to the project root }
+          offset: { type: integer, minimum: 1, description: First line (1-based) }
+          limit: { type: integer, minimum: 1, description: Number of lines }
+        required: [path]
+  - type: function
+    function:
+      name: write_file
+      description: Create or overwrite a file with the given content.
+      parameters:
+        type: object
+        properties:
+          path: { type: string }
+          content: { type: string }
+        required: [path, content]
+  - type: function
+    function:
+      name: edit_file
+      description: Replace an exact snippet of text in a file.
+      parameters:
+        type: object
+        properties:
+          path: { type: string }
+          old_text: { type: string, description: Exact text to replace }
+          new_text: { type: string }
+          replace_all: { type: boolean }
+        required: [path, old_text, new_text]
+  - type: function
+    function:
+      name: grep
+      description: Search file contents with a regular expression.
+      parameters:
+        type: object
+        properties:
+          pattern: { type: string }
+          glob: { type: string, description: Only files matching this glob, e.g. "*.rs" }
+          case_insensitive: { type: boolean }
+        required: [pattern]
+  - type: function
+    function:
+      name: glob
+      description: Find files by name pattern.
+      parameters:
+        type: object
+        properties:
+          pattern: { type: string, description: e.g. "src/**/*.ts" }
+        required: [pattern]
+  - type: function
+    function:
+      name: bash
+      description: Run a shell command in the project directory.
+      parameters:
+        type: object
+        properties:
+          command: { type: string }
+          timeout_s: { type: integer, minimum: 1, maximum: 600 }
+        required: [command]
+  - type: function
+    function:
+      name: create_issue
+      description: Create an issue in the project's tracker.
+      parameters:
+        type: object
+        properties:
+          title: { type: string }
+          body: { type: string }
+          labels: { type: array, items: { type: string } }
+          priority: { type: string, enum: [low, medium, high, critical] }
+          assignee: { type: object, properties: { login: { type: string } }, required: [login] }
+        required: [title, priority]
+  - type: function
+    function:
+      name: run_tests
+      description: Run the project's tests, optionally only some of them.
+      parameters:
+        type: object
+        properties:
+          filter: { type: string, description: Only tests whose name contains this }
+          package: { type: string }
+        required: []
+
+system: &system "You are a coding assistant working in a software project. Use the tools when an action on the project is needed; answer directly when it is not."
+
+tasks:
+  - id: read-simple
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Show me the contents of src/main.rs." }
+    tools: *tools
+    checks:
+      - tool_call: { name: read_file, required_args: [path], args: { path: "src/main.rs" } }
+
+  - id: read-range
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Read lines 120 to 160 of crates/core/src/lib.rs." }
+    tools: *tools
+    checks:
+      - tool_call: { name: read_file, required_args: [path, offset, limit], args: { path: "crates/core/src/lib.rs", offset: 120, limit: 41 } }
+
+  - id: glob-tests
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Which TypeScript test files are there? They end in .test.ts." }
+    tools: *tools
+    checks:
+      - tool_call: { name: glob, required_args: [pattern], args: { pattern: ".test.ts" } }
+
+  - id: grep-todo
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Find all TODO comments in the Rust files." }
+    tools: *tools
+    checks:
+      - tool_call: { name: grep, required_args: [pattern], args: { pattern: "TODO" } }
+
+  - id: grep-case-insensitive
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Search every Python file for 'deprecated', ignoring upper/lower case." }
+    tools: *tools
+    checks:
+      - tool_call: { name: grep, required_args: [pattern, case_insensitive], args: { case_insensitive: true } }
+
+  - id: bash-git-status
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "What is the current git status of the repository?" }
+    tools: *tools
+    checks:
+      - tool_call: { name: bash, required_args: [command], args: { command: "git status" } }
+
+  - id: run-tests-filter
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Run only the tests whose names contain 'parser'." }
+    tools: *tools
+    checks:
+      - tool_call: { name: run_tests, args: { filter: "parser" } }
+
+  - id: write-file
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Create a file NOTES.md with the single line: # Notes" }
+    tools: *tools
+    checks:
+      - tool_call: { name: write_file, required_args: [path, content], args: { path: "NOTES.md", content: "# Notes" } }
+
+  - id: edit-rename
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "In src/config.rs, rename the constant MAX_RETRY to MAX_RETRIES (it appears exactly once, as `const MAX_RETRY: u32 = 3;`)." }
+    tools: *tools
+    checks:
+      - tool_call: { name: edit_file, required_args: [path, old_text, new_text], args: { path: "src/config.rs", old_text: "MAX_RETRY", new_text: "MAX_RETRIES" } }
+
+  - id: issue-enum-array
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Open a critical issue titled 'Crash on empty input' with the labels bug and parser." }
+    tools: *tools
+    checks:
+      - tool_call: { name: create_issue, required_args: [title, priority, labels], args: { title: "Crash on empty input", priority: "critical", labels: ["bug", "parser"] } }
+
+  - id: issue-nested
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Create a low-priority issue 'Improve docs' and assign it to the user octocat." }
+    tools: *tools
+    checks:
+      - tool_call: { name: create_issue, required_args: [title, priority, assignee], args: { priority: "low", assignee: { login: "octocat" } } }
+
+  - id: choose-glob-not-bash
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "List all Markdown files in the docs folder." }
+    tools: *tools
+    checks:
+      - tool_call: { name: glob, required_args: [pattern], args: { pattern: "docs" } }
+
+  - id: multi-turn-follow-up
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Where is the function parse_config defined?" }
+      - { role: assistant, content: null, tool_calls: [{ id: call_1, type: function, function: { name: grep, arguments: "{\"pattern\": \"fn parse_config\"}" } }] }
+      - { role: tool, tool_call_id: call_1, content: "src/config/loader.rs:42: pub fn parse_config(text: &str) -> Result<Config> {" }
+      - { role: user, content: "Show me that function." }
+    tools: *tools
+    checks:
+      - tool_call: { name: read_file, required_args: [path], args: { path: "src/config/loader.rs" } }
+
+  - id: multi-turn-fix
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Run the tests." }
+      - { role: assistant, content: null, tool_calls: [{ id: call_1, type: function, function: { name: run_tests, arguments: "{}" } }] }
+      - { role: tool, tool_call_id: call_1, content: "test util::tests::adds ... FAILED\n  expected 4, got 5\n  at src/util.rs:10: `a + b + 1`" }
+      - { role: user, content: "Fix the bug in src/util.rs: the expression `a + b + 1` should be `a + b`." }
+    tools: *tools
+    checks:
+      - tool_call: { name: edit_file, required_args: [path, old_text, new_text], args: { path: "src/util.rs", old_text: "a + b + 1", new_text: "a + b" } }
+
+  - id: long-content
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Write a .gitignore that ignores target/, node_modules/ and .DS_Store (one per line)." }
+    tools: *tools
+    checks:
+      - tool_call: { name: write_file, required_args: [path, content], args: { path: ".gitignore" }, args_contain_all: { content: ["target/", "node_modules/", ".DS_Store"] } }
+
+  - id: quoted-content
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "In README.md replace the text \"Hello \\\"world\\\"\" with \"Hello Ancilo\"." }
+    tools: *tools
+    checks:
+      - tool_call: { name: edit_file, required_args: [path, old_text, new_text], args: { path: "README.md", new_text: "Hello Ancilo" }, args_contain_all: { old_text: ["Hello", "world"] } }
+
+  - id: bash-timeout
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Build the project with `cargo build --release`; allow up to 300 seconds." }
+    tools: *tools
+    checks:
+      - tool_call: { name: bash, required_args: [command, timeout_s], args: { command: "cargo build --release", timeout_s: 300 } }
+
+  - id: no-tool-explain
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "In general terms, what is the difference between a mutex and a semaphore? Answer in two sentences." }
+    tools: *tools
+    checks:
+      - no_tool_call: true
+
+  - id: no-tool-given-context
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Here is a function: `fn add(a: i32, b: i32) -> i32 { a + b }`. What does it return for 2 and 3? Just the number." }
+    tools: *tools
+    checks:
+      - no_tool_call: true
+      - contains: "5"
+
+  - id: no-tool-greeting
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Thanks, that's all for now!" }
+    tools: *tools
+    checks:
+      - no_tool_call: true

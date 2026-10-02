@@ -1,0 +1,6 @@
+---
+source: crates/cli/src/fmt.rs
+expression: "model_table(&json!([]))"
+---
+No models yet. Add one with:
+  ancilo add hf.co/unsloth/Qwen3.6-35B-A3B-GGUF

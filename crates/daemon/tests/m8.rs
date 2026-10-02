@@ -1,0 +1,1113 @@
+//! M8: coding sessions in the app – approvals, persistence, "retry with
+//! another model", changes that reach the project only when applied, and
+//! terminals – over the real daemon with scripted fake models.
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use ancilo_core::Config;
+use ancilo_daemon::{DaemonHandle, DaemonOptions};
+use ancilo_models::ManagerOptions;
+use ancilo_models::hardware::HardwareProfile;
+use ancilo_testkit::{FakeFile, FakeHf, FakeRepo, TestHome, fake_llama_server_bin, home::git_repo};
+use futures::{SinkExt, StreamExt};
+use serde_json::{Value, json};
+use tokio_tungstenite::tungstenite::Message;
+
+struct Env {
+    home: TestHome,
+    _hf: FakeHf,
+    config: Config,
+    scripts: PathBuf,
+    d: Option<DaemonHandle>,
+}
+
+fn repo(id: &str) -> FakeRepo {
+    let name = id
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .trim_end_matches("-GGUF")
+        .to_string();
+    FakeRepo::new(
+        id,
+        vec![FakeFile::gguf(
+            &format!("{name}-Q8_0.gguf"),
+            "qwen3",
+            32768,
+            150_000,
+        )],
+    )
+    .with_gguf_meta(json!({"architecture": "qwen3", "context_length": 32768}))
+}
+
+fn options() -> DaemonOptions {
+    DaemonOptions {
+        manager: ManagerOptions {
+            measure_speed: false,
+            restart_backoff: Duration::from_millis(50),
+            ..Default::default()
+        },
+        llama_build: Some(None),
+        tasks: ancilo_tasks::Options {
+            shell: ancilo_agent::ShellSettings {
+                sandbox: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    }
+}
+
+impl Env {
+    /// Two chat models, `chat-q8_0` and `other-q8_0`; scripts per model file
+    /// stem (`Chat-Q8_0`, `Other-Q8_0`).
+    async fn start(scripts: &[(&str, &str)]) -> (Self, String, String) {
+        let home = TestHome::new();
+        let hf = FakeHf::start(vec![repo("o/Chat-GGUF"), repo("o/Other-GGUF")]).await;
+        let dir = home.scratch("scripts");
+        let hw = home.scratch("hw").join("hw.json");
+        std::fs::write(
+            &hw,
+            serde_json::to_string(&HardwareProfile::apple(64)).unwrap(),
+        )
+        .unwrap();
+        let config = Config {
+            hf_endpoint: hf.url(),
+            llama_server_bin: Some(fake_llama_server_bin()),
+            model_search_dirs: Some(vec![]),
+            hardware_override: Some(hw),
+            llama_server_env: [("FAKE_LLM_SCRIPT_DIR".to_string(), dir.display().to_string())]
+                .into_iter()
+                .collect(),
+            ..home.config()
+        };
+        home.write_config(&config);
+        let mut env = Self {
+            home,
+            _hf: hf,
+            config,
+            scripts: dir,
+            d: None,
+        };
+        env.set_scripts(scripts);
+        env.d = Some(
+            ancilo_daemon::start(env.home.paths.clone(), env.config.clone(), options())
+                .await
+                .unwrap(),
+        );
+        let chat = env.add("o/Chat-GGUF").await;
+        let other = env.add("o/Other-GGUF").await;
+        (env, chat, other)
+    }
+
+    /// Scripts are read when a fake model server starts.
+    fn set_scripts(&self, scripts: &[(&str, &str)]) {
+        for (stem, script) in scripts {
+            std::fs::write(self.scripts.join(format!("{stem}.yaml")), script).unwrap();
+        }
+    }
+
+    fn d(&self) -> &DaemonHandle {
+        self.d.as_ref().unwrap()
+    }
+
+    async fn call(&self, name: &str, input: Value, confirm: bool) -> (bool, Value) {
+        let mut r = reqwest::Client::new()
+            .post(format!("{}/api/v1/ops/{name}", self.d().url()))
+            .bearer_auth(&self.d().token)
+            .json(&input);
+        if confirm {
+            r = r.header("x-ancilo-confirm", "true");
+        }
+        let r = r.send().await.unwrap();
+        let ok = r.status().is_success();
+        (ok, r.json().await.unwrap_or(Value::Null))
+    }
+
+    async fn op(&self, name: &str, input: Value) -> Value {
+        let (ok, v) = self.call(name, input, true).await;
+        assert!(ok, "{name}: {v}");
+        v
+    }
+
+    async fn add(&self, address: &str) -> String {
+        let v = self
+            .op(
+                "add_model",
+                json!({"address": address, "start": false, "context": "small"}),
+            )
+            .await;
+        let id = v["id"].as_str().unwrap().to_string();
+        for _ in 0..1200 {
+            if self.op("model_status", json!({"model": id})).await["status"] == "ready" {
+                return id;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("{id} not ready");
+    }
+
+    async fn session(&self, id: &str) -> Value {
+        self.op("get_session", json!({"session": id})).await
+    }
+
+    /// Waits until `f` holds for the session.
+    async fn wait_for(&self, id: &str, what: &str, f: impl Fn(&Value) -> bool) -> Value {
+        for _ in 0..600 {
+            let s = self.session(id).await;
+            if f(&s) {
+                return s;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("{what}: {}", self.session(id).await);
+    }
+
+    async fn next_approval(&self, id: &str) -> Value {
+        let s = self
+            .wait_for(id, "no approval requested", |s| {
+                !s["approvals"].as_array().unwrap().is_empty()
+            })
+            .await;
+        s["approvals"][0].clone()
+    }
+
+    async fn idle(&self, id: &str) -> Value {
+        self.wait_for(id, "turn did not finish", |s| s["status"] != "running")
+            .await
+    }
+
+    async fn restart(&mut self) {
+        self.d.take().unwrap().stop().await;
+        self.d = Some(
+            ancilo_daemon::start(self.home.paths.clone(), self.config.clone(), options())
+                .await
+                .unwrap(),
+        );
+    }
+
+    async fn stop(mut self) {
+        if let Some(d) = self.d.take() {
+            d.stop().await;
+        }
+    }
+}
+
+fn project(env: &Env) -> PathBuf {
+    let dir = env.home.scratch("project");
+    git_repo(
+        &dir,
+        &[
+            ("src/lib.rs", "pub fn old_name() -> u32 {\n    42\n}\n"),
+            ("README.md", "# Project\n"),
+        ],
+    );
+    std::fs::canonicalize(dir).unwrap()
+}
+
+fn read(p: &Path) -> String {
+    std::fs::read_to_string(p).unwrap_or_default()
+}
+
+fn git_status(dir: &Path) -> String {
+    let out = std::process::Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=all"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn files(v: &Value) -> Vec<String> {
+    let mut f: Vec<String> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["path"].as_str().unwrap().to_string())
+        .collect();
+    f.sort();
+    f
+}
+
+const GATED: &str = r#"
+steps:
+  - respond: { tool_calls: [{ name: read_file, arguments: { path: "src/lib.rs" } }] }
+  - expect: { any_message_contains: "pub fn old_name" }
+    respond: { tool_calls: [{ name: write_file, arguments: { path: "NOTES.md", content: "notes\n" } }] }
+  - expect: { any_message_contains: "did not allow" }
+    respond: { tool_calls: [{ name: edit_file, arguments: { path: "src/lib.rs", old_text: "old_name", new_text: "new_name" } }] }
+  - respond: { tool_calls: [{ name: bash, arguments: { command: "echo built > out.txt" } }] }
+  - respond: { text: "Renamed old_name to new_name and wrote out.txt." }
+"#;
+
+// covers: M8-AC-03
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn approvals_gate_every_action_above_the_permission() {
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", GATED)]).await;
+    let dir = project(&env);
+    let mut events = env.d().bus.subscribe();
+    let s = env
+        .op("create_session", json!({"cwd": dir, "permission": "read"}))
+        .await;
+    let id = s["id"].as_str().unwrap().to_string();
+    assert_eq!(s["isolated"], true);
+    assert_eq!(s["model"], "chat-q8_0");
+    env.op(
+        "send_message",
+        json!({"session": id, "text": "Rename old_name"}),
+    )
+    .await;
+
+    // Writing a file needs "edit": the agent waits; nothing is written.
+    let a = env.next_approval(&id).await;
+    // The request shows while the turn runs (it joins the history at its end).
+    let running = env.session(&id).await;
+    assert_eq!(
+        running["messages"].as_array().unwrap().last().unwrap()["text"],
+        "Rename old_name"
+    );
+    assert_eq!(a["tool"], "write_file");
+    assert_eq!(a["needs"], "edit");
+    assert_eq!(env.session(&id).await["status"], "running");
+    assert!(files(&env.session(&id).await["changes"]).is_empty());
+    env.op("reject", json!({"approval": a["id"]})).await;
+
+    // Editing: allowed once.
+    let a = env
+        .wait_for(&id, "no edit approval", |s| {
+            s["approvals"][0]["tool"] == "edit_file"
+        })
+        .await["approvals"][0]
+        .clone();
+    assert!(files(&env.session(&id).await["changes"]).is_empty());
+    env.op("approve", json!({"approval": a["id"]})).await;
+
+    // A command needs "shell"; allowed for the rest of the session.
+    let a = env
+        .wait_for(&id, "no shell approval", |s| {
+            s["approvals"][0]["tool"] == "bash"
+        })
+        .await["approvals"][0]
+        .clone();
+    assert_eq!(a["needs"], "shell");
+    assert!(!dir.join("out.txt").exists());
+    env.op("approve", json!({"approval": a["id"], "remember": true}))
+        .await;
+
+    let s = env.idle(&id).await;
+    assert_eq!(s["status"], "idle");
+    let asked = s["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["role"] == "user" && m["text"] == "Rename old_name")
+        .count();
+    assert_eq!(asked, 1, "the request once, not twice");
+    assert_eq!(s["permission"], "shell", "remembered for the session");
+    assert_eq!(files(&s["changes"]), ["out.txt", "src/lib.rs"]);
+    // Approved actions worked in the session's own area – the project is untouched.
+    assert!(read(&dir.join("src/lib.rs")).contains("old_name"));
+    assert!(!dir.join("NOTES.md").exists() && !dir.join("out.txt").exists());
+    assert_eq!(git_status(&dir), "");
+
+    // Deciding twice or on an unknown approval fails.
+    let (ok, _) = env
+        .call("approve", json!({"approval": a["id"]}), true)
+        .await;
+    assert!(!ok);
+
+    // Applying is consequential: it needs the confirmation.
+    let (ok, _) = env
+        .call("apply_changes", json!({"session": id}), false)
+        .await;
+    assert!(!ok);
+    assert_eq!(git_status(&dir), "");
+    let applied = env.op("apply_changes", json!({"session": id})).await;
+    assert_eq!(
+        files(&json!(
+            applied["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| json!({"path": f}))
+                .collect::<Vec<_>>()
+        )),
+        ["out.txt", "src/lib.rs"]
+    );
+    assert!(read(&dir.join("src/lib.rs")).contains("pub fn new_name()"));
+    assert_eq!(read(&dir.join("out.txt")).trim(), "built");
+    assert!(!dir.join("NOTES.md").exists());
+    assert!(files(&env.session(&id).await["changes"]).is_empty());
+
+    let mut kinds = Vec::new();
+    while let Ok(e) = events.try_recv() {
+        kinds.push(e.kind);
+    }
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|k| *k == "session.approval_required")
+            .count(),
+        3
+    );
+    for k in [
+        "session.created",
+        "session.turn_started",
+        "session.rejected",
+        "session.approved",
+        "session.changes_ready",
+        "session.turn_finished",
+        "session.applied",
+    ] {
+        assert!(kinds.iter().any(|x| x == k), "{k} missing: {kinds:?}");
+    }
+    env.stop().await;
+}
+
+// covers: M8-AC-06
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sessions_survive_a_daemon_restart() {
+    let first = r#"
+steps:
+  - respond: { tool_calls: [{ name: edit_file, arguments: { path: "src/lib.rs", old_text: "old_name", new_text: "new_name" } }] }
+  - respond: { text: "Renamed old_name to new_name." }
+  - respond: { text: "never", delay_ms: 30000 }
+"#;
+    let (mut env, _, _) = Env::start(&[("Chat-Q8_0", first)]).await;
+    let dir = project(&env);
+    let s = env.op("create_session", json!({"cwd": dir})).await;
+    let id = s["id"].as_str().unwrap().to_string();
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Rename old_name", "wait": true}),
+        )
+        .await;
+    assert_eq!(s["title"], "Rename old_name");
+    assert_eq!(files(&s["changes"]), ["src/lib.rs"]);
+    // A turn that is still running when the daemon stops.
+    env.op(
+        "send_message",
+        json!({"session": id, "text": "Now document it"}),
+    )
+    .await;
+    env.wait_for(&id, "not running", |s| s["status"] == "running")
+        .await;
+    env.set_scripts(&[(
+        "Chat-Q8_0",
+        r#"
+steps:
+  - expect: { any_message_contains: "Renamed old_name to new_name." }
+    respond: { text: "Continuing where we left off." }
+"#,
+    )]);
+    env.restart().await;
+
+    let s = env.session(&id).await;
+    assert_eq!(s["status"], "interrupted");
+    assert_eq!(s["turns"], 2);
+    assert_eq!(files(&s["changes"]), ["src/lib.rs"], "open changes kept");
+    let texts: Vec<&str> = s["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["text"].as_str().unwrap())
+        .collect();
+    assert!(texts.contains(&"Rename old_name"), "{texts:?}");
+    assert!(
+        texts.contains(&"Renamed old_name to new_name."),
+        "{texts:?}"
+    );
+    let listed = env.op("list_sessions", json!({"project": dir})).await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    // The conversation continues with its history.
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Go on", "wait": true}),
+        )
+        .await;
+    assert_eq!(s["status"], "idle");
+    assert_eq!(
+        s["messages"].as_array().unwrap().last().unwrap()["text"],
+        "Continuing where we left off."
+    );
+    // The change is still only in the session's area.
+    assert!(read(&dir.join("src/lib.rs")).contains("old_name"));
+    env.stop().await;
+}
+
+// covers: M8-AC-05, M8-AC-02
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn retry_with_another_model_runs_side_by_side_and_discarding_leaves_no_trace() {
+    let chat = r#"
+steps:
+  - respond: { tool_calls: [{ name: read_file, arguments: { path: "src/lib.rs" } }] }
+  - expect: { any_message_contains: "pub fn old_name" }
+    respond: { tool_calls: [{ name: edit_file, arguments: { path: "src/lib.rs", old_text: "old_name", new_text: "chat_name" } }] }
+  - respond: { text: "Renamed to chat_name." }
+"#;
+    // The other model starts from the same state: it sees old_name too.
+    let other = r#"
+steps:
+  - respond: { tool_calls: [{ name: read_file, arguments: { path: "src/lib.rs" } }] }
+  - expect: { any_message_contains: "pub fn old_name" }
+    respond: { tool_calls: [{ name: edit_file, arguments: { path: "src/lib.rs", old_text: "old_name", new_text: "other_name" } }] }
+  - respond: { text: "Renamed to other_name." }
+  - expect: { any_message_contains: "Renamed to other_name." }
+    respond: { tool_calls: [{ name: write_file, arguments: { path: "src/extra.rs", content: "// extra\n" } }] }
+  - respond: { text: "Added src/extra.rs." }
+"#;
+    let (env, chat_id, other_id) = Env::start(&[("Chat-Q8_0", chat), ("Other-Q8_0", other)]).await;
+    let dir = project(&env);
+    let s = env
+        .op("create_session", json!({"cwd": dir, "model": chat_id}))
+        .await;
+    let id = s["id"].as_str().unwrap().to_string();
+    assert_eq!(s["can_retry"], false);
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Rename old_name", "wait": true}),
+        )
+        .await;
+    assert_eq!(s["can_retry"], true);
+    let s = env
+        .op(
+            "retry_with_model",
+            json!({"session": id, "model": other_id, "wait": true}),
+        )
+        .await;
+    let v = &s["variants"][0];
+    assert_eq!(v["model"], other_id.as_str());
+    assert_eq!(v["status"], "idle");
+    assert_eq!(v["summary"], "Renamed to other_name.");
+    // Both results side by side, in separate areas; the project is untouched.
+    let mine = env.op("session_diff", json!({"session": id})).await;
+    assert!(
+        mine["patch"]
+            .as_str()
+            .unwrap()
+            .contains("+pub fn chat_name()")
+    );
+    let theirs = env
+        .op("session_diff", json!({"session": id, "variant": v["id"]}))
+        .await;
+    let patch = theirs["patch"].as_str().unwrap();
+    assert!(patch.contains("+pub fn other_name()") && !patch.contains("chat_name"));
+    assert_eq!(git_status(&dir), "");
+
+    // The other model's result is taken; the session continues from it.
+    env.op("apply_changes", json!({"session": id, "variant": v["id"]}))
+        .await;
+    assert!(read(&dir.join("src/lib.rs")).contains("pub fn other_name()"));
+    let s = env.session(&id).await;
+    assert!(s["variants"].as_array().unwrap().is_empty());
+    assert!(files(&s["changes"]).is_empty());
+    let msgs = s["messages"].as_array().unwrap();
+    assert_eq!(msgs.last().unwrap()["text"], "Renamed to other_name.");
+    // The choice counts for the leaderboard – as the user's (subjective) choice.
+    let board = env.op("leaderboard", json!({})).await;
+    assert_eq!(
+        board["choices"],
+        json!([
+            {"model": other_id, "chosen": 1, "passed_over": 0},
+            {"model": chat_id, "chosen": 0, "passed_over": 1}
+        ])
+    );
+    assert!(
+        board["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("Your choices in coding sessions")
+    );
+    assert!(!msgs.iter().any(|m| m["text"] == "Renamed to chat_name."));
+
+    // Discarded changes leave no trace – in the project and in the session.
+    let before = git_status(&dir);
+    env.op("update_session", json!({"session": id, "model": other_id}))
+        .await;
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Add an extra module", "wait": true}),
+        )
+        .await;
+    assert_eq!(files(&s["changes"]), ["src/extra.rs"]);
+    env.op("discard_changes", json!({"session": id})).await;
+    assert!(files(&env.session(&id).await["changes"]).is_empty());
+    assert!(!dir.join("src/extra.rs").exists());
+    assert_eq!(git_status(&dir), before);
+
+    // Deleting removes the session's work area.
+    let (ok, _) = env
+        .call("delete_session", json!({"session": id}), false)
+        .await;
+    assert!(!ok, "deleting is consequential");
+    env.op("delete_session", json!({"session": id})).await;
+    assert!(!env.home.paths.home().join("sessions").join(&id).exists());
+    let worktrees = std::process::Command::new("git")
+        .args(["worktree", "list"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&worktrees.stdout).lines().count(),
+        1
+    );
+    env.stop().await;
+}
+
+// covers: M8-AC-02
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn projects_without_git_are_protected_too() {
+    let script = r#"
+steps:
+  - respond: { tool_calls: [{ name: write_file, arguments: { path: "notes.txt", content: "new\n" } }] }
+  - respond: { text: "Wrote notes.txt." }
+  - respond: { tool_calls: [{ name: edit_file, arguments: { path: "a.txt", old_text: "one", new_text: "two" } }] }
+  - respond: { text: "Changed a.txt." }
+  - respond: { tool_calls: [{ name: edit_file, arguments: { path: "a.txt", old_text: "one", new_text: "three" } }] }
+  - respond: { text: "Changed a.txt differently." }
+"#;
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
+    let dir = env.home.scratch("plain");
+    std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+    let dir = std::fs::canonicalize(dir).unwrap();
+    let p = env.op("open_project", json!({"path": dir})).await;
+    assert_eq!(p["git"], false);
+    let s = env.op("create_session", json!({"cwd": dir})).await;
+    let id = s["id"].as_str().unwrap().to_string();
+    assert_eq!(s["isolated"], true);
+    env.op(
+        "send_message",
+        json!({"session": id, "text": "Write notes", "wait": true}),
+    )
+    .await;
+    // Without git the agent works in a copy of its own, too.
+    assert_eq!(files(&env.session(&id).await["changes"]), ["notes.txt"]);
+    assert!(!dir.join("notes.txt").exists());
+    // The user keeps working on the project; discarding never touches it.
+    std::fs::write(dir.join("mine.txt"), "mine\n").unwrap();
+    env.op("discard_changes", json!({"session": id})).await;
+    assert_eq!(read(&dir.join("mine.txt")), "mine\n");
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Change a", "wait": true}),
+        )
+        .await;
+    assert_eq!(files(&s["changes"]), ["a.txt"]);
+    assert_eq!(read(&dir.join("a.txt")), "one\n");
+    // Retrying works without git as well.
+    assert_eq!(s["can_retry"], true);
+    let s = env
+        .op(
+            "retry_with_model",
+            json!({"session": id, "model": "chat-q8_0", "wait": true}),
+        )
+        .await;
+    let v = s["variants"][0]["id"].as_str().unwrap().to_string();
+    env.op("apply_changes", json!({"session": id, "variant": v}))
+        .await;
+    assert_eq!(read(&dir.join("a.txt")), "three\n");
+    assert!(files(&env.session(&id).await["changes"]).is_empty());
+    // No shadow data inside the project.
+    let mut entries: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    entries.sort();
+    assert_eq!(entries, ["a.txt", "mine.txt"]);
+    env.stop().await;
+}
+
+// covers: M8-AC-05
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn running_retries_never_race_the_session() {
+    let chat = r#"
+steps:
+  - respond: { tool_calls: [{ name: edit_file, arguments: { path: "src/lib.rs", old_text: "old_name", new_text: "chat_name" } }] }
+  - respond: { text: "Renamed." }
+fallback: { text: "ok" }
+"#;
+    // The other model is slow: its retry is still running when the user acts.
+    let other = r#"
+steps:
+  - respond: { text: "thinking", delay_ms: 20000 }
+fallback: { text: "late", delay_ms: 20000 }
+"#;
+    let (env, chat_id, other_id) = Env::start(&[("Chat-Q8_0", chat), ("Other-Q8_0", other)]).await;
+    let dir = project(&env);
+    let s = env
+        .op("create_session", json!({"cwd": dir, "model": chat_id}))
+        .await;
+    let id = s["id"].as_str().unwrap().to_string();
+    env.op(
+        "send_message",
+        json!({"session": id, "text": "Rename", "wait": true}),
+    )
+    .await;
+    let s = env
+        .op(
+            "retry_with_model",
+            json!({"session": id, "model": other_id}),
+        )
+        .await;
+    let v = s["variants"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(s["variants"][0]["status"], "running");
+    // A running retry cannot be taken.
+    let (ok, e) = env
+        .call("apply_changes", json!({"session": id, "variant": v}), true)
+        .await;
+    assert!(
+        !ok && e["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("still running"),
+        "{e}"
+    );
+    // Applying the session's own changes stops the retry first – cleanly.
+    env.op("apply_changes", json!({"session": id})).await;
+    assert!(read(&dir.join("src/lib.rs")).contains("chat_name"));
+    let s = env.session(&id).await;
+    assert!(
+        s["variants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|x| x["status"] != "running"),
+        "{s}"
+    );
+    // Deleting while a retry runs stops it and leaves no work area behind.
+    env.op(
+        "retry_with_model",
+        json!({"session": id, "model": other_id}),
+    )
+    .await;
+    env.op("delete_session", json!({"session": id})).await;
+    assert!(!env.home.paths.home().join("sessions").join(&id).exists());
+    let worktrees = std::process::Command::new("git")
+        .args(["worktree", "list"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&worktrees.stdout).lines().count(),
+        1
+    );
+    env.stop().await;
+}
+
+// covers: M8-AC-08, M8-AC-04
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_session_action_is_an_operation_and_terminals_need_a_ticket() {
+    let (env, _, _) = Env::start(&[]).await;
+    let dir = project(&env);
+    let ops: Value = reqwest::Client::new()
+        .get(format!("{}/api/v1/ops", env.d().url()))
+        .bearer_auth(&env.d().token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let names: Vec<&str> = ops
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["name"].as_str().unwrap())
+        .collect();
+    for op in [
+        "open_project",
+        "create_session",
+        "send_message",
+        "approve",
+        "reject",
+        "get_session",
+        "list_sessions",
+        "session_diff",
+        "apply_changes",
+        "discard_changes",
+        "retry_with_model",
+        "cancel_turn",
+        "update_session",
+        "delete_session",
+        "open_terminal",
+        "terminal_ticket",
+        "list_terminals",
+        "close_terminal",
+    ] {
+        assert!(names.contains(&op), "{op} missing");
+    }
+
+    // A terminal lives in the daemon; connections need a one-time ticket.
+    let t = env
+        .op("open_terminal", json!({"cwd": dir, "cols": 80, "rows": 24}))
+        .await;
+    let term = t["terminal"]["id"].as_str().unwrap().to_string();
+    let ws_url = |path: &str| format!("{}{}", env.d().url().replace("http://", "ws://"), path);
+    let bad =
+        tokio_tungstenite::connect_async(ws_url(&format!("/api/v1/pty/{term}?ticket=nope"))).await;
+    assert!(bad.is_err(), "an invalid ticket is refused");
+    let path = t["ticket"]["path"].as_str().unwrap().to_string();
+    let (mut ws, _) = tokio_tungstenite::connect_async(ws_url(&path))
+        .await
+        .unwrap();
+    assert!(
+        tokio_tungstenite::connect_async(ws_url(&path))
+            .await
+            .is_err(),
+        "tickets are single use"
+    );
+    ws.send(Message::Text(r#"{"resize":[120,40]}"#.into()))
+        .await
+        .unwrap();
+    ws.send(Message::Binary(
+        b"stty size; echo marker-$((6*7))\r".to_vec().into(),
+    ))
+    .await
+    .unwrap();
+    let mut seen = String::new();
+    let got = tokio::time::timeout(Duration::from_secs(15), async {
+        while let Some(Ok(m)) = ws.next().await {
+            if let Message::Binary(b) = m {
+                seen.push_str(&String::from_utf8_lossy(&b));
+                if seen.contains("marker-42") && seen.contains("40 120") {
+                    return true;
+                }
+            }
+        }
+        false
+    })
+    .await
+    .unwrap_or(false);
+    assert!(got, "terminal output: {seen}");
+    drop(ws);
+
+    // Reconnecting (e.g. after reloading the window) shows what happened.
+    let ticket = env.op("terminal_ticket", json!({"terminal": term})).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(ws_url(ticket["path"].as_str().unwrap()))
+        .await
+        .unwrap();
+    let backlog = tokio::time::timeout(Duration::from_secs(5), ws.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&backlog.into_data()).contains("marker-42"));
+
+    // A session's terminal opens where its agent works.
+    let s = env.op("create_session", json!({"cwd": dir})).await;
+    let t2 = env.op("open_terminal", json!({"session": s["id"]})).await;
+    assert_eq!(t2["terminal"]["cwd"], s["workdir"]);
+    assert_ne!(s["workdir"], json!(dir), "isolated work area");
+    assert_eq!(
+        env.op("list_terminals", json!({}))
+            .await
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    env.op("close_terminal", json!({"terminal": term})).await;
+    env.op("close_terminal", json!({"terminal": t2["terminal"]["id"]}))
+        .await;
+    assert!(
+        env.op("list_terminals", json!({}))
+            .await
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    env.stop().await;
+}
+
+// covers: M8-AC-07
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_coding_eval_runs_tasks_through_sessions_and_judges_the_project() {
+    let script = r#"
+steps:
+  - expect: { last_user_contains: "hello.txt" }
+    respond: { tool_calls: [{ name: write_file, arguments: { path: "hello.txt", content: "hi\n" } }] }
+  - respond: { text: "Created hello.txt." }
+  - expect: { last_user_contains: "Now say bye" }
+    respond: { tool_calls: [{ name: edit_file, arguments: { path: "hello.txt", old_text: "hi", new_text: "bye" } }] }
+  - respond: { text: "Changed it to bye." }
+  - respond: { text: "I won't do that." }
+"#;
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
+    let suite = env.home.scratch("suite").join("coding.yaml");
+    std::fs::write(
+        &suite,
+        r#"
+name: mini-coding
+tasks:
+  - id: two-turns
+    files: { "README.md": "x\n" }
+    turns: ["Create hello.txt with hi", "Now say bye instead"]
+    checks:
+      - file_contains: { path: hello.txt, text: "bye" }
+      - summary_contains: "bye"
+  - id: refused
+    files: { "README.md": "x\n" }
+    turns: ["Create other.txt"]
+    checks:
+      - file_contains: { path: other.txt, text: "x" }
+"#,
+    )
+    .unwrap();
+    let r = env
+        .op(
+            "run_coding_eval",
+            json!({"suite": suite, "model": "chat-q8_0", "repeat": 1}),
+        )
+        .await;
+    assert_eq!(r["model"], "chat-q8_0");
+    assert_eq!(r["tasks"][0]["success_rate"], 1.0, "{r}");
+    assert_eq!(r["tasks"][0]["runs"][0]["steps"], 2, "two turns");
+    assert_eq!(r["tasks"][1]["success_rate"], 0.0);
+    assert!(
+        r["tasks"][1]["runs"][0]["failure"]
+            .as_str()
+            .unwrap()
+            .contains("other.txt missing")
+    );
+    assert_eq!(r["success_rate"], 0.5);
+    // Sessions of the eval are cleaned up; the report is kept.
+    assert!(
+        env.op("list_sessions", json!({}))
+            .await
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let saved = std::fs::read_dir(env.home.paths.home().join("evals"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("mini-coding-chat-q8_0")
+        });
+    assert!(saved);
+    env.stop().await;
+}
+
+// covers: M8-AC-09
+/// The agent works in the session's copy but only ever sees the project's
+/// path: absolute paths and commands with it reach the copy, never the
+/// project itself, and the work area's path never reaches the model.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_agent_works_under_the_project_path() {
+    let (env, _, _) = Env::start(&[]).await;
+    let dir = project(&env);
+    let root = dir.display().to_string();
+    let script = format!(
+        r#"
+steps:
+  - expect: {{ any_message_contains: "Project root: {root} ", no_message_contains: "/sessions/" }}
+    respond: {{ tool_calls: [{{ name: write_file, arguments: {{ path: "{root}/ancilo.txt", content: "Hallo Ancilo!\n" }} }}] }}
+  - expect: {{ no_message_contains: "/sessions/" }}
+    respond: {{ tool_calls: [{{ name: bash, arguments: {{ command: "cd {root} && pwd && cat ancilo.txt" }} }}] }}
+  - expect: {{ any_message_contains: "Hallo Ancilo!", no_message_contains: "/sessions/" }}
+    respond: {{ text: "Created ancilo.txt in {root}." }}
+"#
+    );
+    env.set_scripts(&[("Chat-Q8_0", &script)]);
+    let s = env
+        .op("create_session", json!({"cwd": dir, "permission": "shell"}))
+        .await;
+    let id = s["id"].as_str().unwrap().to_string();
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Create ancilo.txt", "wait": true}),
+        )
+        .await;
+    let last = s["messages"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(
+        last["text"],
+        format!("Created ancilo.txt in {root}."),
+        "{s}"
+    );
+    assert_eq!(files(&s["changes"]), ["ancilo.txt"]);
+    // Nothing reached the project before applying.
+    assert!(!dir.join("ancilo.txt").exists());
+    env.op("apply_changes", json!({"session": id})).await;
+    assert_eq!(read(&dir.join("ancilo.txt")), "Hallo Ancilo!\n");
+    env.stop().await;
+}
+
+// covers: M8-AC-10
+/// The app's project list: opened projects stay listed even without
+/// sessions; removing one removes its sessions, never the folder.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn projects_are_listed_and_removed() {
+    let (env, _, _) = Env::start(&[]).await;
+    let dir = project(&env);
+    let other = env.home.scratch("other");
+    assert!(
+        env.op("list_projects", json!({}))
+            .await
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    env.op("open_project", json!({"path": dir})).await;
+    env.op("open_project", json!({"path": other})).await;
+    let list = env.op("list_projects", json!({})).await;
+    let roots: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["root"].as_str().unwrap())
+        .collect();
+    let other = std::fs::canonicalize(other).unwrap();
+    assert_eq!(
+        roots,
+        [other.to_str().unwrap(), dir.to_str().unwrap()],
+        "most recent first"
+    );
+    assert_eq!(list[1]["sessions"], 0);
+    assert_eq!(list[1]["name"], "project");
+    assert_eq!(list[1]["exists"], true);
+    let s = env.op("create_session", json!({"cwd": dir})).await;
+    let list = env.op("list_projects", json!({})).await;
+    assert_eq!(
+        list[0]["root"],
+        dir.to_str().unwrap(),
+        "a new session makes it the latest"
+    );
+    assert_eq!(list[0]["sessions"], 1);
+    // Removing is consequential and takes the sessions with it.
+    let (ok, _) = env
+        .call("remove_project", json!({"path": dir}), false)
+        .await;
+    assert!(!ok);
+    env.op("remove_project", json!({"path": dir})).await;
+    let list = env.op("list_projects", json!({})).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    let (ok, _) = env
+        .call("get_session", json!({"session": s["id"]}), false)
+        .await;
+    assert!(!ok);
+    assert!(dir.join("README.md").exists(), "the folder stays");
+    env.stop().await;
+}
+
+// covers: M8-AC-11
+/// Something new to build: a name is all it takes – Ancilo creates the
+/// folder (with git, so changes can be reviewed and undone) and lists it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_new_project_needs_only_a_name() {
+    let (env, _, _) = Env::start(&[]).await;
+    let p = env
+        .op("create_project", json!({"name": "Meine Rezepte/Webseite"}))
+        .await;
+    let root = PathBuf::from(p["root"].as_str().unwrap());
+    assert_eq!(p["name"], "Meine Rezepte-Webseite");
+    assert_eq!(p["git"], true);
+    assert!(root.join("README.md").exists());
+    assert_eq!(git_status(&root), "", "a clean start");
+    // The same name again gets its own folder.
+    let again = env
+        .op("create_project", json!({"name": "Meine Rezepte/Webseite"}))
+        .await;
+    assert_eq!(again["name"], "Meine Rezepte-Webseite 2");
+    let listed = env.op("list_projects", json!({})).await;
+    assert_eq!(listed.as_array().unwrap().len(), 2);
+    // A session works in it right away.
+    let s = env.op("create_session", json!({"cwd": root})).await;
+    assert_eq!(s["isolated"], true);
+    let (ok, _) = env
+        .call("create_project", json!({"name": " / "}), true)
+        .await;
+    assert!(!ok, "a name is needed");
+    env.stop().await;
+}
+
+// covers: M8-AC-12
+/// Projects and their sessions can be renamed and put in an order by hand;
+/// new ones come first, the folder itself is never renamed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn projects_and_sessions_are_renamed_and_ordered_by_hand() {
+    let (env, _, _) = Env::start(&[]).await;
+    let a = env.op("create_project", json!({"name": "Alpha"})).await;
+    let b = env.op("create_project", json!({"name": "Beta"})).await;
+    let names = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(
+        names(&env.op("list_projects", json!({})).await),
+        ["Beta", "Alpha"]
+    );
+    // By hand: Alpha first.
+    let ordered = env
+        .op("reorder_projects", json!({"paths": [a["root"], b["root"]]}))
+        .await;
+    assert_eq!(names(&ordered), ["Alpha", "Beta"]);
+    // A new project comes first; the order set by hand stays below.
+    env.op("create_project", json!({"name": "Gamma"})).await;
+    assert_eq!(
+        names(&env.op("list_projects", json!({})).await),
+        ["Gamma", "Alpha", "Beta"]
+    );
+    // Renamed in the list – the folder stays.
+    let renamed = env
+        .op(
+            "rename_project",
+            json!({"path": a["root"], "name": "Meine Webseite"}),
+        )
+        .await;
+    assert_eq!(renamed["name"], "Meine Webseite");
+    assert!(PathBuf::from(a["root"].as_str().unwrap()).ends_with("Alpha"));
+    let back = env
+        .op("rename_project", json!({"path": a["root"], "name": " "}))
+        .await;
+    assert_eq!(back["name"], "Alpha", "empty: the folder's name again");
+
+    // Sessions: renamed with update_session, ordered by hand.
+    let s1 = env.op("create_session", json!({"cwd": a["root"]})).await;
+    let s2 = env.op("create_session", json!({"cwd": a["root"]})).await;
+    let order = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let listed = env.op("list_sessions", json!({"project": a["root"]})).await;
+    assert_eq!(
+        order(&listed)[0],
+        s2["id"].as_str().unwrap(),
+        "newest first"
+    );
+    env.op(
+        "update_session",
+        json!({"session": s1["id"], "title": "Startseite bauen"}),
+    )
+    .await;
+    env.op(
+        "reorder_sessions",
+        json!({"sessions": [s1["id"], s2["id"]]}),
+    )
+    .await;
+    let listed = env.op("list_sessions", json!({"project": a["root"]})).await;
+    assert_eq!(
+        order(&listed),
+        [s1["id"].as_str().unwrap(), s2["id"].as_str().unwrap()]
+    );
+    assert_eq!(listed[0]["title"], "Startseite bauen");
+    let (ok, _) = env
+        .call("reorder_sessions", json!({"sessions": ["s-nope"]}), true)
+        .await;
+    assert!(!ok);
+    env.stop().await;
+}

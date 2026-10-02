@@ -1,0 +1,36 @@
+[package]
+name = "ancilo-models"
+description = "Ancilo model manager: addresses, hardware, planning, downloads, discovery, llama.cpp processes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ancilo-core.workspace = true
+ancilo-storage.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+flate2 = "1"
+futures.workspace = true
+hex.workspace = true
+nix = { version = "0.30", features = ["signal"] }
+reqwest.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sysinfo = { version = "0.37", default-features = false, features = ["system", "disk"] }
+tar = "0.4"
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+ancilo-testkit.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

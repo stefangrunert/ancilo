@@ -1,0 +1,24 @@
+[profile.ci]
+fail-fast = false
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[profile.ci.junit]
+path = "junit.xml"
+
+# Real models and real llama.cpp: downloads and model loading take time.
+[profile.real]
+fail-fast = false
+slow-timeout = { period = "120s", terminate-after = 90 }
+test-threads = 1
+
+[profile.real.junit]
+path = "junit.xml"
+
+# Checks of finished release artifacts (package, network, reproducibility, installs).
+[profile.artifact]
+fail-fast = false
+slow-timeout = { period = "300s", terminate-after = 12 }
+test-threads = 1
+
+[profile.artifact.junit]
+path = "junit.xml"

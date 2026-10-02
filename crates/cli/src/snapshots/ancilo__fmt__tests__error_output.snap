@@ -1,0 +1,6 @@
+---
+source: crates/cli/src/fmt.rs
+expression: "error(\"insufficient_resources\",\n\"This model does not fit on this machine: even the smallest variant needs about 26.4 GB, but only 25.8 GB are available. Try a smaller context or a smaller model.\")"
+---
+error: This model does not fit on this machine: even the smallest variant needs about 26.4 GB, but only 25.8 GB are available. Try a smaller context or a smaller model.
+  hint: try `--context small`, a smaller quantization (`--quant Q4_K_M`) or a smaller model

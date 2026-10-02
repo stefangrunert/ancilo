@@ -1,0 +1,21 @@
+# Minimal suite used to verify the eval runner itself (M0-AC-06).
+name: sample
+tasks:
+  - id: greet
+    description: The model answers a greeting.
+    messages:
+      - { role: user, content: "Say hello" }
+    checks:
+      - contains: hello
+  - id: tool
+    description: The model calls the list tool.
+    messages:
+      - { role: user, content: "List the files" }
+    tools:
+      - type: function
+        function:
+          name: glob
+          description: Find files by pattern
+          parameters: { type: object, properties: { pattern: { type: string } }, required: [pattern] }
+    checks:
+      - tool_call: { name: glob, required_args: [pattern] }

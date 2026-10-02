@@ -1,0 +1,89 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+exclude = ["app/src-tauri"]
+default-members = ["crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/stefangrunert/ancilo"
+homepage = "https://ancilo.app"
+rust-version = "1.90"
+
+[workspace.dependencies]
+ancilo-core = { path = "crates/core" }
+ancilo-storage = { path = "crates/storage" }
+ancilo-models = { path = "crates/models" }
+ancilo-server = { path = "crates/server" }
+ancilo-daemon = { path = "crates/daemon" }
+ancilo-testkit = { path = "crates/testkit" }
+ancilo-eval = { path = "crates/eval" }
+ancilo-gateway = { path = "crates/gateway" }
+ancilo-agent = { path = "crates/agent" }
+ancilo-tasks = { path = "crates/tasks" }
+ancilo-mcp = { path = "crates/mcp" }
+ancilo-connect = { path = "crates/connect" }
+ancilo-compare = { path = "crates/compare" }
+ancilo-index = { path = "crates/index" }
+ancilo-assistant = { path = "crates/assistant" }
+ancilo-sessions = { path = "crates/sessions" }
+ancilo-web = { path = "crates/web" }
+
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["macros", "ws"] }
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+futures = "0.3"
+globset = "0.4"
+rust-embed = { version = "8", features = ["mime-guess"] }
+keyring = { version = "3.6", features = ["apple-native", "linux-native"] }
+tree-sitter = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-python = "0.25"
+tree-sitter-javascript = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+ignore = "0.4"
+regex = "1"
+similar = "2"
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+schemars = { version = "1", features = ["chrono04", "uuid1"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = "0.7"
+toml = "0.9"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+insta = { version = "1", features = ["json", "yaml"] }
+proptest = "1"
+assert_cmd = "2"
+predicates = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

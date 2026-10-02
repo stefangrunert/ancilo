@@ -1,0 +1,8 @@
+---
+source: crates/cli/src/fmt.rs
+expression: "plan_summary(&json!({\n    \"plan\":\n    {\"files\": [{\"path\": \"Qwen3.6-35B-A3B-Q8_0.gguf\"}], \"quant\": \"Q8_0\",\n        \"size_bytes\": 36_903_140_320u64, \"ctx_tokens\": 32768, \"fit\": \"fits\",\n        \"reason\":\n        \"Q8_0 needs about 39.1 GB of 92.9 GB available – fits comfortably\"},\n    \"existing\": null, \"existing_in\": null, \"download_bytes\": 36_903_140_320u64\n}))"
+---
+Qwen3.6-35B-A3B-Q8_0.gguf
+  Q8_0 · 36.9 GB · context 32k
+  ✓ Q8_0 needs about 39.1 GB of 92.9 GB available – fits comfortably
+  download: 36.9 GB

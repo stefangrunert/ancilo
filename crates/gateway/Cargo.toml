@@ -1,0 +1,34 @@
+[package]
+name = "ancilo-gateway"
+description = "Ancilo inference gateway: routing, scheduling, reliability pipeline, OpenAI/Anthropic APIs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ancilo-core.workspace = true
+ancilo-eval.workspace = true
+ancilo-models.workspace = true
+ancilo-server.workspace = true
+ancilo-storage.workspace = true
+axum.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+jsonschema = { version = "0.33", default-features = false }
+reqwest.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+ancilo-testkit.workspace = true
+proptest.workspace = true
+
+[lints]
+workspace = true

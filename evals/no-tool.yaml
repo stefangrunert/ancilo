@@ -1,0 +1,93 @@
+# Counter-check for the reliability pipeline (from the Codex counter-review):
+# requests that must NOT trigger a tool call – although many contain action
+# words, project vocabulary, harness text, markup or code. English and German.
+# The same coding tool set as `tool-calling` is offered.
+name: no-tool
+tools: &tools
+  - type: function
+    function:
+      name: read_file
+      description: Read a text file.
+      parameters: { type: object, properties: { path: { type: string } }, required: [path] }
+  - type: function
+    function:
+      name: write_file
+      description: Create or overwrite a file with the given content.
+      parameters: { type: object, properties: { path: { type: string }, content: { type: string } }, required: [path, content] }
+  - type: function
+    function:
+      name: edit_file
+      description: Replace an exact snippet of text in a file.
+      parameters: { type: object, properties: { path: { type: string }, old_text: { type: string }, new_text: { type: string } }, required: [path, old_text, new_text] }
+  - type: function
+    function:
+      name: grep
+      description: Search file contents with a regular expression.
+      parameters: { type: object, properties: { pattern: { type: string } }, required: [pattern] }
+  - type: function
+    function:
+      name: glob
+      description: Find files by name pattern.
+      parameters: { type: object, properties: { pattern: { type: string } }, required: [pattern] }
+  - type: function
+    function:
+      name: bash
+      description: Run a shell command in the project directory.
+      parameters: { type: object, properties: { command: { type: string } }, required: [command] }
+
+system: &system "You are a coding assistant working in a software project. Use the tools when an action on the project is needed; answer directly when it is not."
+
+tasks:
+  - { id: what-is-repo, messages: [{ role: system, content: *system }, { role: user, content: "What is a repository?" }], checks: [{ no_tool_call: true }] }
+  - { id: how-run-tests, messages: [{ role: system, content: *system }, { role: user, content: "How do I run tests in a Rust project?" }], checks: [{ no_tool_call: true }] }
+  - { id: write-explanation, messages: [{ role: system, content: *system }, { role: user, content: "Write an explanation of what a race condition is." }], checks: [{ no_tool_call: true }] }
+  - { id: show-example, messages: [{ role: system, content: *system }, { role: user, content: "Show an example of a Python list comprehension." }], checks: [{ no_tool_call: true }] }
+  - { id: explain-rebase, messages: [{ role: system, content: *system }, { role: user, content: "Can you explain what `git rebase` does?" }], checks: [{ no_tool_call: true }] }
+  - { id: build-vs-run, messages: [{ role: system, content: *system }, { role: user, content: "What's the difference between `cargo build` and `cargo run`?" }], checks: [{ no_tool_call: true }] }
+  - { id: regex-email, messages: [{ role: system, content: *system }, { role: user, content: "Give me a regex that matches an email address." }], checks: [{ no_tool_call: true }] }
+  - { id: translate, messages: [{ role: system, content: *system }, { role: user, content: "Translate 'good morning' into German." }], checks: [{ no_tool_call: true }] }
+  - { id: summarize-inline, messages: [{ role: system, content: *system }, { role: user, content: "Summarize in one sentence: The build failed because the linker could not find the OpenSSL library. After installing it, the build succeeded." }], checks: [{ no_tool_call: true }] }
+  - { id: review-inline-code, messages: [{ role: system, content: *system }, { role: user, content: "Here is my code: ```fn main() { let x = 5; }``` Is there anything wrong with it?" }], checks: [{ no_tool_call: true }] }
+  - { id: haiku, messages: [{ role: system, content: *system }, { role: user, content: "Write a haiku about compilers." }], checks: [{ no_tool_call: true }] }
+  - { id: permissions-letters, messages: [{ role: system, content: *system }, { role: user, content: "In the output of ls -la I see drwxr-xr-x. What do the letters mean?" }], checks: [{ no_tool_call: true }] }
+  - { id: branch-command, messages: [{ role: system, content: *system }, { role: user, content: "How would I create a new branch in git? Just tell me the command." }], checks: [{ no_tool_call: true }] }
+  - { id: http-418, messages: [{ role: system, content: *system }, { role: user, content: "What does HTTP status 418 mean?" }], checks: [{ no_tool_call: true }] }
+  - { id: rust-vs-python, messages: [{ role: system, content: *system }, { role: user, content: "Is Rust faster than Python in general?" }], checks: [{ no_tool_call: true }] }
+  - { id: km-to-miles, messages: [{ role: system, content: *system }, { role: user, content: "Convert 3 kilometers to miles." }], checks: [{ no_tool_call: true }] }
+  - { id: harness-reminder, messages: [{ role: system, content: *system }, { role: user, content: "<system-reminder>The current repository has uncommitted changes in src/main.rs.</system-reminder>\nWhat is the capital of France?" }], checks: [{ no_tool_call: true }] }
+  - { id: fix-understanding, messages: [{ role: system, content: *system }, { role: user, content: "Please fix my understanding: is a mutex the same as a lock?" }], checks: [{ no_tool_call: true }] }
+  - { id: motivational, messages: [{ role: system, content: *system }, { role: user, content: "Create a short motivational sentence for my team." }], checks: [{ no_tool_call: true }] }
+  - { id: sql-query, messages: [{ role: system, content: *system }, { role: user, content: "Write a SQL query that selects all users older than 30." }], checks: [{ no_tool_call: true }] }
+  - { id: dockerfile-example, messages: [{ role: system, content: *system }, { role: user, content: "Show an example of a Dockerfile for a Node app." }], checks: [{ no_tool_call: true }] }
+  - { id: de-git-merge, messages: [{ role: system, content: *system }, { role: user, content: "Wie funktioniert ein Git-Merge?" }], checks: [{ no_tool_call: true }] }
+  - { id: de-process-thread, messages: [{ role: system, content: *system }, { role: user, content: "Was ist der Unterschied zwischen einem Prozess und einem Thread?" }], checks: [{ no_tool_call: true }] }
+  - { id: de-rest, messages: [{ role: system, content: *system }, { role: user, content: "Erkläre mir, was eine REST-API ist." }], checks: [{ no_tool_call: true }] }
+  - { id: de-paragraph, messages: [{ role: system, content: *system }, { role: user, content: "Schreib mir einen kurzen Absatz über künstliche Intelligenz." }], checks: [{ no_tool_call: true }] }
+  - { id: de-loop-example, messages: [{ role: system, content: *system }, { role: user, content: "Zeig mir ein Beispiel für eine Schleife in Python." }], checks: [{ no_tool_call: true }] }
+  - { id: de-how-tests, messages: [{ role: system, content: *system }, { role: user, content: "Wie starte ich die Tests in einem Node-Projekt?" }], checks: [{ no_tool_call: true }] }
+  - { id: de-thanks, messages: [{ role: system, content: *system }, { role: user, content: "Danke dir!" }], checks: [{ no_tool_call: true }] }
+  - { id: ok, messages: [{ role: system, content: *system }, { role: user, content: "Ok, sounds good." }], checks: [{ no_tool_call: true }] }
+  - { id: cet, messages: [{ role: system, content: *system }, { role: user, content: "What time zone is CET?" }], checks: [{ no_tool_call: true }] }
+  - { id: list-advantages, messages: [{ role: system, content: *system }, { role: user, content: "List three advantages of static typing." }], checks: [{ no_tool_call: true }] }
+  - { id: find-bug-inline, messages: [{ role: system, content: *system }, { role: user, content: "Find the bug in this snippet: `for i in 0..=v.len() { println!(\"{}\", v[i]); }`" }], checks: [{ no_tool_call: true }] }
+  - { id: rename-inline, messages: [{ role: system, content: *system }, { role: user, content: "Rename these variables to be more descriptive: `let a = 5; let b = a * 2;`" }], checks: [{ no_tool_call: true }] }
+  - { id: replace-template, messages: [{ role: system, content: *system }, { role: user, content: "Replace the placeholder in this template 'Hello {name}' with 'World' and show me the result." }], checks: [{ no_tool_call: true }] }
+  - { id: harness-env-context, messages: [{ role: system, content: *system }, { role: user, content: "<environment_context><cwd>/repo</cwd></environment_context>\nHi! Who are you?" }], checks: [{ no_tool_call: true }] }
+  - { id: question-mark-op, messages: [{ role: system, content: *system }, { role: user, content: "What does the ? operator do in Rust?" }], checks: [{ no_tool_call: true }] }
+  - { id: run-through, messages: [{ role: system, content: *system }, { role: user, content: "Can you run through the steps of TCP's three-way handshake?" }], checks: [{ no_tool_call: true }] }
+  - { id: check-reasoning, messages: [{ role: system, content: *system }, { role: user, content: "Check my reasoning: if all A are B and some B are C, are some A C?" }], checks: [{ no_tool_call: true }] }
+  - { id: delete-word, messages: [{ role: system, content: *system }, { role: user, content: "Delete the word 'very' from this sentence: 'It is very good.'" }], checks: [{ no_tool_call: true }] }
+  - { id: mental-model, messages: [{ role: system, content: *system }, { role: user, content: "Please build a mental model for me of how DNS works." }], checks: [{ no_tool_call: true }] }
+  - { id: open-question, messages: [{ role: system, content: *system }, { role: user, content: "Open question: should microservices share a database?" }], checks: [{ no_tool_call: true }] }
+  - { id: print-numbers, messages: [{ role: system, content: *system }, { role: user, content: "Print the numbers 1 to 5 as a comma-separated list." }], checks: [{ no_tool_call: true }] }
+  - { id: postgres-port, messages: [{ role: system, content: *system }, { role: user, content: "Search your memory: what is the default port of PostgreSQL?" }], checks: [{ no_tool_call: true }] }
+  - { id: api-versioning, messages: [{ role: system, content: *system }, { role: user, content: "Update me on best practices for API versioning." }], checks: [{ no_tool_call: true }] }
+  - { id: de-kilobyte, messages: [{ role: system, content: *system }, { role: user, content: "Wie viele Bytes hat ein Kilobyte?" }], checks: [{ no_tool_call: true }] }
+  - { id: de-merge-sentences, messages: [{ role: system, content: *system }, { role: user, content: "Füge diese beiden Sätze zu einem zusammen: 'Es regnet.' 'Ich bleibe drinnen.'" }], checks: [{ no_tool_call: true }] }
+  - { id: de-check-math, messages: [{ role: system, content: *system }, { role: user, content: "Prüfe bitte diese Rechnung: 17 * 23 = 391?" }], checks: [{ no_tool_call: true }] }
+  - { id: harness-command, messages: [{ role: system, content: *system }, { role: user, content: "<command-name>/help</command-name>\nWhat can you do?" }], checks: [{ no_tool_call: true }] }
+  - { id: test-output-given, messages: [{ role: system, content: *system }, { role: user, content: "Here is the output of my tests:\n```\ntest parse ... FAILED: expected 3 got 4\n```\nWhat could be the reason?" }], checks: [{ no_tool_call: true }] }
+  - { id: http-version, messages: [{ role: system, content: *system }, { role: user, content: "What is the current version of the HTTP protocol?" }], checks: [{ no_tool_call: true }] }
+  - { id: typical-rust-files, messages: [{ role: system, content: *system }, { role: user, content: "Which files does a typical Rust project contain?" }], checks: [{ no_tool_call: true }] }
+  - { id: html-markup, messages: [{ role: system, content: *system }, { role: user, content: "What does <b>bold</b> do in HTML?" }], checks: [{ no_tool_call: true }] }
+  - { id: after-tool-summary, messages: [{ role: system, content: *system }, { role: user, content: "Show me main.rs" }, { role: assistant, content: null, tool_calls: [{ id: c1, type: function, function: { name: read_file, arguments: "{\"path\": \"main.rs\"}" } }] }, { role: tool, tool_call_id: c1, content: "fn main() { println!(\"hi\"); }" }], checks: [{ no_tool_call: true }] }

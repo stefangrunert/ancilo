@@ -1,0 +1,5 @@
+---
+source: crates/cli/src/fmt.rs
+expression: "progress_line(&json!({\"bytes\": 12_000_000_000u64, \"total\": 36_903_140_320u64,\n    \"percent\": 32.5, \"bytes_per_sec\": 3_100_000}))"
+---
+downloading  32 %  12.0 GB of 36.9 GB  3 MB/s  ~2 h 13 min

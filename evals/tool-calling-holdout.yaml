@@ -1,0 +1,260 @@
+# Eval-Set I – holdout (M2): tool calling on tasks that were never used to
+# develop prompts or heuristics. Only for acceptance (M2-AC-04): tune on
+# `tool-calling`/`no-tool`, measure here. Do not tune against this file.
+name: tool-calling-holdout
+tools: &tools
+  - type: function
+    function:
+      name: read_file
+      description: Read a text file. Use offset/limit for large files.
+      parameters:
+        type: object
+        properties:
+          path: { type: string, description: Path relative to the project root }
+          offset: { type: integer, minimum: 1, description: First line (1-based) }
+          limit: { type: integer, minimum: 1, description: Number of lines }
+        required: [path]
+  - type: function
+    function:
+      name: write_file
+      description: Create or overwrite a file with the given content.
+      parameters:
+        type: object
+        properties:
+          path: { type: string }
+          content: { type: string }
+        required: [path, content]
+  - type: function
+    function:
+      name: edit_file
+      description: Replace an exact snippet of text in a file.
+      parameters:
+        type: object
+        properties:
+          path: { type: string }
+          old_text: { type: string, description: Exact text to replace }
+          new_text: { type: string }
+          replace_all: { type: boolean }
+        required: [path, old_text, new_text]
+  - type: function
+    function:
+      name: grep
+      description: Search file contents with a regular expression.
+      parameters:
+        type: object
+        properties:
+          pattern: { type: string }
+          glob: { type: string, description: Only files matching this glob, e.g. "*.rs" }
+          case_insensitive: { type: boolean }
+        required: [pattern]
+  - type: function
+    function:
+      name: glob
+      description: Find files by name pattern.
+      parameters:
+        type: object
+        properties:
+          pattern: { type: string, description: e.g. "src/**/*.ts" }
+        required: [pattern]
+  - type: function
+    function:
+      name: bash
+      description: Run a shell command in the project directory.
+      parameters:
+        type: object
+        properties:
+          command: { type: string }
+          timeout_s: { type: integer, minimum: 1, maximum: 600 }
+        required: [command]
+  - type: function
+    function:
+      name: create_issue
+      description: Create an issue in the project's tracker.
+      parameters:
+        type: object
+        properties:
+          title: { type: string }
+          body: { type: string }
+          labels: { type: array, items: { type: string } }
+          priority: { type: string, enum: [low, medium, high, critical] }
+          assignee: { type: object, properties: { login: { type: string } }, required: [login] }
+        required: [title, priority]
+  - type: function
+    function:
+      name: run_tests
+      description: Run the project's tests, optionally only some of them.
+      parameters:
+        type: object
+        properties:
+          filter: { type: string, description: Only tests whose name contains this }
+          package: { type: string }
+        required: []
+
+system: &system "You are a coding assistant working in a software project. Use the tools when an action on the project is needed; answer directly when it is not."
+
+tasks:
+  - id: h-read-config
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Open package.json so I can see the scripts." }
+    tools: *tools
+    checks:
+      - tool_call: { name: read_file, required_args: [path], args: { path: "package.json" } }
+
+  - id: h-read-head
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "I only need the first 25 lines of docs/architecture.md." }
+    tools: *tools
+    checks:
+      - tool_call: { name: read_file, required_args: [path, limit], args: { path: "docs/architecture.md", limit: 25 } }
+
+  - id: h-glob-dockerfiles
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Are there any Dockerfiles anywhere in this repo? Find them." }
+    tools: *tools
+    checks:
+      - tool_call: { name: glob, required_args: [pattern], args: { pattern: "Dockerfile" } }
+
+  - id: h-grep-unwrap
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Look for every place where we call .unwrap() in the Rust sources." }
+    tools: *tools
+    checks:
+      - tool_call: { name: grep, required_args: [pattern], args: { pattern: "unwrap" } }
+
+  - id: h-grep-glob-filter
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Search only the *.go files for the string 'context.Background'." }
+    tools: *tools
+    checks:
+      - tool_call: { name: grep, required_args: [pattern, glob], args: { pattern: "context.Background", glob: "go" } }
+
+  - id: h-bash-log
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Show me the last 5 commits of this repository." }
+    tools: *tools
+    checks:
+      - tool_call: { name: bash, required_args: [command], args: { command: "git log" } }
+
+  - id: h-bash-install
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Install the dependencies with npm install." }
+    tools: *tools
+    checks:
+      - tool_call: { name: bash, required_args: [command], args: { command: "npm install" } }
+
+  - id: h-tests-package
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Run the test suite of the package called storage." }
+    tools: *tools
+    checks:
+      - tool_call: { name: run_tests, args: { package: "storage" } }
+
+  - id: h-write-env-example
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Add a file .env.example containing exactly: PORT=8080" }
+    tools: *tools
+    checks:
+      - tool_call: { name: write_file, required_args: [path, content], args: { path: ".env.example", content: "PORT=8080" } }
+
+  - id: h-write-multiline
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Create CONTRIBUTING.md with a heading 'Contributing' and a line saying 'Open a pull request.'" }
+    tools: *tools
+    checks:
+      - tool_call: { name: write_file, required_args: [path, content], args: { path: "CONTRIBUTING.md" }, args_contain_all: { content: ["Contributing", "Open a pull request."] } }
+
+  - id: h-edit-version
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Change the version in Cargo.toml from \"0.3.1\" to \"0.4.0\"." }
+    tools: *tools
+    checks:
+      - tool_call: { name: edit_file, required_args: [path, old_text, new_text], args: { path: "Cargo.toml", old_text: "0.3.1", new_text: "0.4.0" } }
+
+  - id: h-edit-replace-all
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "In src/app.ts replace every occurrence of 'oldApi' with 'newApi'." }
+    tools: *tools
+    checks:
+      - tool_call: { name: edit_file, required_args: [path, old_text, new_text, replace_all], args: { path: "src/app.ts", old_text: "oldApi", new_text: "newApi", replace_all: true } }
+
+  - id: h-issue-labels
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "File a medium priority issue called 'Slow startup' labelled performance." }
+    tools: *tools
+    checks:
+      - tool_call: { name: create_issue, required_args: [title, priority, labels], args: { title: "Slow startup", priority: "medium", labels: ["performance"] } }
+
+  - id: h-issue-assignee
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Please create a high priority ticket 'Login broken on Safari' for alice." }
+    tools: *tools
+    checks:
+      - tool_call: { name: create_issue, required_args: [title, priority, assignee], args: { priority: "high", assignee: { login: "alice" } } }
+
+  - id: h-follow-up-edit
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "What's in src/greet.py?" }
+      - { role: assistant, content: null, tool_calls: [{ id: call_1, type: function, function: { name: read_file, arguments: "{\"path\": \"src/greet.py\"}" } }] }
+      - { role: tool, tool_call_id: call_1, content: "def greet(name):\n    return 'Helo ' + name\n" }
+      - { role: user, content: "There's a typo – 'Helo' should be 'Hello'. Please fix it." }
+    tools: *tools
+    checks:
+      - tool_call: { name: edit_file, required_args: [path, old_text, new_text], args: { path: "src/greet.py", old_text: "Helo", new_text: "Hello" } }
+
+  - id: h-follow-up-search
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Which files are in the migrations folder?" }
+      - { role: assistant, content: null, tool_calls: [{ id: call_1, type: function, function: { name: glob, arguments: "{\"pattern\": \"migrations/*\"}" } }] }
+      - { role: tool, tool_call_id: call_1, content: "migrations/001_init.sql\nmigrations/002_users.sql" }
+      - { role: user, content: "Now find where the users table gets an index." }
+    tools: *tools
+    checks:
+      - tool_call: { name: grep, required_args: [pattern], args: { pattern: "INDEX" } }
+
+  - id: h-lint
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Run clippy on the workspace: cargo clippy --workspace" }
+    tools: *tools
+    checks:
+      - tool_call: { name: bash, required_args: [command], args: { command: "cargo clippy --workspace" } }
+
+  - id: h-no-tool-concept
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Briefly, why do people use dependency injection?" }
+    tools: *tools
+    checks:
+      - no_tool_call: true
+
+  - id: h-no-tool-given-output
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "My test printed `assertion failed: left == right, left: 3, right: 4`. In plain words, what does that mean?" }
+    tools: *tools
+    checks:
+      - no_tool_call: true
+
+  - id: h-no-tool-thanks
+    messages:
+      - { role: system, content: *system }
+      - { role: user, content: "Perfect, that solved it. Have a nice day!" }
+    tools: *tools
+    checks:
+      - no_tool_call: true

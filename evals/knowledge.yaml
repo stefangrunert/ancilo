@@ -1,0 +1,16 @@
+# Knowledge eval (M5-AC-07): questions about Ancilo and models, with the
+# documents of the knowledge base that answer them (any of them counts).
+name: knowledge
+queries:
+  - { q: "how do I let Claude Code delegate tasks to Ancilo", expect: [docs/delegation.md] }
+  - { q: "what does the error 'does not fit' mean", expect: [docs/troubleshooting.md, docs/models.md] }
+  - { q: "which model is good for coding", expect: [models/Qwen3-Coder-30B-A3B-Instruct, models/Devstral Small, models/Qwen3.6-35B-A3B] }
+  - { q: "what is a mixture of experts model", expect: [models/general/Mixture-of-experts models, docs/models.md] }
+  - { q: "how much RAM does Ancilo keep free for the system", expect: [docs/models.md] }
+  - { q: "how can I compare two models on my own task", expect: [docs/comparing-models.md] }
+  - { q: "which quantization should I choose", expect: [models/general/Choosing a quantization, docs/models.md] }
+  - { q: "embedding model for semantic search", expect: [models/All-MiniLM-L6-v2, models/nomic-embed-text v1.5] }
+  - { q: "use Ancilo with the OpenAI SDK", expect: [docs/model-api.md] }
+  - { q: "start an A/B test for the delegation role", expect: [docs/comparing-models.md] }
+  - { q: "a gated model on Hugging Face asks for a login", expect: [docs/troubleshooting.md] }
+  - { q: "what are roles", expect: [docs/models.md] }

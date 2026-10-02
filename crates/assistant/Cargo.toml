@@ -1,0 +1,27 @@
+[package]
+name = "ancilo-assistant"
+description = "Ancilo assistant: operate Ancilo in natural language through its operations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ancilo-agent.workspace = true
+ancilo-core.workspace = true
+ancilo-gateway.workspace = true
+ancilo-models.workspace = true
+ancilo-storage.workspace = true
+ancilo-web.workspace = true
+chrono.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

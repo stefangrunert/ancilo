@@ -1,0 +1,5 @@
+---
+source: crates/cli/src/fmt.rs
+expression: "error(\"not_found\", \"repository 'org/nope' was not found on Hugging Face\")"
+---
+error: repository 'org/nope' was not found on Hugging Face

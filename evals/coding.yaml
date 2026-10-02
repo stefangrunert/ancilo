@@ -1,0 +1,128 @@
+# Eval for the coding agent in the app (M8): tasks as a user would type them
+# in the coding view – some over several turns that build on each other.
+# Each task runs in a fresh git repository; the changes are applied through
+# `apply_changes`, then the checks judge the project.
+name: coding
+tasks:
+  - id: py-add-function
+    kind: feature
+    files:
+      mathx.py: |
+        def add(a, b):
+            return a + b
+    turns:
+      - "Add a function `mul(a, b)` to mathx.py that returns the product of a and b."
+    checks:
+      - command: "python3 -c 'import mathx; assert mathx.mul(3, 4) == 12 and mathx.add(1, 2) == 3'"
+
+  - id: py-fix-then-test
+    kind: fix
+    files:
+      stats.py: |
+        def mean(values):
+            return sum(values) / len(values) + 1
+    turns:
+      - "mean() in stats.py returns wrong results. Fix it."
+      - "Now add test_stats.py with unittest tests for mean, and run them."
+    checks:
+      - command: "python3 -c 'import stats; assert stats.mean([1, 2, 3]) == 2'"
+      - file_contains: { path: test_stats.py, text: "unittest" }
+      - command: "python3 -m unittest test_stats -q"
+
+  - id: js-rename-across-files
+    kind: refactor
+    files:
+      src/price.js: |
+        function calcTotal(items) {
+          return items.reduce((s, i) => s + i.price, 0);
+        }
+        module.exports = { calcTotal };
+      src/cart.js: |
+        const { calcTotal } = require("./price");
+        function summary(items) {
+          return `Total: ${calcTotal(items)}`;
+        }
+        module.exports = { summary };
+    turns:
+      - "Rename calcTotal to totalPrice everywhere in src/."
+    checks:
+      - command: "! grep -rq calcTotal src"
+      - command: "node -e 'const {summary}=require(\"./src/cart\"); if (summary([{price:2},{price:3}]) !== \"Total: 5\") process.exit(1)'"
+
+  - id: py-follow-up-change
+    kind: feature
+    files:
+      greet.py: |
+        def greet(name):
+            return "Hello " + name
+    turns:
+      - "Make greet() in greet.py add an exclamation mark at the end."
+      - "Also let it accept an optional parameter `greeting` with default \"Hello\"."
+    checks:
+      - command: "python3 -c 'import greet; assert greet.greet(\"Ann\") == \"Hello Ann!\"; assert greet.greet(\"Ann\", greeting=\"Hi\") == \"Hi Ann!\"'"
+
+  - id: explain-without-changes
+    kind: other
+    permission: read
+    files:
+      queue.py: |
+        class Queue:
+            def __init__(self, limit):
+                self.items = []
+                self.limit = limit
+
+            def push(self, x):
+                if len(self.items) >= self.limit:
+                    self.items.pop(0)
+                self.items.append(x)
+    turns:
+      - "What happens in queue.py when push is called on a full queue? Just explain, don't change anything."
+    checks:
+      - unchanged: [queue.py]
+      - summary_contains: "oldest"
+
+  - id: sh-script-and-run
+    kind: feature
+    files:
+      data/a.txt: "1\n2\n"
+      data/b.txt: "3\n"
+    turns:
+      - "Write a shell script count.sh that prints the total number of lines of all .txt files in data/, then run it to check it prints 3."
+    checks:
+      - command: "test \"$(sh count.sh | tr -d ' \n')\" = 3"
+
+  - id: py-config-default
+    kind: fix
+    files:
+      config.py: |
+        import os
+
+        def port():
+            return int(os.environ["APP_PORT"])
+    turns:
+      - "port() in config.py crashes when APP_PORT is not set. Use 8080 as default in that case."
+    checks:
+      - command: "env -u APP_PORT python3 -c 'import config; assert config.port() == 8080'"
+      - command: "APP_PORT=9 python3 -c 'import config; assert config.port() == 9'"
+
+  - id: md-docs-section
+    kind: docs
+    files:
+      README.md: |
+        # Tool
+
+        A small tool.
+      tool.py: |
+        import sys
+
+        def main():
+            print(" ".join(reversed(sys.argv[1:])))
+
+        if __name__ == "__main__":
+            main()
+    turns:
+      - "Look at tool.py and add a '## Usage' section to README.md that explains how to run it, with an example."
+    checks:
+      - file_contains: { path: README.md, text: "## Usage" }
+      - file_contains: { path: README.md, text: "tool.py" }
+      - unchanged: [tool.py]

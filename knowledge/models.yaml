@@ -1,0 +1,107 @@
+# Curated model notes for Ancilo's knowledge base (M5).
+#
+# Only well-established facts and practical hints. Anything about quality on
+# the user's own tasks is measured, not claimed: `ancilo compare`,
+# `ancilo suite run`, `ancilo op tune_reliability`.
+# Sizes are approximate file sizes of the named quantization.
+
+models:
+  - name: Qwen3.5-4B
+    address: hf.co/unsloth/Qwen3.5-4B-GGUF
+    kind: chat
+    size: "Q4_K_M ≈ 2.7 GB"
+    good_for: [delegation of simple tasks, tool calling, fast answers]
+    notes: >
+      Small, fast model with reliable tool calling for its size. In Ancilo's
+      measurements the reliability pipeline with the prompt hint improved both
+      tool calling and plain answers (tune it with `tune_reliability`).
+      A good first model on machines with 16 GB RAM.
+
+  - name: Qwen3-0.6B
+    address: hf.co/unsloth/Qwen3-0.6B-GGUF
+    kind: chat
+    size: "Q4_0 ≈ 0.4 GB"
+    good_for: [tests, demos, very weak hardware]
+    notes: >
+      Tiny; useful to try Ancilo and for automated tests. Tends to call tools
+      for plain questions when told about tools – Ancilo's default pipeline
+      leaves out the prompt hint for that reason. Not recommended for real
+      delegation.
+
+  - name: Qwen3.6-35B-A3B
+    address: hf.co/unsloth/Qwen3.6-35B-A3B-GGUF
+    kind: chat
+    size: "Q8_0 ≈ 37 GB, Q4_K_M ≈ 21 GB"
+    good_for: [delegation, coding, multi-step agent work]
+    notes: >
+      Mixture-of-experts: about 3 billion parameters are active per token, so
+      it answers roughly as fast as a small model while having the knowledge
+      of a large one. Needs the memory of the full model. A strong default for
+      machines with 32 GB (Q4) or 64 GB+ (Q8).
+
+  - name: Qwen3-Coder-30B-A3B-Instruct
+    address: hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF
+    kind: chat
+    size: "Q4_K_M ≈ 18 GB"
+    good_for: [coding, refactoring, tests]
+    notes: >
+      Coding-focused mixture-of-experts model (3B active). A candidate for the
+      `delegation` or `coding` role and for a rule like `ancilo route tests …`.
+
+  - name: gpt-oss-20b
+    address: hf.co/unsloth/gpt-oss-20b-GGUF
+    kind: chat
+    size: "≈ 12–14 GB"
+    good_for: [reasoning, tool calling]
+    notes: >
+      OpenAI's open-weight mixture-of-experts model (Apache-2.0). Reasons
+      before answering, which costs time; good tool use.
+
+  - name: Devstral Small
+    address: hf.co/unsloth/Devstral-Small-2507-GGUF
+    kind: chat
+    size: "Q4_K_M ≈ 14 GB"
+    good_for: [agentic coding]
+    notes: >
+      Mistral's model for coding agents (24B, Apache-2.0). Dense: slower per
+      token than a 3B-active MoE model of similar size.
+
+  - name: All-MiniLM-L6-v2
+    address: hf.co/second-state/All-MiniLM-L6-v2-Embedding-GGUF
+    kind: embedding
+    size: "≈ 20 MB"
+    good_for: [search in code and documents]
+    notes: >
+      Tiny, fast embedding model (384 dimensions, English). Enough for Ancilo's
+      hybrid search, which also uses exact full-text matching. Added models
+      that are embedding models get the `embed` role automatically.
+
+  - name: nomic-embed-text v1.5
+    address: hf.co/nomic-ai/nomic-embed-text-v1.5-GGUF
+    kind: embedding
+    size: "Q8_0 ≈ 150 MB"
+    good_for: [search, longer texts]
+    notes: >
+      Larger embedding model (768 dimensions) with a longer input window.
+      Worth it when search results with the small model are not good enough.
+
+# First start (`ancilo setup`): the first chat model that fits comfortably,
+# in this order, plus the embedding model.
+general:
+  - title: Choosing a quantization
+    text: >
+      Q4_K_M is the usual balance of size and quality; Q5_K_M and Q6_K are
+      slightly better and larger; Q8_0 is nearly lossless. Above about 8.6 bits
+      per weight there is no measurable gain, so Ancilo never picks more.
+      Ancilo picks the best quantization that fits into memory automatically.
+  - title: Mixture-of-experts models
+    text: >
+      A mixture-of-experts (MoE) model like 30B-A3B has 30 billion parameters
+      but uses only about 3 billion per token: it needs the memory of a 30B
+      model and runs at the speed of a 3B model. On Apple Silicon with enough
+      memory they are often the best choice for local agent work.
+  - title: Context size and memory
+    text: >
+      The context (how much text the model sees at once) needs memory for the
+      KV cache in addition to the model. Coding agents need large contexts;
+      Ancilo grows the context automatically when a request does not fit.

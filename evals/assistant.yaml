@@ -1,0 +1,89 @@
+# Eval-Set III (M6): requests to the assistant with a target state that is
+# checked through operations. Variables: {model} (a second chat model; {model_name} its display name),
+# {default} (the default model), {idle} (a chat model that is not the
+# assistant's), {embed} (the embedding model), {cwd} (a project directory).
+name: assistant
+tasks:
+  - id: assign-role
+    prompt: "Use {model} for delegated tasks."
+    confirm: true
+    checks:
+      - { proposed: [assign_role] }
+      - { op: explain_route, input: { role: delegation }, expect: { model: "{model}" } }
+    cleanup:
+      - { op: assign_role, input: { role: delegation, model: "{default}" } }
+
+  - id: route-tests
+    prompt: "For test-writing tasks, use {model}."
+    confirm: true
+    checks:
+      - { proposed: [set_route] }
+      - { op: list_routes, expect: [{ kind: tests, model: "{model}" }] }
+    cleanup:
+      - { op: remove_route, input: { kind: tests } }
+
+  - id: ab-test
+    prompt: "Start an A/B test for the delegation role with {model} as the challenger for 20 % of the requests."
+    confirm: true
+    checks:
+      - { proposed: [ab_start] }
+      - { op: ab_status, expect: [{ role: delegation, model_b: "{model}", status: running }] }
+    cleanup:
+      - { op: ab_stop, input: { test: delegation } }
+
+  - id: compare-proposed
+    prompt: "Compare {model} and {default} on this task in {cwd}: add a doc comment to every public function."
+    confirm: false
+    checks:
+      - { proposed: [compare_models] }
+
+  - id: pin
+    prompt: "Pin {embed} so that it stays loaded."
+    checks:
+      - { executed: [set_pinned] }
+      - { op: model_status, input: { model: "{embed}" }, expect: { pinned: true } }
+    cleanup:
+      - { op: set_pinned, input: { model: "{embed}", pinned: false } }
+
+  - id: stop-model
+    prompt: "Stop the model {idle}."
+    setup:
+      - { op: start_model, input: { model: "{idle}" } }
+    checks:
+      - { executed: [stop_model] }
+      - { op: model_status, input: { model: "{idle}" }, expect: { status: ready } }
+
+  - id: index-project
+    prompt: "Make the project in {cwd} searchable."
+    checks:
+      - { executed: [index_project] }
+
+  - id: index-project-de
+    prompt: "Richte die Suche für das Projekt {cwd} ein."
+    checks:
+      - { executed: [index_project] }
+
+  - id: list-models
+    prompt: "Which models do I have?"
+    checks:
+      - { executed_any: [list_models] }
+      - { answer_contains: ["{model}", "{model_name}"] }
+
+  - id: memory
+    prompt: "How much memory can models use on this machine?"
+    checks:
+      - { executed_any: [hardware_info, diagnose] }
+      - { answer_contains: ["GB", "GiB"] }
+
+  - id: knowledge-does-not-fit
+    prompt: "What does it mean when Ancilo says a model 'does not fit'?"
+    checks:
+      - { executed_any: [search] }
+      - { answer_contains: ["memory", "RAM", "smaller", "quantization"] }
+
+  - id: best-model-honest
+    prompt: "Which of my models is best at writing tests, according to my measurements?"
+    checks:
+      - { executed_any: [leaderboard, recommendations, search, list_comparisons] }
+      # No data at all, or too little for a reliable ranking – both must be said.
+      - { answer_contains: ["no ", "not enough", "none", "keine", "noch", "no comparison", "no data", "haven't", "reliable ranking", "preliminary", "too few", "zu wenige", "vorläufig"] }

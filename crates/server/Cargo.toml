@@ -1,0 +1,28 @@
+[package]
+name = "ancilo-server"
+description = "Ancilo HTTP server: control API, events (SSE), OpenAPI, security guards"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rust-embed.workspace = true
+ancilo-core.workspace = true
+ancilo-storage.workspace = true
+axum.workspace = true
+futures.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+subtle = "2"
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+schemars.workspace = true
+
+[lints]
+workspace = true

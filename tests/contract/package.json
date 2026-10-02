@@ -1,0 +1,10 @@
+{
+  "name": "ancilo-contract-tests",
+  "private": true,
+  "description": "Contract tests: the official OpenAI and Anthropic SDKs against Ancilo's model API (M2-AC-01/02)",
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.129.0",
+    "openai": "7.25.0"
+  }
+}
