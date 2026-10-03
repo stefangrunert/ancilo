@@ -14,7 +14,7 @@ function session(extra: Record<string, unknown> = {}) {
     title: "Rename things",
     project: "/p/wcs",
     model: "dev",
-    permission: "edit",
+    permission: "shell",
     status: "idle",
     isolated: true,
     workdir: "/home/sessions/s-1/work",
@@ -23,6 +23,7 @@ function session(extra: Record<string, unknown> = {}) {
     approvals: [],
     variants: [],
     can_retry: false,
+    web_used: false,
     messages: [],
     created_at: "",
     ...extra,
@@ -116,6 +117,34 @@ describe("SessionView", () => {
     await waitFor(() => expect(calls.some((c) => c.op === "cancel_turn")).toBe(true));
   });
 
+  // covers: M8-AC-13
+  it("asks before every web search, only for this once, and says what goes out", async () => {
+    const s = session({
+      status: "running",
+      approvals: [{ id: "ap-2", session: "s-1", tool: "web_search", arguments: { query: "tokio select" }, needs: "shell", sends_to: "wikipedia", created_at: "" }],
+    });
+    const { calls } = daemon(s, { approve: () => ({}), reject: () => ({}) });
+    const card = await screen.findByTestId("approval");
+    expect(card).toHaveTextContent("The agent wants to search Wikipedia for: tokio select");
+    expect(card).toHaveTextContent("These search words go to Wikipedia.");
+    expect(within(card).queryByRole("button", { name: "Allow for this session" })).toBeNull();
+    await userEvent.click(within(card).getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(calls.find((c) => c.op === "approve")?.input).toEqual({ approval: "ap-2", remember: false }));
+    await userEvent.click(within(card).getByRole("button", { name: "Don’t search" }));
+    await waitFor(() => expect(calls.find((c) => c.op === "reject")?.input).toEqual({ approval: "ap-2" }));
+  });
+
+  // covers: M8-AC-13
+  it("points to changes that run on build and to web text before keeping", async () => {
+    const s = session({ web_used: true, changes: [{ path: "build.rs", added: 3, removed: 0, runs: true }, { path: "src/a.rs", added: 1, removed: 0, runs: false }] });
+    daemon(s, {});
+    const changes = await screen.findByTestId("changes");
+    expect(within(changes).getAllByText("runs code")).toHaveLength(1);
+    const note = within(screen.getByTestId("changes-card")).getByTestId("keep-note");
+    expect(note).toHaveTextContent("Some changes run when the project is built, installed or tested (build.rs).");
+    expect(note).toHaveTextContent("The agent read web pages in this session.");
+  });
+
   it("sends multi-line messages with Enter", async () => {
     const { calls } = daemon(session(), { send_message: () => session({ status: "running" }), list_sessions: () => [], list_projects: () => [] });
     const box = await screen.findByRole("textbox", { name: "What should the agent do?" });
@@ -166,7 +195,7 @@ describe("SessionView", () => {
 });
 
 describe("SessionView, simple", () => {
-  it("offers keep or undo – no diff, terminal or permissions", async () => {
+  it("offers keep or undo and the two access modes – no diff or terminal", async () => {
     const s = session({
       changes: [{ path: "a.rs", added: 3, removed: 1 }],
       messages: [{ role: "assistant", text: "", tool_calls: ["read_file({})"] }, { role: "tool", text: "x" }, { role: "assistant", text: "Done." }],
@@ -177,10 +206,16 @@ describe("SessionView, simple", () => {
       list_terminals: () => [],
       discard_changes: () => ({ files: ["a.rs"] }),
       apply_changes: () => ({ files: ["a.rs"] }),
+      update_session: () => s,
+      list_sessions: () => [],
     });
     const card = await screen.findByTestId("changes-card");
     expect(screen.getByText("Ancilo worked on it (1 steps).")).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "The agent may" })).toBeNull();
+    // The access modes are for everyone: "Ask first" or "Approve for me".
+    const mode = screen.getByRole("combobox", { name: "Access" });
+    expect(within(mode).getAllByRole("option").map((o) => o.textContent)).toEqual(["Ask first", "Approve for me"]);
+    await userEvent.selectOptions(mode, "read");
+    await waitFor(() => expect(calls.find((c) => c.op === "update_session")?.input).toEqual({ session: "s-1", permission: "read" }));
     expect(screen.queryByRole("tab", { name: "Terminal" })).toBeNull();
     expect(screen.queryByTestId("changes")).toBeNull();
     await userEvent.click(within(card).getByRole("button", { name: "Undo" }));

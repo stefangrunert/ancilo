@@ -2456,6 +2456,11 @@ export interface components {
             id: string;
             /** @description The permission the action needs. */
             needs: components["schemas"]["Access"];
+            /**
+             * @description Where the action sends data (the web search provider) – such an
+             *     approval is only ever for this once.
+             */
+            sends_to?: string | null;
             session: string;
             tool: string;
         };
@@ -2673,6 +2678,12 @@ export interface components {
             path: string;
             /** Format: uint64 */
             removed: number;
+            /**
+             * @description The file runs (or brings in code that runs) when the project is
+             *     built, installed or tested – outside the sandbox, once kept.
+             * @default false
+             */
+            runs: boolean;
         };
         Fit: "does_not_fit" | "fits" | "tight";
         /** @description One click that helps. */
@@ -3180,6 +3191,11 @@ export interface components {
             /** Format: uint32 */
             turns: number;
             variants: components["schemas"]["VariantView"][];
+            /**
+             * @description The agent searched the web here – what it changed may follow text
+             *     from foreign pages; review it with that in mind.
+             */
+            web_used: boolean;
             /** @description Where the agent works (the terminal of the session opens here). */
             workdir: string;
         };
@@ -3890,6 +3906,11 @@ export interface operations {
                         id: string;
                         /** @description The permission the action needs. */
                         needs: components["schemas"]["Access"];
+                        /**
+                         * @description Where the action sends data (the web search provider) – such an
+                         *     approval is only ever for this once.
+                         */
+                        sends_to?: string | null;
                         session: string;
                         tool: string;
                     };
@@ -4830,6 +4851,11 @@ export interface operations {
                         /** Format: uint32 */
                         turns: number;
                         variants: components["schemas"]["VariantView"][];
+                        /**
+                         * @description The agent searched the web here – what it changed may follow text
+                         *     from foreign pages; review it with that in mind.
+                         */
+                        web_used: boolean;
                         /** @description Where the agent works (the terminal of the session opens here). */
                         workdir: string;
                     };
@@ -5645,6 +5671,11 @@ export interface operations {
                         /** Format: uint32 */
                         turns: number;
                         variants: components["schemas"]["VariantView"][];
+                        /**
+                         * @description The agent searched the web here – what it changed may follow text
+                         *     from foreign pages; review it with that in mind.
+                         */
+                        web_used: boolean;
                         /** @description Where the agent works (the terminal of the session opens here). */
                         workdir: string;
                     };
@@ -6939,6 +6970,11 @@ export interface operations {
                         id: string;
                         /** @description The permission the action needs. */
                         needs: components["schemas"]["Access"];
+                        /**
+                         * @description Where the action sends data (the web search provider) – such an
+                         *     approval is only ever for this once.
+                         */
+                        sends_to?: string | null;
                         session: string;
                         tool: string;
                     };
@@ -7531,6 +7567,11 @@ export interface operations {
                         /** Format: uint32 */
                         turns: number;
                         variants: components["schemas"]["VariantView"][];
+                        /**
+                         * @description The agent searched the web here – what it changed may follow text
+                         *     from foreign pages; review it with that in mind.
+                         */
+                        web_used: boolean;
                         /** @description Where the agent works (the terminal of the session opens here). */
                         workdir: string;
                     };
@@ -8148,6 +8189,11 @@ export interface operations {
                         /** Format: uint32 */
                         turns: number;
                         variants: components["schemas"]["VariantView"][];
+                        /**
+                         * @description The agent searched the web here – what it changed may follow text
+                         *     from foreign pages; review it with that in mind.
+                         */
+                        web_used: boolean;
                         /** @description Where the agent works (the terminal of the session opens here). */
                         workdir: string;
                     };
@@ -9353,6 +9399,11 @@ export interface operations {
                         /** Format: uint32 */
                         turns: number;
                         variants: components["schemas"]["VariantView"][];
+                        /**
+                         * @description The agent searched the web here – what it changed may follow text
+                         *     from foreign pages; review it with that in mind.
+                         */
+                        web_used: boolean;
                         /** @description Where the agent works (the terminal of the session opens here). */
                         workdir: string;
                     };

@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::changes::{Changes, Diff, FileDiff, git_top};
 use crate::pty::Terminals;
-use crate::tools::{Approval, Approvals, Decision, SessionTools};
+use crate::tools::{Approval, Approvals, Decision, SessionTools, WebLookup};
 
 pub const ROLE_CODING: &str = "coding";
 
@@ -69,6 +69,9 @@ struct Meta {
     last_model: Option<String>,
     variants: Vec<Variant>,
     turns: u32,
+    /// The agent searched the web in this session: foreign text is in it.
+    #[serde(default)]
+    web_used: bool,
     created_at: DateTime<Utc>,
 }
 
@@ -99,6 +102,9 @@ pub struct SessionView {
     pub approvals: Vec<Approval>,
     pub variants: Vec<VariantView>,
     pub can_retry: bool,
+    /// The agent searched the web here – what it changed may follow text
+    /// from foreign pages; review it with that in mind.
+    pub web_used: bool,
     /// Only for a single session (`get_session`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<ChatMessage>,
@@ -158,6 +164,8 @@ struct Inner {
     /// One writer per session at a time.
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     permissions: Mutex<HashMap<String, Arc<Mutex<Access>>>>,
+    /// Web search for agents (the daemon sets it).
+    web: Mutex<Option<Arc<dyn WebLookup>>>,
 }
 
 #[derive(Clone)]
@@ -260,8 +268,15 @@ impl Sessions {
                 tasks: Mutex::new(HashMap::new()),
                 locks: Mutex::new(HashMap::new()),
                 permissions: Mutex::new(HashMap::new()),
+                web: Mutex::new(None),
             }),
         }
+    }
+
+    /// Lets agents search the web – only while the user has a provider chosen.
+    pub fn with_web(self, web: Arc<dyn WebLookup>) -> Self {
+        *self.inner.web.lock().unwrap() = Some(web);
+        self
     }
 
     pub fn terminals(&self) -> &Terminals {
@@ -400,6 +415,7 @@ impl Sessions {
                 })
                 .collect(),
             can_retry: meta.last_turn_base.is_some() && meta.status != SessionStatus::Running,
+            web_used: meta.web_used,
             messages: if with_messages {
                 let mut m = simplify(history);
                 // The request of a running turn joins the history when the
@@ -678,7 +694,9 @@ impl Sessions {
             title: title.unwrap_or_else(|| "New session".into()),
             project: root.clone(),
             model,
-            permission: permission.unwrap_or(Access::Edit),
+            // "Für mich freigeben": changes in the copy and commands in the
+            // sandbox without asking; searches and keeping stay with the user.
+            permission: permission.unwrap_or(Access::Shell),
             status: SessionStatus::Idle,
             changes,
             last_turn_base: None,
@@ -687,6 +705,7 @@ impl Sessions {
             last_model: None,
             variants: Vec::new(),
             turns: 0,
+            web_used: false,
             created_at: Utc::now(),
         };
         if let Err(e) = self.save(&meta, &[]) {
@@ -867,14 +886,13 @@ impl Sessions {
                 if !o.messages.is_empty() {
                     history = o.messages.clone();
                 }
+                meta.web_used |= crate::tools::searched_web(&o.messages);
                 // A turn that failed (the model could not be loaded or did
                 // not answer) says why – otherwise it looks as if nothing
                 // happened.
                 if o.status == ancilo_agent::Status::Failed && !cancel.is_cancelled() {
-                    if !history
-                        .iter()
-                        .any(|m| m["role"] == "user" && m["content"] == text.as_str())
-                    {
+                    // Failed before the agent took the request in.
+                    if o.messages.is_empty() {
                         history.push(json!({"role": "user", "content": text}));
                     }
                     history.push(
@@ -946,6 +964,7 @@ impl Sessions {
             bus: self.inner.bus.clone(),
             cancel: cancel.clone(),
             transcript: Some(Arc::new(move |t: &str| terms.show(&sid, t))),
+            web: self.inner.web.lock().unwrap().clone(),
         };
         let spec = AgentSpec {
             model: model.to_string(),
@@ -1203,6 +1222,8 @@ impl Sessions {
                     }
                     Err(e) => v.summary = Some(format!("(failed: {})", e.message())),
                 }
+                meta.web_used |=
+                    matches!(&outcome, Ok(o) if crate::tools::searched_web(&o.messages));
                 let _ = me.save(&meta, &history);
             }
             me.inner.running.lock().unwrap().remove(&key);

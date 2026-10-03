@@ -1159,7 +1159,11 @@ fallback: { http_error: { status: 400, message: "the model refused the request" 
         .await;
     let messages = s["messages"].as_array().unwrap();
     let texts: Vec<&str> = messages.iter().filter_map(|m| m["text"].as_str()).collect();
-    assert!(texts.contains(&"Fix the quiz facts"), "{s}");
+    assert_eq!(
+        texts.iter().filter(|t| **t == "Fix the quiz facts").count(),
+        1,
+        "the request shows once: {s}"
+    );
     let last = texts.last().unwrap();
     assert!(last.starts_with("(failed: model call failed"), "{s}");
     assert!(last.contains("the model refused the request"), "{s}");

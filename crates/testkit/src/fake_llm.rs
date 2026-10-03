@@ -64,6 +64,10 @@ pub struct Expect {
     pub no_message_contains: Option<String>,
     pub model: Option<String>,
     pub has_tools: Option<bool>,
+    /// A tool of this name is offered.
+    pub offers_tool: Option<String>,
+    /// No tool of this name is offered.
+    pub lacks_tool: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -302,6 +306,21 @@ fn check(expect: &Expect, body: &Value) -> Result<(), String> {
         if present != has {
             return Err(format!("expected has_tools={has}, got {present}"));
         }
+    }
+    let offered = |name: &str| {
+        body["tools"]
+            .as_array()
+            .is_some_and(|t| t.iter().any(|t| t["function"]["name"] == name))
+    };
+    if let Some(name) = &expect.offers_tool
+        && !offered(name)
+    {
+        return Err(format!("expected the tool {name:?} to be offered"));
+    }
+    if let Some(name) = &expect.lacks_tool
+        && offered(name)
+    {
+        return Err(format!("expected no tool {name:?}"));
     }
     Ok(())
 }

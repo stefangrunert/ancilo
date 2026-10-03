@@ -373,3 +373,110 @@ steps:
     );
     env.stop().await;
 }
+
+impl Env {
+    async fn session(&self, id: &str) -> Value {
+        self.op("get_session", json!({"session": id})).await
+    }
+
+    async fn wait_session(&self, id: &str, what: &str, f: impl Fn(&Value) -> bool) -> Value {
+        for _ in 0..800 {
+            let s = self.session(id).await;
+            if f(&s) {
+                return s;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("{what}: {}", self.session(id).await);
+    }
+}
+
+// covers: M8-AC-13
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_coding_agent_searches_only_with_an_ok_for_each_search() {
+    let script = r#"
+steps:
+  # Web search off: the agent has no such tool.
+  - expect: { last_user_contains: "Kein Web", has_tools: true, lacks_tool: web_search }
+    respond: { text: "Ohne Web." }
+  - expect: { last_user_contains: "Schau nach", offers_tool: web_search }
+    respond: { tool_calls: [{ name: web_search, arguments: { query: "  Oslo  " } }] }
+  # The result is marked as foreign text.
+  - expect: { any_message_contains: "728.714" }
+    respond: { tool_calls: [{ name: web_search, arguments: { query: "Oslo Geschichte" } }] }
+  - expect: { any_message_contains: "The user did not allow this action" }
+    respond: { text: "Fertig." }
+"#;
+    let env = Env::start(script).await;
+    env.web.article("en", "Oslo", OSLO);
+    let project = env.home.scratch("birds");
+    std::fs::write(project.join("quiz.py"), "print('quiz')\n").unwrap();
+    let s = env.op("create_session", json!({"cwd": project})).await;
+    let id = s["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        s["permission"], "shell",
+        "new sessions: changes in the copy and sandboxed commands without asking"
+    );
+    env.op(
+        "send_message",
+        json!({"session": id, "text": "Kein Web", "wait": true}),
+    )
+    .await;
+
+    env.op("set_web_search", json!({"provider": "wikipedia"}))
+        .await;
+    env.op("send_message", json!({"session": id, "text": "Schau nach"}))
+        .await;
+    // Even with every permission: the search waits for the user, who sees
+    // exactly what goes out and to whom.
+    let a = env
+        .wait_session(&id, "no approval", |s| {
+            !s["approvals"].as_array().unwrap().is_empty()
+        })
+        .await["approvals"][0]
+        .clone();
+    assert_eq!(a["tool"], "web_search");
+    assert_eq!(a["sends_to"], "wikipedia");
+    assert_eq!(a["arguments"], json!({"query": "Oslo"}));
+    assert!(
+        env.web.requests().is_empty(),
+        "nothing went out before the OK"
+    );
+    // "Remember" does not stick for searches: the next one asks again.
+    env.op("approve", json!({"approval": a["id"], "remember": true}))
+        .await;
+    let b = env
+        .wait_session(&id, "no second approval", |s| {
+            s["approvals"][0]["arguments"]["query"] == "Oslo Geschichte"
+        })
+        .await["approvals"][0]
+        .clone();
+    let sent = env.web.requests().len();
+    assert!(sent > 0);
+    env.op("reject", json!({"approval": b["id"]})).await;
+    let s = env
+        .wait_session(&id, "turn not finished", |s| s["status"] == "idle")
+        .await;
+    assert_eq!(
+        env.web.requests().len(),
+        sent,
+        "the rejected search never went out"
+    );
+    assert!(
+        env.web
+            .requests()
+            .iter()
+            .all(|r| !r.params.to_string().contains("quiz")),
+        "only the query went out"
+    );
+    assert_eq!(s["permission"], "shell");
+    assert_eq!(s["web_used"], true, "the session read web text");
+    let text: String = s["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["text"].as_str().unwrap_or_default())
+        .collect();
+    assert!(text.contains("Fertig."), "{text}");
+    env.stop().await;
+}

@@ -252,6 +252,13 @@
             "$ref": "#/components/schemas/Access",
             "description": "The permission the action needs."
           },
+          "sends_to": {
+            "description": "Where the action sends data (the web search provider) – such an\napproval is only ever for this once.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "session": {
             "type": "string"
           },
@@ -985,6 +992,11 @@
             "format": "uint64",
             "minimum": 0,
             "type": "integer"
+          },
+          "runs": {
+            "default": false,
+            "description": "The file runs (or brings in code that runs) when the project is\nbuilt, installed or tested – outside the sandbox, once kept.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2759,6 +2771,10 @@
             },
             "type": "array"
           },
+          "web_used": {
+            "description": "The agent searched the web here – what it changed may follow text\nfrom foreign pages; review it with that in mind.",
+            "type": "boolean"
+          },
           "workdir": {
             "description": "Where the agent works (the terminal of the session opens here).",
             "type": "string"
@@ -2778,6 +2794,7 @@
           "approvals",
           "variants",
           "can_retry",
+          "web_used",
           "created_at"
         ],
         "type": "object"
@@ -4503,6 +4520,13 @@
                     "needs": {
                       "$ref": "#/components/schemas/Access",
                       "description": "The permission the action needs."
+                    },
+                    "sends_to": {
+                      "description": "Where the action sends data (the web search provider) – such an\napproval is only ever for this once.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "session": {
                       "type": "string"
@@ -6449,6 +6473,10 @@
                       },
                       "type": "array"
                     },
+                    "web_used": {
+                      "description": "The agent searched the web here – what it changed may follow text\nfrom foreign pages; review it with that in mind.",
+                      "type": "boolean"
+                    },
                     "workdir": {
                       "description": "Where the agent works (the terminal of the session opens here).",
                       "type": "string"
@@ -6468,6 +6496,7 @@
                     "approvals",
                     "variants",
                     "can_retry",
+                    "web_used",
                     "created_at"
                   ],
                   "title": "SessionView",
@@ -7937,6 +7966,10 @@
                       },
                       "type": "array"
                     },
+                    "web_used": {
+                      "description": "The agent searched the web here – what it changed may follow text\nfrom foreign pages; review it with that in mind.",
+                      "type": "boolean"
+                    },
                     "workdir": {
                       "description": "Where the agent works (the terminal of the session opens here).",
                       "type": "string"
@@ -7956,6 +7989,7 @@
                     "approvals",
                     "variants",
                     "can_retry",
+                    "web_used",
                     "created_at"
                   ],
                   "title": "SessionView",
@@ -10226,6 +10260,13 @@
                       "$ref": "#/components/schemas/Access",
                       "description": "The permission the action needs."
                     },
+                    "sends_to": {
+                      "description": "Where the action sends data (the web search provider) – such an\napproval is only ever for this once.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "session": {
                       "type": "string"
                     },
@@ -11353,6 +11394,10 @@
                       },
                       "type": "array"
                     },
+                    "web_used": {
+                      "description": "The agent searched the web here – what it changed may follow text\nfrom foreign pages; review it with that in mind.",
+                      "type": "boolean"
+                    },
                     "workdir": {
                       "description": "Where the agent works (the terminal of the session opens here).",
                       "type": "string"
@@ -11372,6 +11417,7 @@
                     "approvals",
                     "variants",
                     "can_retry",
+                    "web_used",
                     "created_at"
                   ],
                   "title": "SessionView",
@@ -12528,6 +12574,10 @@
                       },
                       "type": "array"
                     },
+                    "web_used": {
+                      "description": "The agent searched the web here – what it changed may follow text\nfrom foreign pages; review it with that in mind.",
+                      "type": "boolean"
+                    },
                     "workdir": {
                       "description": "Where the agent works (the terminal of the session opens here).",
                       "type": "string"
@@ -12547,6 +12597,7 @@
                     "approvals",
                     "variants",
                     "can_retry",
+                    "web_used",
                     "created_at"
                   ],
                   "title": "SessionView",
@@ -14926,6 +14977,10 @@
                       },
                       "type": "array"
                     },
+                    "web_used": {
+                      "description": "The agent searched the web here – what it changed may follow text\nfrom foreign pages; review it with that in mind.",
+                      "type": "boolean"
+                    },
                     "workdir": {
                       "description": "Where the agent works (the terminal of the session opens here).",
                       "type": "string"
@@ -14945,6 +15000,7 @@
                     "approvals",
                     "variants",
                     "can_retry",
+                    "web_used",
                     "created_at"
                   ],
                   "title": "SessionView",

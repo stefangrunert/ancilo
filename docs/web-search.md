@@ -33,6 +33,10 @@ Writing, translating, explanations and small talk are not searched.
 
 Every answer with a web search says what was searched and lists its **sources**; `[1]` in the answer links to source 1.
 
+## In coding sessions
+
+The coding agent can search, too – for documentation or error messages. Every search shows its search words and asks first, whatever the session's mode; only those words go out. See [coding.md](coding.md#web-search).
+
 ## For experts
 
 `ancilo op get_web_search`, `set_web_search` (`provider`: `off`, `wikipedia`, `serper`; `mode`: `ask`, `auto`; `serper_key`), `test_web_search`, `web_search` (`query`, `topic`, `lang`) and `answer_web_proposal`. Why it works this way, the measurements with a 4-billion-parameter model and the security review: decision `2026-10-02-websuche`.

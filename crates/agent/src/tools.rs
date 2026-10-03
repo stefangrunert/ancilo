@@ -112,6 +112,9 @@ pub struct FileChange {
 pub struct ShellSettings {
     pub sandbox: bool,
     pub network: bool,
+    /// Places commands may not read, besides the usual secret places
+    /// (Ancilo's home, with other sessions and its key file).
+    pub hidden: Vec<PathBuf>,
     pub default_timeout: Duration,
     pub max_timeout: Duration,
 }
@@ -121,6 +124,7 @@ impl Default for ShellSettings {
         Self {
             sandbox: true,
             network: false,
+            hidden: Vec::new(),
             default_timeout: Duration::from_secs(120),
             max_timeout: Duration::from_secs(600),
         }
@@ -795,7 +799,12 @@ impl Workspace {
             .min(self.shell.max_timeout);
         let script = self.inbound(&a.command);
         let mut cmd = if self.shell.sandbox {
-            match sandbox::command(&self.root, self.shell.network, &script) {
+            let bounds = sandbox::Bounds {
+                root: &self.root,
+                hidden: &self.shell.hidden,
+                network: self.shell.network,
+            };
+            match sandbox::command(&bounds, &script) {
                 Ok(c) => c,
                 Err(e) => return ToolOutput::err(e),
             }

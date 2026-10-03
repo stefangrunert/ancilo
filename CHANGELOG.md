@@ -2,6 +2,16 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+- **Coding: two access modes** for every session – *Ask first* or *Approve for me* (new default: changes in the copy and sandboxed commands without asking). No mode runs commands outside the sandbox.
+- **Coding: web search** for the agent, when web search is on – every search shows its words and asks first, in both modes.
+- **Coding: a stricter sandbox** – no `/tmp`, a temporary folder of its own, no reading of SSH/cloud keys, keychains, browser profiles or Ancilo's own data, no inherited environment, lower priority.
+- **Coding: before keeping**, files that run code on build or install are marked, and sessions that read web pages say so.
+- **Coding: new projects** – name, then the folder it goes into; **+** next to a project starts another chat; terminals open in the project folder.
+- **Coding: a turn whose model fails says why** instead of seeming to do nothing.
+- For developers: `just app-dev` installs *Ancilo Dev* next to the release (own data, port 7425, no updates).
+
 ## 0.1.0 – 2026-10-02 (pre-release)
 
 The first public version of Ancilo – for macOS on Apple Silicon (13 Ventura or newer), signed and notarized.

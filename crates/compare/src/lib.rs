@@ -1039,6 +1039,7 @@ impl Comparer {
                 )
                 .await
                 .ok();
+                std::fs::remove_dir_all(ancilo_agent::sandbox::temp_dir(&wt)).ok();
                 let success =
                     outcome.status == Status::Done && check.as_ref().is_none_or(|c| c.passed);
                 let failure = if success {
@@ -1244,7 +1245,14 @@ impl Comparer {
     ) -> CheckResult {
         let started = Instant::now();
         let cmd = if self.inner.shell.sandbox {
-            ancilo_agent::sandbox::command(sandbox_root, network, script)
+            ancilo_agent::sandbox::command(
+                &ancilo_agent::sandbox::Bounds {
+                    root: sandbox_root,
+                    hidden: &self.inner.shell.hidden,
+                    network,
+                },
+                script,
+            )
         } else {
             let mut c = tokio::process::Command::new("/bin/sh");
             c.arg("-c").arg(script);

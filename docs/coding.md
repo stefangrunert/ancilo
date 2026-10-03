@@ -19,15 +19,32 @@ New files you have not committed yet are part of the starting point, too. When c
 
 ## What the agent may do
 
-Each session has a permission, chosen at the top:
+Each session has one of two modes, chosen under the input:
 
-| Permission | Without asking | Asks before |
+| Mode | Without asking | Asks before |
 |---|---|---|
-| read | read and search | changing files, running commands |
-| edit files (default) | also change files (in its own work area) | running commands |
-| edit and run commands | everything | – |
+| **Ask first** | read and search the project | every change, every command, every web search |
+| **Approve for me** (default) | change files in its copy, run commands in the sandbox | every web search |
 
-When the agent wants to do more than its permission allows, it waits and shows the action: **Allow** (this once), **Allow for this session** (raises the permission), or **Reject** – the agent then continues without it.
+Either way the agent works in its copy and **only you keep changes**. There is no mode that runs commands outside the sandbox.
+
+When the agent wants to do something its mode does not allow, it waits and shows the action: **Allow** (this once), **Allow for this session**, or **Reject** – the agent then continues without it.
+
+### The sandbox
+
+The agent's commands run in a sandbox (Seatbelt on macOS, Bubblewrap on Linux; without one, commands are refused):
+
+- **no network**,
+- **writing** only in the copy and the command's own temporary folder – not in `/tmp`, not anywhere else,
+- **no reading** where secrets and personal data live: SSH and cloud keys, keychains, browser profiles, mail, Claude and Codex settings, and Ancilo's own data (other sessions, its key file),
+- **no inherited environment**: only what tools need to be found (`PATH`, `HOME`, locale, toolchain folders) – no keys or tokens,
+- at **lower priority**, so a long build does not make the computer unusable.
+
+### Web search
+
+With web search turned on (System › Web search), the agent can look up documentation and error messages. **Every search asks first – in both modes**: you see exactly the search words and where they go (Wikipedia or Google through Serper), and the OK counts for this one search only. Nothing else from the project goes out. What comes back is marked for the agent as text from foreign pages.
+
+Text from the web can try to steer the agent. So before you keep changes, Ancilo says when the agent read web pages in the session – and marks changed files that **run code** when the project is built, installed or tested (build scripts, package files and lock files, hooks, CI, shell scripts). Look at those before you keep them: once in your project, they run outside the sandbox.
 
 ## Models
 
@@ -37,7 +54,7 @@ The session uses the model with the role `coding` (or your default model); pick 
 
 ## Terminal
 
-The *Terminal* tab opens a shell in the session's copy of the project – where the agent works, so you see its files and can run tests on them. The agent's commands appear in the session's terminals, too. Terminals live in Ancilo: reloading or closing the window keeps them running, reconnecting shows their recent output. Several terminals per session are possible.
+The *Terminal* tab opens a shell in the project folder. The agent's commands appear in the session's terminals, too (they run in its copy). Terminals live in Ancilo: reloading or closing the window keeps them running, reconnecting shows their recent output. Several terminals per session are possible.
 
 ## From the command line or other tools
 
@@ -45,7 +62,7 @@ Everything in the Code view is an operation (`ancilo op …`, REST, MCP):
 
 ```bash
 ancilo op open_project '{"path": "/path/to/project"}'
-ancilo op create_session '{"cwd": "/path/to/project", "permission": "edit"}'
+ancilo op create_session '{"cwd": "/path/to/project", "permission": "read"}'
 ancilo op send_message '{"session": "s-…", "text": "Add input validation to parse()", "wait": true}'
 ancilo op session_diff '{"session": "s-…"}'
 ancilo op apply_changes '{"session": "s-…"}' --confirm

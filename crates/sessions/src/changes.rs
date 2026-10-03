@@ -29,6 +29,81 @@ pub struct FileDiff {
     pub path: String,
     pub added: u64,
     pub removed: u64,
+    /// The file runs (or brings in code that runs) when the project is
+    /// built, installed or tested – outside the sandbox, once kept.
+    #[serde(default)]
+    pub runs: bool,
+}
+
+/// Files whose change runs code when the project is built, installed or
+/// tested: build scripts, package manifests and lock files, hooks, CI, shell
+/// scripts, tool configs written in code.
+pub fn runs_code(path: &str) -> bool {
+    let path = path.trim_end_matches('/');
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    const NAMES: &[&str] = &[
+        "build.rs",
+        "cargo.toml",
+        "cargo.lock",
+        "rust-toolchain",
+        "rust-toolchain.toml",
+        "package.json",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "bun.lockb",
+        ".npmrc",
+        "makefile",
+        "gnumakefile",
+        "justfile",
+        "cmakelists.txt",
+        "meson.build",
+        "build.zig",
+        "setup.py",
+        "setup.cfg",
+        "pyproject.toml",
+        "conftest.py",
+        "noxfile.py",
+        "tox.ini",
+        "poetry.lock",
+        "pipfile",
+        "pipfile.lock",
+        "uv.lock",
+        "gemfile",
+        "gemfile.lock",
+        "rakefile",
+        "podfile",
+        "go.mod",
+        "go.sum",
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts",
+        "gradlew",
+        "pom.xml",
+        "mvnw",
+        "dockerfile",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yaml",
+        ".envrc",
+        ".gitlab-ci.yml",
+        "composer.json",
+        "composer.lock",
+        "deno.json",
+        "project.pbxproj",
+    ];
+    NAMES.contains(&name.as_str())
+        || name.starts_with("requirements") && name.ends_with(".txt")
+        || [".sh", ".bash", ".zsh", ".cmake", ".mk", ".command"]
+            .iter()
+            .any(|e| name.ends_with(e))
+        // vite.config.ts, jest.config.js, .eslintrc.cjs, babel.config.json …
+        || name.contains(".config.") && !name.ends_with(".json")
+        || name.starts_with(".eslintrc") && !name.ends_with(".json")
+        || ["/.cargo/config", ".cargo/config", ".github/workflows/", ".husky/", ".githooks/", ".devcontainer/"]
+            .iter()
+            .any(|d| path.starts_with(d.trim_start_matches('/')) || path.contains(d))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -179,7 +254,8 @@ fn numstat(text: &str) -> Vec<FileDiff> {
             let added = parts.next()?.trim().parse().unwrap_or(0);
             let removed = parts.next()?.parse().unwrap_or(0);
             let path = parts.next()?.to_string();
-            (!path.is_empty()).then_some(FileDiff {
+            (!path.is_empty()).then(|| FileDiff {
+                runs: runs_code(&path),
                 path,
                 added,
                 removed,
@@ -573,12 +649,44 @@ impl Changes {
             }
         }
         std::fs::remove_dir_all(self.work_dir()).ok();
+        std::fs::remove_dir_all(ancilo_agent::sandbox::temp_dir(self.work_dir())).ok();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // covers: M8-AC-13
+    #[test]
+    fn changes_that_run_on_build_or_install_are_marked() {
+        for p in [
+            "build.rs",
+            "crates/x/build.rs",
+            "package.json",
+            "app/package-lock.json",
+            "Makefile",
+            "scripts/release.sh",
+            "vite.config.ts",
+            ".github/workflows/ci.yml",
+            ".husky/pre-commit",
+            "requirements-dev.txt",
+            "conftest.py",
+            ".cargo/config.toml",
+            "Cargo.lock",
+        ] {
+            assert!(runs_code(p), "{p}");
+        }
+        for p in [
+            "src/main.rs",
+            "README.md",
+            "app/src/App.tsx",
+            "tsconfig.json",
+            "docs/build.md",
+        ] {
+            assert!(!runs_code(p), "{p}");
+        }
+    }
 
     fn repo() -> tempfile::TempDir {
         let d = tempfile::tempdir().unwrap();

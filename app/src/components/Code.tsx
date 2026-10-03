@@ -16,6 +16,24 @@ type Access = Session["permission"];
 type SessionMessage = NonNullable<Session["messages"]>[number];
 
 /** A few words for what the agent wants to do. */
+/** The access modes (decision `2026-10-03-coding-zugriff-websuche`): "ask" =
+ * read freely, ask before changes, commands and searches; "auto" = changes in
+ * the copy and sandboxed commands without asking. Searches always ask. */
+function AccessChoice({ s, disabled, onChange }: { s: Session; disabled: boolean; onChange: (p: Access) => void }) {
+  const { t } = useI18n();
+  return (
+    <label className="row access-choice" title={t(s.permission === "shell" ? "code.mode.autoHint" : "code.mode.askHint")}>
+      <span className="sr-only">{t("code.mode")}</span>
+      <select value={s.permission} onChange={(e) => onChange(e.target.value as Access)} disabled={disabled} aria-label={t("code.mode")} data-testid="access-mode">
+        <option value="read">{t("code.mode.ask")}</option>
+        {/* Sessions from before the two modes may still allow only edits. */}
+        {s.permission === "edit" && <option value="edit">{t("code.mode.edit")}</option>}
+        <option value="shell">{t("code.mode.auto")}</option>
+      </select>
+    </label>
+  );
+}
+
 function describe(a: Approval): string {
   const args = (a.arguments ?? {}) as Record<string, unknown>;
   if (a.tool === "bash") return `$ ${String(args.command ?? "")}`;
@@ -88,6 +106,7 @@ function Changes({ s, onError }: { s: Session; onError: (e: unknown) => void }) 
   return (
     <div className="changes stack" data-testid="changes">
       <p className="muted small">{t("code.notYetInProject")}</p>
+      <KeepNote s={s} />
       <ul>
         {files.map((f) => (
           <li key={f.path}>
@@ -102,6 +121,11 @@ function Changes({ s, onError }: { s: Session; onError: (e: unknown) => void }) 
             <button type="button" className="link file" aria-expanded={shown === f.path} onClick={() => setShown(shown === f.path ? null : f.path)}>
               {f.path}
             </button>
+            {f.runs && (
+              <span className="badge warn" title={t("code.runsHint")}>
+                {t("code.runs")}
+              </span>
+            )}
             <span className="stat">
               <span className="add">+{f.added}</span> <span className="del">−{f.removed}</span>
             </span>
@@ -206,6 +230,7 @@ function Approvals({ s, onError }: { s: Session; onError: (e: unknown) => void }
   const client = useClient();
   const refresh = useRefresh();
   if (s.approvals.length === 0) return null;
+  const provider = (a: Approval) => (a.sends_to === "serper" ? "Google (Serper)" : "Wikipedia");
   const decide = async (a: Approval, how: "once" | "session" | "no") => {
     try {
       if (how === "no") await client.op("reject", { approval: a.id });
@@ -219,20 +244,39 @@ function Approvals({ s, onError }: { s: Session; onError: (e: unknown) => void }
     <div className="approvals stack" role="group" aria-label={t("code.approvals")}>
       {s.approvals.map((a) => (
         <div key={a.id} className="card approval" data-testid="approval">
-          <p>
-            {t("code.wants")} <code>{describe(a)}</code>
-          </p>
-          <div className="row">
-            <button type="button" onClick={() => void decide(a, "once")}>
-              {t("code.allow")}
-            </button>
-            <button type="button" className="secondary" onClick={() => void decide(a, "session")}>
-              {t("code.allowSession")}
-            </button>
-            <button type="button" className="secondary" onClick={() => void decide(a, "no")}>
-              {t("code.reject")}
-            </button>
-          </div>
+          {a.sends_to ? (
+            <>
+              <p>
+                {t("code.wantsSearch", { provider: provider(a) })} <code>{String((a.arguments as { query?: string })?.query ?? "")}</code>
+              </p>
+              <p className="muted small">{t("code.searchSends", { provider: provider(a) })}</p>
+              <div className="row">
+                <button type="button" onClick={() => void decide(a, "once")}>
+                  {t("code.search")}
+                </button>
+                <button type="button" className="secondary" onClick={() => void decide(a, "no")}>
+                  {t("code.dontSearch")}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p>
+                {t("code.wants")} <code>{describe(a)}</code>
+              </p>
+              <div className="row">
+                <button type="button" onClick={() => void decide(a, "once")}>
+                  {t("code.allow")}
+                </button>
+                <button type="button" className="secondary" onClick={() => void decide(a, "session")}>
+                  {t("code.allowSession")}
+                </button>
+                <button type="button" className="secondary" onClick={() => void decide(a, "no")}>
+                  {t("code.reject")}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       ))}
     </div>
@@ -289,6 +333,20 @@ function Steps({ steps, open }: { steps: { call: string; result?: string }[]; op
   );
 }
 
+/** Before keeping: changes that run when the project is built or installed,
+ * and sessions that read web pages, deserve a closer look. */
+function KeepNote({ s }: { s: Session }) {
+  const { t } = useI18n();
+  const runs = s.changes.filter((f) => f.runs).map((f) => f.path);
+  if (runs.length === 0 && !s.web_used) return null;
+  return (
+    <div className="note" data-testid="keep-note">
+      {runs.length > 0 && <p>{t("code.runsNote", { files: runs.slice(0, 3).join(", ") + (runs.length > 3 ? " …" : "") })}</p>}
+      {s.web_used && <p>{t("code.webNote")}</p>}
+    </div>
+  );
+}
+
 /** After a turn: what changed, and the way into the project. */
 function ChangesCard({ s, onReview, onError, pro }: { s: Session; onReview: () => void; onError: (e: unknown) => void; pro: boolean }) {
   const { t } = useI18n();
@@ -307,6 +365,7 @@ function ChangesCard({ s, onReview, onError, pro }: { s: Session; onReview: () =
         </span>
       </div>
       <p className="muted small">{t("code.notYetInProject")}</p>
+      <KeepNote s={s} />
       <div className="row">
         <button type="button" onClick={() => void act(() => client.op("apply_changes", { session: s.id, paths: null }, true))}>
           {pro ? t("code.applyToProject") : t("code.keep")}
@@ -461,19 +520,9 @@ export function SessionView({ id, models }: { id: string; models: Model[] }) {
           </button>
           <span className="spacer" />
           {pro && (
-            <>
-              <label className="row">
-                <span className="sr-only">{t("code.permission")}</span>
-                <select value={s.permission} onChange={(e) => void update({ permission: e.target.value as Access })} disabled={running} aria-label={t("code.permission")}>
-                  <option value="read">{t("code.may.read")}</option>
-                  <option value="edit">{t("code.may.edit")}</option>
-                  <option value="shell">{t("code.may.shell")}</option>
-                </select>
-              </label>
-              <button type="button" className="secondary" aria-pressed={panel} onClick={() => setPanel((p) => !p)}>
-                {panel ? t("code.hidePanel") : t("code.showPanel", { n: s.changes.length })}
-              </button>
-            </>
+            <button type="button" className="secondary" aria-pressed={panel} onClick={() => setPanel((p) => !p)}>
+              {panel ? t("code.hidePanel") : t("code.showPanel", { n: s.changes.length })}
+            </button>
           )}
         </header>
         <ChatLayout
@@ -485,7 +534,12 @@ export function SessionView({ id, models }: { id: string; models: Model[] }) {
               onSend={send}
               busy={running}
               onStop={() => void client.op("cancel_turn", { session: s.id }).catch(setError)}
-              extra={pro ? modelChoice : undefined}
+              extra={
+                <>
+                  <AccessChoice s={s} disabled={running} onChange={(permission) => void update({ permission })} />
+                  {pro && modelChoice}
+                </>
+              }
               autoFocus
             />
           }

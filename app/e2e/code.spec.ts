@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, project, test, waitStatus, type Daemon } from "./harness";
 
@@ -26,6 +26,15 @@ async function start(page: Page, daemon: Daemon): Promise<string> {
   return dir;
 }
 
+/** "Ask first": the agent asks before every change and command. */
+async function askFirst(page: Page, daemon: Daemon) {
+  const mode = page.getByRole("combobox", { name: "Access" });
+  // New sessions start with "Approve for me".
+  await expect(mode).toHaveValue("shell");
+  await mode.selectOption("read");
+  await expect.poll(async () => (await daemon.op("list_sessions", {}))[0].permission).toBe("read");
+}
+
 async function send(page: Page, text: string) {
   const box = page.getByRole("textbox", { name: /What should the agent do/ });
   await box.fill(text);
@@ -35,9 +44,12 @@ async function send(page: Page, text: string) {
 // covers: M8-AC-01
 test("a task is done entirely in the chat: ask, approve, review the diff, apply", async ({ page, daemon }) => {
   const dir = await start(page, daemon);
+  await askFirst(page, daemon);
   await send(page, "Greet in the README and build");
-  // Running a command is above "edit files": the agent asks.
+  // "Ask first": the change and the command each wait for an OK.
   const approval = page.getByTestId("approval");
+  await expect(approval).toContainText("edit_file README.md", { timeout: 20_000 });
+  await approval.getByRole("button", { name: "Allow", exact: true }).click();
   await expect(approval).toContainText("$ echo ok > build.txt", { timeout: 20_000 });
   await approval.getByRole("button", { name: "Allow", exact: true }).click();
   await expect(page.getByTestId("messages")).toContainText("Updated README.md and ran the build.");
@@ -60,9 +72,12 @@ test("a task is done entirely in the chat: ask, approve, review the diff, apply"
 // covers: M8-AC-02
 test("rejected and discarded changes leave no trace", async ({ page, daemon }) => {
   const dir = await start(page, daemon);
+  await askFirst(page, daemon);
   await send(page, "Greet in the README and build");
   const approval = page.getByTestId("approval");
-  await expect(approval).toBeVisible({ timeout: 20_000 });
+  await expect(approval).toContainText("edit_file README.md", { timeout: 20_000 });
+  await approval.getByRole("button", { name: "Allow", exact: true }).click();
+  await expect(approval).toContainText("$ echo ok", { timeout: 20_000 });
   await approval.getByRole("button", { name: "Reject" }).click();
   await expect(page.getByTestId("messages")).toContainText("Updated README.md and ran the build.");
   const changes = page.getByTestId("changes");
@@ -79,11 +94,8 @@ test("rejected and discarded changes leave no trace", async ({ page, daemon }) =
 // covers: M8-AC-05
 test("retry with another model: same start, side by side, one is taken", async ({ page, daemon }) => {
   const dir = await start(page, daemon);
-  // Allowed to run commands: no questions this time.
-  const may = page.getByRole("combobox", { name: "The agent may" });
-  await may.selectOption("shell");
-  await expect.poll(async () => (await daemon.op("list_sessions", {}))[0].permission).toBe("shell");
-  await expect(may).toHaveValue("shell");
+  // "Approve for me" (the default): no questions.
+  await expect(page.getByRole("combobox", { name: "Access" })).toHaveValue("shell");
   await send(page, "Greet in the README and build");
   await expect(page.getByTestId("messages")).toContainText("Updated README.md and ran the build.", { timeout: 20_000 });
   await page.getByRole("combobox", { name: "Try again with" }).selectOption("alt-q8_0");
@@ -109,7 +121,7 @@ async function terminalText(page: Page, id: string): Promise<string> {
 
 // covers: M8-AC-04
 test("the terminal works, resizes, survives a reload, and there can be several", async ({ page, daemon }) => {
-  await start(page, daemon);
+  const dir = await start(page, daemon);
   await page.getByRole("tab", { name: "Terminal" }).click();
   await page.getByRole("button", { name: "New terminal" }).click();
   const term = page.locator("[data-testid^=terminal-]");
@@ -119,10 +131,11 @@ test("the terminal works, resizes, survives a reload, and there can be several",
   await page.keyboard.type("echo marker-$((6*7))");
   await page.keyboard.press("Enter");
   await expect.poll(() => terminalText(page, id)).toContain("marker-42");
-  // It opens where the agent works (the session's work area).
+  // It opens in the project folder.
   await page.keyboard.type("pwd");
   await page.keyboard.press("Enter");
-  await expect.poll(() => terminalText(page, id)).toContain("/sessions/");
+  await expect.poll(() => terminalText(page, id)).toMatch(new RegExp(`pwd/\\S*/${basename(dir)}`));
+  expect(await terminalText(page, id)).not.toContain("/sessions/");
 
   // Resizing the window resizes the terminal.
   await page.keyboard.type("stty size");
@@ -168,6 +181,7 @@ test("the terminal works, resizes, survives a reload, and there can be several",
 test("the code view has no serious accessibility findings", async ({ page, daemon }) => {
   const { default: AxeBuilder } = await import("@axe-core/playwright");
   await start(page, daemon);
+  await askFirst(page, daemon);
   await send(page, "Greet in the README and build");
   await expect(page.getByTestId("approval")).toBeVisible({ timeout: 20_000 });
   const check = async () => {

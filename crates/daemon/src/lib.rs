@@ -473,7 +473,11 @@ fn lock_home(paths: &Paths) -> Result<std::fs::File> {
     )))
 }
 
-pub async fn start(paths: Paths, config: Config, options: DaemonOptions) -> Result<DaemonHandle> {
+pub async fn start(
+    paths: Paths,
+    config: Config,
+    mut options: DaemonOptions,
+) -> Result<DaemonHandle> {
     paths.ensure()?;
     let lock = lock_home(&paths)?;
     let db = Db::open(&paths.db_file())?;
@@ -520,6 +524,8 @@ pub async fn start(paths: Paths, config: Config, options: DaemonOptions) -> Resu
     );
     let search: Arc<dyn ancilo_agent::CodeSearch> =
         Arc::new(knowledge::IndexSearch(indexer.clone()));
+    // Commands of agents never read Ancilo's home (other sessions, key file).
+    options.tasks.shell.hidden.push(paths.home().to_path_buf());
     let comparer = ancilo_compare::Comparer::new(
         db.clone(),
         bus.clone(),
@@ -529,6 +535,7 @@ pub async fn start(paths: Paths, config: Config, options: DaemonOptions) -> Resu
         Some(search.clone()),
     );
     let terminals = ancilo_sessions::Terminals::new(bus.clone());
+    let web_search = web::WebSearch::new(&config, db.clone(), manager.secrets(), bus.clone());
     let sessions = ancilo_sessions::Sessions::new(
         db.clone(),
         bus.clone(),
@@ -542,7 +549,8 @@ pub async fn start(paths: Paths, config: Config, options: DaemonOptions) -> Resu
         dirs::home_dir()
             .unwrap_or_else(|| paths.home().to_path_buf())
             .join("Ancilo")
-    }));
+    }))
+    .with_web(Arc::new(web::AgentWeb(web_search.clone())));
     let mut task_options = options.tasks;
     task_options.search.get_or_insert(search);
     let tasks = ancilo_tasks::TaskRunner::new(
@@ -588,10 +596,7 @@ pub async fn start(paths: Paths, config: Config, options: DaemonOptions) -> Resu
     ancilo_connect::register(&mut registry, clients(&paths, &config));
     register_update_settings(&mut registry, db.clone());
     preferences::register(&mut registry, db.clone(), bus.clone());
-    web::register(
-        &mut registry,
-        web::WebSearch::new(&config, db.clone(), manager.secrets(), bus.clone()),
-    );
+    web::register(&mut registry, web_search);
     register_delegation_eval(
         &mut registry,
         gateway.clone(),

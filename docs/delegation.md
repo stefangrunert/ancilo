@@ -37,9 +37,9 @@ Permissions (`allow`):
 |---|---|
 | `read` | read and search only |
 | `edit` (default) | also change and create files inside the project |
-| `shell` | also run commands – in a sandbox: writing only inside the project and temporary directories, no network |
+| `shell` | also run commands – in a sandbox: no network, writing only inside the project and the command's own temporary folder, no reading of keys and personal data, no inherited environment |
 
-The sandbox uses Seatbelt on macOS and Bubblewrap on Linux; without a sandbox shell commands are refused.
+The sandbox uses Seatbelt on macOS and Bubblewrap on Linux; without a sandbox shell commands are refused. Details: [coding.md](coding.md#the-sandbox).
 
 ## From the command line
 
