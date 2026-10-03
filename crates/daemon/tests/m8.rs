@@ -799,11 +799,12 @@ async fn every_session_action_is_an_operation_and_terminals_need_a_ticket() {
         .unwrap();
     assert!(String::from_utf8_lossy(&backlog.into_data()).contains("marker-42"));
 
-    // A session's terminal opens where its agent works.
+    // A session's terminal opens in the project folder – where the user works
+    // (not in the agent's hidden work area).
     let s = env.op("create_session", json!({"cwd": dir})).await;
     let t2 = env.op("open_terminal", json!({"session": s["id"]})).await;
-    assert_eq!(t2["terminal"]["cwd"], s["workdir"]);
-    assert_ne!(s["workdir"], json!(dir), "isolated work area");
+    assert_eq!(t2["terminal"]["cwd"], s["project"]);
+    assert_ne!(s["workdir"], s["project"], "isolated work area");
     assert_eq!(
         env.op("list_terminals", json!({}))
             .await
@@ -1026,6 +1027,32 @@ async fn a_new_project_needs_only_a_name() {
         .call("create_project", json!({"name": " / "}), true)
         .await;
     assert!(!ok, "a name is needed");
+    // The folder it goes into can be chosen (like Codex) – it must exist.
+    let place = env.home.scratch("my-www");
+    let p = env
+        .op(
+            "create_project",
+            json!({"name": "Vogelquiz", "parent": place}),
+        )
+        .await;
+    assert_eq!(
+        p["root"],
+        place
+            .canonicalize()
+            .unwrap()
+            .join("Vogelquiz")
+            .display()
+            .to_string()
+    );
+    assert!(place.join("Vogelquiz/README.md").is_file());
+    let (ok, _) = env
+        .call(
+            "create_project",
+            json!({"name": "X", "parent": "relative/path"}),
+            true,
+        )
+        .await;
+    assert!(!ok, "only an existing absolute folder");
     env.stop().await;
 }
 

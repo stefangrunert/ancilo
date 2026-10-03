@@ -6250,7 +6250,7 @@
     },
     "/api/v1/ops/create_project": {
       "post": {
-        "description": "Start a new, empty project to build something (a folder in ~/Ancilo, set up for undo)",
+        "description": "Start a new, empty project to build something (a folder named after it in `parent`, default ~/Ancilo, set up for undo)",
         "operationId": "create_project",
         "requestBody": {
           "content": {
@@ -6261,6 +6261,14 @@
                   "name": {
                     "description": "What it is, e.g. \"Meine Rezepte-Webseite\".",
                     "type": "string"
+                  },
+                  "parent": {
+                    "default": null,
+                    "description": "The folder the project folder goes into (default: ~/Ancilo).",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -6319,7 +6327,7 @@
             "description": "Error"
           }
         },
-        "summary": "Start a new, empty project to build something (a folder in ~/Ancilo, set up for undo)",
+        "summary": "Start a new, empty project to build something (a folder named after it in `parent`, default ~/Ancilo, set up for undo)",
         "x-ancilo-consequential": false,
         "x-ancilo-permission": "manage"
       }

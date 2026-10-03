@@ -148,16 +148,23 @@ describe("Quick actions", () => {
     }
   });
 
-  it("build something: a name is enough", async () => {
+  it("build something: a name, then the folder it goes into", async () => {
     at("#/build");
     const { calls } = renderWithDaemon(<App />, {
       ...base,
-      create_project: (i) => ({ root: `/Users/me/Ancilo/${String(i.name)}`, name: String(i.name), git: true, sessions: [] }),
+      choose_folder: () => ({ path: "/Users/me/www" }),
+      create_project: (i) => ({ root: `${String(i.parent)}/${String(i.name)}`, name: String(i.name), git: true, sessions: [] }),
       open_project: (i) => ({ root: i.path, name: "Recipes", git: true, sessions: [] }),
     });
-    await userEvent.type(await screen.findByRole("textbox", { name: "New project – what should it be called?" }), "Recipes{Enter}");
-    await waitFor(() => expect(calls.find((c) => c.op === "create_project")?.input).toEqual({ name: "Recipes" }));
-    await waitFor(() => expect(window.location.hash).toBe("#/project/%2FUsers%2Fme%2FAncilo%2FRecipes"));
+    await userEvent.type(await screen.findByRole("textbox", { name: "New project – what should it be called?" }), "Recipes");
+    // Nothing is created before the folder is chosen.
+    expect(screen.getByRole("button", { name: "Create project" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Choose where it goes…" }));
+    expect(await screen.findByTestId("project-location")).toHaveTextContent("Ancilo creates /Users/me/www/Recipes");
+    expect(calls.find((c) => c.op === "choose_folder")?.input).toEqual({ prompt: "Where should the folder for “Recipes” go?" });
+    await userEvent.click(screen.getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(calls.find((c) => c.op === "create_project")?.input).toEqual({ name: "Recipes", parent: "/Users/me/www" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/project/%2FUsers%2Fme%2Fwww%2FRecipes"));
   });
 });
 

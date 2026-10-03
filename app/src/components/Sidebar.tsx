@@ -256,6 +256,15 @@ export function Sidebar({ route, onHide }: { route: Route; onHide: () => void })
                   actions={
                     renaming?.id === p.root ? undefined : (
                       <>
+                        <button
+                          type="button"
+                          className="icon"
+                          aria-label={t("nav.newChatIn", { name: p.name })}
+                          title={t("nav.newChatIn", { name: p.name })}
+                          onClick={() => navigate({ view: "project", root: p.root })}
+                        >
+                          <Icon name="plus" size={14} />
+                        </button>
                         <RenameButton title={p.name} onClick={() => setRenaming({ id: p.root, title: p.name })} />
                         <button
                           type="button"

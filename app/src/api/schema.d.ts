@@ -490,8 +490,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start a new, empty project to build something (a folder in ~/Ancilo, set up for undo)
-         * @description Start a new, empty project to build something (a folder in ~/Ancilo, set up for undo)
+         * Start a new, empty project to build something (a folder named after it in `parent`, default ~/Ancilo, set up for undo)
+         * @description Start a new, empty project to build something (a folder named after it in `parent`, default ~/Ancilo, set up for undo)
          */
         post: operations["create_project"];
         delete?: never;
@@ -4743,6 +4743,11 @@ export interface operations {
                 "application/json": {
                     /** @description What it is, e.g. "Meine Rezepte-Webseite". */
                     name: string;
+                    /**
+                     * @description The folder the project folder goes into (default: ~/Ancilo).
+                     * @default null
+                     */
+                    parent?: string | null;
                 };
             };
         };

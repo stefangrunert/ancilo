@@ -6,14 +6,16 @@ import { BackToChat } from "./QuickActions";
 import { ErrorNote } from "./ui";
 
 /**
- * "Build something": a new project needs only a name – Ancilo creates the
- * folder. An existing folder can be opened too.
+ * "Build something": a new project is a name and the folder it goes into
+ * (like Codex: you always know where your project lives). An existing
+ * folder can be opened too.
  */
 export function BuildPage() {
   const { t } = useI18n();
   const client = useClient();
   const refresh = useRefresh();
   const [name, setName] = useState("");
+  const [parent, setParent] = useState<string | null>(null);
   const [path, setPath] = useState("");
   const [error, setError] = useState<unknown>(null);
   const opened = async (root: string) => {
@@ -24,7 +26,8 @@ export function BuildPage() {
     e.preventDefault();
     setError(null);
     try {
-      const p = await client.op("create_project", { name });
+      if (!parent) return;
+      const p = await client.op("create_project", { name, parent });
       await opened(p.root);
     } catch (err) {
       setError(err);
@@ -52,13 +55,31 @@ export function BuildPage() {
           <label htmlFor="project-name">
             <strong>{t("build.newLabel")}</strong>
           </label>
+          <input id="project-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("build.namePlaceholder")} autoFocus />
           <div className="row">
-            <input id="project-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("build.namePlaceholder")} autoFocus />
-            <button type="submit" disabled={!name.trim()}>
+            <button
+              type="button"
+              className="secondary"
+              disabled={!name.trim()}
+              onClick={async () => {
+                setError(null);
+                try {
+                  const r = await client.op("choose_folder", { prompt: t("build.chooseWhere", { name: name.trim() }) });
+                  if (r.path) setParent(r.path);
+                } catch (err) {
+                  setError(err);
+                }
+              }}
+            >
+              {parent ? t("build.otherFolder") : t("build.chooseFolder")}
+            </button>
+            <button type="submit" disabled={!name.trim() || !parent}>
               {t("build.create")}
             </button>
           </div>
-          <p className="muted small">{t("build.where")}</p>
+          <p className="muted small" data-testid="project-location">
+            {parent ? t("build.willCreate", { path: `${parent.replace(/\/$/, "")}/${name.trim()}` }) : t("build.where")}
+          </p>
         </form>
         <form className="card stack" onSubmit={(e) => void open(path, e)}>
           <strong>{t("build.openLabel")}</strong>

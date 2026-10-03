@@ -38,6 +38,9 @@ pub struct ReorderSessionsInput {
 pub struct NameInput {
     /// What it is, e.g. "Meine Rezepte-Webseite".
     pub name: String,
+    /// The folder the project folder goes into (default: ~/Ancilo).
+    #[serde(default)]
+    pub parent: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -206,10 +209,10 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
     );
     op!(
         "create_project",
-        "Start a new, empty project to build something (a folder in ~/Ancilo, set up for undo)",
+        "Start a new, empty project to build something (a folder named after it in `parent`, default ~/Ancilo, set up for undo)",
         manage = true,
         conseq = false,
-        |s, i: NameInput| s.create_project(&i.name)
+        |s, i: NameInput| s.create_project(&i.name, i.parent.as_deref())
     );
     op!(
         "rename_project",
@@ -358,7 +361,9 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
         |s, i: TerminalInput| {
             let cwd = match (i.cwd, &i.session) {
                 (Some(c), _) => c,
-                (None, Some(id)) => s.get(id)?.workdir,
+                // The project folder – where the user works; the agent's
+                // changes arrive there once they are kept.
+                (None, Some(id)) => s.get(id)?.project,
                 (None, None) => {
                     return Err(ancilo_core::Error::invalid(
                         "give a directory (cwd) or a session",

@@ -455,7 +455,7 @@ impl Sessions {
 
     /// A new, empty project for something to build: a folder named after it
     /// (in `~/Ancilo`), with git set up so changes can be reviewed and undone.
-    pub fn create_project(&self, name: &str) -> Result<ProjectView> {
+    pub fn create_project(&self, name: &str, parent: Option<&Path>) -> Result<ProjectView> {
         let clean: String = name
             .trim()
             .chars()
@@ -472,7 +472,18 @@ impl Sessions {
         if clean.is_empty() {
             return Err(Error::invalid("give the project a name"));
         }
-        let base = self.inner.projects_dir.lock().unwrap().clone();
+        let base = match parent {
+            Some(p) => {
+                if !p.is_absolute() || !p.is_dir() {
+                    return Err(Error::invalid(format!(
+                        "{} is not a folder on this computer",
+                        p.display()
+                    )));
+                }
+                p.to_path_buf()
+            }
+            None => self.inner.projects_dir.lock().unwrap().clone(),
+        };
         std::fs::create_dir_all(&base)?;
         let mut root = base.join(&clean);
         let mut n = 2;
