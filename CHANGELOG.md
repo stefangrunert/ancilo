@@ -4,6 +4,8 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+## 0.2.0 – 2026-10-03
+
 - **Tasks**: first choose a folder (the dialog opens in Documents), then say what to do – or start from an example. Ancilo works in a copy that holds only what the task changes – a task starts at once, whatever the folder’s size (Documents too); it reads the folder as it is and never writes there. Files dragged onto the input go into the copy – or, if the folder already holds the same file, that one is used; the agent is told which files you gave. You see every change (new, changed, deleted, moved) and keep it, drop it or undo it. Keeping checks the folder first (nothing is written if it changed meanwhile), backs up originals, writes with a journal and rolls back on failure or after a crash. Nothing to set: a task works on its own in its copy; web searches follow the one web search switch, as in chats and coding.
 - **You see the agent work**: what it says on the way ("Let me look at the PDFs …") appears at once, with the steps so far – in tasks and coding, in both views.
 - **Chat projects**: folders Ancilo only reads; chats in them answer from their documents with file and page, and the project page says what could not be read and why. Plain chats no longer see document folders.
