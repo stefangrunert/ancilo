@@ -101,6 +101,10 @@ app-install:
 app-dev:
     packaging/app-local.sh dev
 
+# The download DMG of a built app, styled (packaging/dmg): just dmg <Ancilo.app> <out.dmg>
+dmg APP OUT:
+    packaging/dmg.sh {{APP}} {{OUT}}
+
 # Release packages (CLI archive with llama.cpp, files for the app bundle) – reproducible.
 package *OUT:
     packaging/package.sh {{OUT}}

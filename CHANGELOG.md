@@ -4,6 +4,10 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **A proper install window**: the DMG opens a styled window – Ancilo on the left, Applications on the right, an arrow and one line in English and German between them; no toolbar, no `.app`, nothing hidden in sight (also with hidden files shown). Readable in light and dark mode.
+
+- **Pictures and scans have text now**: photos of receipts (JPEG, PNG, HEIC, TIFF, WebP) and scanned PDFs are read by text recognition – the one built into macOS, on this computer, in a sandbox without network, at low priority. In chats, chat projects and tasks; recognized text is marked (it may have mistakes).
+
 - **Fixed: connecting Claude Code or Codex from the app** failed with "cannot run claude: No such file or directory" – an app starts with a bare search path. Ancilo now finds them where your terminal does (Homebrew, npm, `~/.local/bin`, nvm …), with the `node` npm tools need; if one is not installed, it says so and where to get it.
 
 ## 0.2.0 – 2026-10-03

@@ -77,11 +77,13 @@ build() {
   mkdir -p app/src-tauri/binaries
   cp "$pkg/bin/ancilo" app/src-tauri/binaries/ancilo-aarch64-apple-darwin
   cp "$pkg/libexec/ancilo/llama-server" app/src-tauri/binaries/llama-server-aarch64-apple-darwin
+  cp "$pkg/libexec/ancilo/ancilo-ocr" app/src-tauri/binaries/ancilo-ocr-aarch64-apple-darwin
   (cd app && npm ci --no-audit --no-fund --silent \
     && TAURI_SIGNING_PRIVATE_KEY="$(cat "$key")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
-       npx tauri build --config src-tauri/tauri.release.conf.json)
+       npx tauri build --bundles app --config src-tauri/tauri.release.conf.json)
   unset TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-  cp "$bundle"/dmg/*.dmg "$dist/"
+  say "DMG (the styled window: packaging/dmg)"
+  packaging/dmg.sh "$bundle/macos/Ancilo.app" "$dist/Ancilo_${version}_aarch64.dmg"
   cp "$bundle/macos/Ancilo.app.tar.gz" "$dist/"
   # The manifest the updater reads (releases/latest/download/latest.json).
   node -e '
