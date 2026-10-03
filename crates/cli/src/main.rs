@@ -276,6 +276,10 @@ enum Command {
     Disconnect { client: String },
     /// MCP server on stdin/stdout (started by Claude Code, Codex, …).
     Mcp,
+    /// Reads one document and prints its text as JSON – how the daemon reads
+    /// the user's files, in a sandboxed process of its own.
+    #[command(hide = true)]
+    ExtractDocument { path: std::path::PathBuf },
     /// Print the path of the Ancilo plugin for Claude Code (try it without
     /// installing: `claude --plugin-dir "$(ancilo claude-plugin)"`).
     ClaudePlugin,
@@ -559,6 +563,11 @@ async fn run(cli: Cli) -> Result<()> {
 
     if let Command::Mcp = &cli.command {
         return mcp_bridge(&paths).await;
+    }
+    if let Command::ExtractDocument { path } = &cli.command {
+        let doc = ancilo_docs::extract::extract_file(path)?;
+        println!("{}", serde_json::to_string(&doc)?);
+        return Ok(());
     }
     let client = Client::connect(&paths, true).await?;
     match cli.command {
@@ -1350,7 +1359,7 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Command::Connect { client: target } => connect(&client, &target, false, cli.json).await?,
         Command::Disconnect { client: target } => connect(&client, &target, true, cli.json).await?,
-        Command::Mcp => unreachable!(),
+        Command::Mcp | Command::ExtractDocument { .. } => unreachable!(),
         Command::ClaudePlugin => {
             let v = client.call("claude_plugin_dir", json!({}), true).await?;
             println!("{}", v["path"].as_str().unwrap_or_default());

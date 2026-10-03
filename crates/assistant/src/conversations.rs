@@ -76,6 +76,12 @@ pub struct ConversationMessage {
     /// The web search behind this message: proposed, done (with sources), …
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web: Option<WebNote>,
+    /// Documents sent with this message (its text stays on this computer).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<ancilo_docs::AttachmentView>,
+    /// The answer drew on the user's documents.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub documents: bool,
 }
 
 /// What became of a web search.
@@ -140,6 +146,8 @@ impl ConversationMessage {
             operations: Vec::new(),
             pending: Vec::new(),
             web: None,
+            attachments: Vec::new(),
+            documents: false,
         }
     }
 
@@ -202,6 +210,22 @@ impl Conversation {
 
     /// Whether text from the web went into this conversation – it then never
     /// gets Ancilo's tools (a page could try to give orders).
+    /// The conversation saw the user's documents: it stays with the AI on
+    /// this computer – no cloud model, no tools, every web search asks.
+    pub fn has_documents(&self) -> bool {
+        self.messages
+            .iter()
+            .any(|m| m.documents || !m.attachments.is_empty())
+    }
+
+    /// The documents attached anywhere in the conversation.
+    pub fn attachment_ids(&self) -> Vec<String> {
+        self.messages
+            .iter()
+            .flat_map(|m| m.attachments.iter().map(|a| a.id.clone()))
+            .collect()
+    }
+
     pub fn used_web(&self) -> bool {
         self.messages.iter().any(|m| {
             m.web

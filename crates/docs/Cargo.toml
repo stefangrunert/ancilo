@@ -1,28 +1,32 @@
 [package]
-name = "ancilo-assistant"
-description = "Ancilo assistant: operate Ancilo in natural language through its operations"
+name = "ancilo-docs"
+description = "The user's documents: text from PDF, Word, Excel and plain files – read in a sandboxed process – and attachments for chats"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-ancilo-agent.workspace = true
 ancilo-core.workspace = true
-ancilo-gateway.workspace = true
-ancilo-models.workspace = true
 ancilo-storage.workspace = true
+ancilo-agent.workspace = true
 ancilo-web.workspace = true
-ancilo-docs.workspace = true
+calamine = "0.36"
 chrono.workspace = true
+pdf-extract = "0.12"
+quick-xml = "0.42"
+rusqlite.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+lopdf = "0.42"
+tempfile = "3"
 
 [lints]
 workspace = true

@@ -146,3 +146,38 @@ describe("Web search in a chat", () => {
     await waitFor(() => expect(calls.filter((c) => c.op === "set_web_search").pop()?.input).toEqual({ mode: "ask" }));
   });
 });
+
+// covers: M10-AC-02
+describe("Documents in a chat", () => {
+  it("are attached, read, shown with what they are, sent with the question – and keep the chat local", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    const { calls, container } = chat([], {
+      upload: (i) => {
+        if (String(i.name).endsWith(".exe")) throw { code: "invalid_input", message: "Ancilo cannot read tool.exe" };
+        return { id: "a-1", name: i.name, kind: "pdf", pages: 3, chars: 5000, warnings: [], created_at: "" };
+      },
+      remove_attachment: () => ({ removed: true }),
+      ask: () => ({ answer: "950 Euro [Vertrag.pdf, page 2]", conversation: "c-1", documents: true }),
+    });
+    const input = await waitFor(() => container.querySelector<HTMLInputElement>('input[type="file"]')!);
+    expect(screen.getByRole("button", { name: "Attach a document" })).toBeInTheDocument();
+    await user.upload(input, [new File(["%PDF"], "Vertrag.pdf"), new File(["MZ"], "tool.exe")]);
+    const chips = await screen.findAllByTestId("doc-chip");
+    await waitFor(() => expect(chips[0]).toHaveTextContent("Vertrag.pdfPDF · 3 pages"));
+    await waitFor(() => expect(screen.getAllByTestId("doc-chip")[1]).toHaveTextContent("tool.execannot be read"));
+    expect(screen.getByTestId("local-note")).toHaveTextContent("Stays on this computer");
+    // The unreadable one goes; only what was read is sent along.
+    await user.click(screen.getByRole("button", { name: "Remove tool.exe" }));
+    await user.type(screen.getByRole("textbox", { name: "What should Ancilo do?" }), "Was kostet die Miete?{Enter}");
+    await waitFor(() => expect(calls.find((c) => c.op === "ask")?.input).toEqual({ prompt: "Was kostet die Miete?", conversation: "c-1", attachments: ["a-1"] }));
+    await waitFor(() => expect(screen.queryByTestId("pending-docs")).toBeNull());
+  });
+
+  it("shows a message's documents in its bubble, and the conversation stays local", async () => {
+    const m = { role: "user", text: "Was kostet die Miete?", at: "", attachments: [{ id: "a-1", name: "Vertrag.pdf", kind: "pdf", pages: 3, chars: 5000, warnings: ["shortened"], created_at: "" }] };
+    chat([m, { role: "assistant", text: "950 Euro.", at: "", documents: true }]);
+    const bubble = await screen.findByTestId("user-message");
+    expect(within(bubble).getByTestId("doc-chip")).toHaveTextContent("Vertrag.pdfPDF · 3 pagesonly the beginning was read");
+    expect(screen.getByTestId("local-note")).toBeInTheDocument();
+  });
+});

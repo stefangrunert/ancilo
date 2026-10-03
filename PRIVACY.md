@@ -25,6 +25,8 @@ Ancilo is built to keep your work on your machine.
 
 API keys for cloud providers and the Serper key are stored in the system keychain, never in files or logs. Web search and your documents only ever go to the AI on this computer – never to cloud models.
 
+**Documents you attach to a chat** are read on this computer, in a separate process without network access; Ancilo keeps only their text (in its database, deleted with the conversation), never a copy of the file. A conversation with a document stays with the AI on this computer for good: no cloud model – not even for its earlier messages – and every web search asks first.
+
 ## Claude Code and Codex
 
 When you connect Claude Code or Codex, they call Ancilo locally (MCP). `ancilo claude` starts Claude Code against the local model with a separate configuration directory, so your Claude account credentials are never sent to Ancilo.

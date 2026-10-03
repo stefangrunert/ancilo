@@ -14,6 +14,7 @@ ancilo-compare.workspace = true
 ancilo-index.workspace = true
 ancilo-assistant.workspace = true
 ancilo-sessions.workspace = true
+ancilo-docs.workspace = true
 ancilo-agent.workspace = true
 ancilo-core.workspace = true
 ancilo-eval.workspace = true

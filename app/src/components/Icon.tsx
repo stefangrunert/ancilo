@@ -9,6 +9,8 @@ const paths = {
   computer: "M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zM7 20h10M9 16v4M15 16v4",
   code: "M7 8l-4 4 4 4M17 8l4 4-4 4M14 4l-4 16",
   pulse: "M3 12h4l3 8 4-16 3 8h4",
+  paperclip: "M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3L18 10a3 3 0 0 0-6-6l-6.5 6.5a4.5 4.5 0 0 0 9 9L21 13",
+  lock: "M5 13a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2zM8 11V7a4 4 0 0 1 8 0v4",
   trash: "M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12",
   sidebar: "M4 5h16v14H4zM9 5v14",
   chevron: "M9 6l6 6-6 6",

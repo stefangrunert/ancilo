@@ -186,6 +186,18 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     ALTER TABLE projects ADD COLUMN position INTEGER;
     ALTER TABLE sessions ADD COLUMN position INTEGER;
     "#,
+    // 10: documents attached to chats – their text only, never the file
+    r#"
+    CREATE TABLE attachments (
+        id           TEXT PRIMARY KEY,
+        created_at   TEXT NOT NULL,
+        conversation TEXT,
+        name         TEXT NOT NULL,
+        meta         TEXT NOT NULL,
+        parts        TEXT NOT NULL
+    );
+    CREATE INDEX attachments_conversation ON attachments(conversation);
+    "#,
 ];
 
 #[cfg(test)]

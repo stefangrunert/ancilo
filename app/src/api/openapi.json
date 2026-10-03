@@ -435,6 +435,69 @@
         ],
         "type": "object"
       },
+      "AttachmentView": {
+        "description": "An attached document as the app shows it.",
+        "properties": {
+          "chars": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "conversation": {
+            "description": "The conversation it belongs to, once it was sent.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Kind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pages": {
+            "description": "Pages with text (PDF).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "sheets": {
+            "description": "Sheets (spreadsheets).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "chars",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "CatalogInfo": {
         "properties": {
           "error": {
@@ -820,6 +883,17 @@
           "at": {
             "format": "date-time",
             "type": "string"
+          },
+          "attachments": {
+            "description": "Documents sent with this message (its text stays on this computer).",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentView"
+            },
+            "type": "array"
+          },
+          "documents": {
+            "description": "The answer drew on the user's documents.",
+            "type": "boolean"
           },
           "model": {
             "type": [
@@ -1400,6 +1474,15 @@
           "scores"
         ],
         "type": "object"
+      },
+      "Kind": {
+        "enum": [
+          "text",
+          "pdf",
+          "word",
+          "spreadsheet"
+        ],
+        "type": "string"
       },
       "LeaderboardEntry": {
         "properties": {
@@ -3457,6 +3540,26 @@
           }
         ]
       },
+      "Warning": {
+        "description": "Something worth saying about a document that was read.",
+        "oneOf": [
+          {
+            "const": "no_text",
+            "description": "A PDF without text – probably scanned (text recognition comes later).",
+            "type": "string"
+          },
+          {
+            "const": "shortened",
+            "description": "Only the first part of the text was kept.",
+            "type": "string"
+          },
+          {
+            "const": "rows_left_out",
+            "description": "Only the first rows of a sheet were kept.",
+            "type": "string"
+          }
+        ]
+      },
       "WebNote": {
         "description": "A web search, as a message shows it.",
         "properties": {
@@ -4002,6 +4105,119 @@
         "x-ancilo-permission": "manage"
       }
     },
+    "/api/v1/ops/add_attachment": {
+      "post": {
+        "description": "Reads the file in a sandboxed process (no network, time limit) and keeps only its text. Pass the returned id in `attachments` of `ask`. A conversation with a document stays with the AI on this computer: no cloud model, no tools, and every web search asks first.",
+        "operationId": "add_attachment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "description": "Full path of a PDF, Word (.docx), Excel, CSV or text file.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "title": "AttachPath",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "An attached document as the app shows it.",
+                  "properties": {
+                    "chars": {
+                      "format": "uint",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "conversation": {
+                      "description": "The conversation it belongs to, once it was sent.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "$ref": "#/components/schemas/Kind"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "pages": {
+                      "description": "Pages with text (PDF).",
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "sheets": {
+                      "description": "Sheets (spreadsheets).",
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "warnings": {
+                      "default": [],
+                      "items": {
+                        "$ref": "#/components/schemas/Warning"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "kind",
+                    "chars",
+                    "created_at"
+                  ],
+                  "title": "AttachmentView",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Read a document (PDF, Word, Excel, CSV, text) to ask about it in a chat",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
+      }
+    },
     "/api/v1/ops/add_model": {
       "post": {
         "description": "One step from an address to a running model: plans for this hardware, reuses an existing local copy or downloads with checksum verification, then starts it. Returns immediately; follow progress via events (download.progress, model.running).",
@@ -4244,6 +4460,11 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "documents": {
+                      "default": false,
+                      "description": "The answer drew on the user's documents.",
+                      "type": "boolean"
                     },
                     "grounded": {
                       "default": false,
@@ -4576,6 +4797,14 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "attachments": {
+                    "default": [],
+                    "description": "Documents to ask about (ids from `add_attachment` or the app's\nupload). The conversation then stays with the AI on this computer.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
                   "conversation": {
                     "default": null,
                     "description": "Continue this conversation (the earlier exchange goes along).",
@@ -4659,6 +4888,11 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "documents": {
+                      "default": false,
+                      "description": "The answer drew on the user's documents.",
+                      "type": "boolean"
                     },
                     "grounded": {
                       "default": false,
@@ -7601,6 +7835,118 @@
         "x-ancilo-permission": "read"
       }
     },
+    "/api/v1/ops/get_attachment": {
+      "post": {
+        "description": "What was read of an attached document: kind, pages or sheets, length, warnings",
+        "operationId": "get_attachment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "title": "AttachmentRef",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "An attached document as the app shows it.",
+                  "properties": {
+                    "chars": {
+                      "format": "uint",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "conversation": {
+                      "description": "The conversation it belongs to, once it was sent.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "$ref": "#/components/schemas/Kind"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "pages": {
+                      "description": "Pages with text (PDF).",
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "sheets": {
+                      "description": "Sheets (spreadsheets).",
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "warnings": {
+                      "default": [],
+                      "items": {
+                        "$ref": "#/components/schemas/Warning"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "kind",
+                    "chars",
+                    "created_at"
+                  ],
+                  "title": "AttachmentView",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "What was read of an attached document: kind, pages or sheets, length, warnings",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
+      }
+    },
     "/api/v1/ops/get_conversation": {
       "post": {
         "description": "One conversation with the assistant, with all messages",
@@ -10362,6 +10708,66 @@
           }
         },
         "summary": "Drop an action the assistant proposed",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "manage"
+      }
+    },
+    "/api/v1/ops/remove_attachment": {
+      "post": {
+        "description": "Remove an attached document and its text",
+        "operationId": "remove_attachment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "title": "AttachmentRef",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "removed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "removed"
+                  ],
+                  "title": "Removed",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Remove an attached document and its text",
         "x-ancilo-consequential": false,
         "x-ancilo-permission": "manage"
       }

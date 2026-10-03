@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useI18n } from "../i18n";
+import { Icon } from "./Icon";
 
 /**
  * The input of every chat: grows with its text, Enter sends, Shift+Enter
@@ -15,6 +16,8 @@ export function Composer({
   autoFocus = false,
   extra,
   initial = "",
+  above,
+  onFiles,
 }: {
   label: string;
   placeholder?: string;
@@ -26,9 +29,19 @@ export function Composer({
   /** Controls next to the send button (e.g. a model choice). */
   extra?: ReactNode;
   initial?: string;
+  /** Shown above the input (attached documents). */
+  above?: ReactNode;
+  /** Documents chosen, dropped or pasted – offers the paperclip when set. */
+  onFiles?: (files: File[]) => void;
 }) {
   const { t } = useI18n();
   const [text, setText] = useState(initial);
+  const [dropping, setDropping] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  const take = (list: FileList | null | undefined) => {
+    const files = Array.from(list ?? []);
+    if (files.length > 0 && onFiles) onFiles(files);
+  };
   const [sending, setSending] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
@@ -64,18 +77,58 @@ export function Composer({
     }
   };
   return (
-    <form className="composer" onSubmit={send}>
+    <form
+      className={dropping ? "composer dropping" : "composer"}
+      onSubmit={send}
+      onDragOver={(e) => {
+        if (!onFiles || !e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={() => setDropping(false)}
+      onDrop={(e) => {
+        if (!onFiles) return;
+        e.preventDefault();
+        setDropping(false);
+        take(e.dataTransfer.files);
+      }}
+    >
+      {above}
       <textarea
         ref={area}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKey}
+        onPaste={(e) => {
+          if (onFiles && e.clipboardData.files.length > 0) {
+            e.preventDefault();
+            take(e.clipboardData.files);
+          }
+        }}
         placeholder={placeholder ?? label}
         aria-label={label}
         rows={1}
         disabled={disabled}
       />
       <div className="composer-bar">
+        {onFiles && (
+          <>
+            <button type="button" className="icon attach" aria-label={t("chat.attach")} title={t("chat.attachHint")} onClick={() => picker.current?.click()}>
+              <Icon name="paperclip" />
+            </button>
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              accept=".pdf,.docx,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt,.md,.markdown,.json,.xml,.yaml,.yml,.log,.html,.htm,.eml"
+              onChange={(e) => {
+                take(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </>
+        )}
         {extra}
         <span className="hint">{t("chat.hint")}</span>
         <span className="spacer" />
@@ -121,10 +174,11 @@ export function ChatLayout({ children, composer, follow }: { children: ReactNode
   );
 }
 
-export function UserBubble({ text }: { text: string }) {
+export function UserBubble({ text, files }: { text: string; files?: ReactNode }) {
   return (
     <div className="bubble-row user">
       <div className="bubble" data-testid="user-message">
+        {files}
         {text}
       </div>
     </div>

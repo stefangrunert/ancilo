@@ -4,7 +4,8 @@
 //! server together and returns a handle. The CLI runs it in the foreground
 //! (`ancilo daemon run`); tests run it in-process.
 
-pub mod knowledge;
+pub mod docs;
+mod knowledge;
 pub mod preferences;
 pub mod secrets;
 pub mod system;
@@ -581,7 +582,27 @@ pub async fn start(
         config.clone(),
         paths.logs_dir(),
     );
-    let assistant = ancilo_assistant::Assistant::new(gateway.clone(), bus.clone(), db.clone());
+    // Documents are read by the `ancilo` program itself, in a sandboxed
+    // process; a test daemon (another program) reads them in-process.
+    let reader = config.ancilo_bin.clone().or_else(|| {
+        std::env::current_exe()
+            .ok()
+            .filter(|p| p.file_name().is_some_and(|n| n == "ancilo"))
+    });
+    let attachments = ancilo_docs::Attachments::new(
+        db.clone(),
+        ancilo_docs::Extractor::new(
+            reader,
+            paths.home().join("tmp").join("documents"),
+            vec![paths.home().to_path_buf()],
+        ),
+    );
+    if let Err(e) = attachments.prune() {
+        tracing::warn!(error = %e.message(), "removing unsent attachments failed");
+    }
+    docs::register(&mut registry, attachments.clone());
+    let assistant = ancilo_assistant::Assistant::new(gateway.clone(), bus.clone(), db.clone())
+        .with_documents(attachments.clone());
     ancilo_assistant::ops::register(&mut registry, assistant.clone());
     ancilo_sessions::ops::register(&mut registry, sessions.clone());
     let registry_cell: Arc<std::sync::OnceLock<Arc<Registry>>> = Arc::default();
@@ -640,7 +661,9 @@ pub async fn start(
         .with_state(terminals);
     let app = ancilo_server::router_with(
         state,
-        ancilo_gateway::routes::router(gateway.clone()).merge(ancilo_mcp::router()),
+        ancilo_gateway::routes::router(gateway.clone())
+            .merge(ancilo_mcp::router())
+            .merge(docs::routes(attachments)),
         pty,
     );
     let stop = shutdown.clone();

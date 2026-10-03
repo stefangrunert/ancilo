@@ -4,6 +4,7 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **Documents in chats**: attach PDF, Word, Excel, CSV or text files (paperclip, drag and drop, paste). They are read on this computer in a sandboxed process; answers name the file and page or sheet. A conversation with documents stays local – no cloud model, no tools, every web search asks.
 - **Three areas: Chat, Tasks, Code** – tabs with symbols at the top of the left column. *Set up* and *System* moved into the header, which in the app is the window's title bar. The left column can be resized and remembers its width. Tasks – working with your files – is being built.
 - **Coding Tasks**: what Claude Code and Codex hand to Ancilo is now called *Coding Tasks* (in every language) and lives in the Code area, together with what such tasks may do.
 - **A model that works keeps working.** When a conversation outgrows the model's context, Ancilo restarts it with a larger one only if that fits right now – counting the memory the model frees itself, and waiting until the system really reports it free. If the restart fails anyway, the model comes back as it was. Before, the model could be gone with "only … GB are free".

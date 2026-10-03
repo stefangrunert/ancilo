@@ -147,6 +147,7 @@ pub async fn run(
                 kind: None,
                 greeting: None,
                 web: None,
+                attachments: Vec::new(),
             })
             .await;
         let (passed, failure, answer, operations) = match result {

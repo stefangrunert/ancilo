@@ -681,6 +681,30 @@ async fn cloud_models_work_keep_their_key_secret_and_never_get_code() {
         !sent.contains("Classify the user"),
         "no web planning: {sent}"
     );
+    // A conversation with an attached document stays on this computer
+    // (decision `2026-10-03-drei-bereiche`).
+    let contract = docs.join("vertrag.txt");
+    std::fs::write(&contract, "Die Miete beträgt 950 Euro.\n").unwrap();
+    let doc = env.op("add_attachment", json!({"path": contract})).await;
+    let before = cloud.requests().len();
+    let (ok, err) = env
+        .call(
+            "ask",
+            json!({"prompt": "Was kostet die Miete?", "model": id, "kind": "chat", "remember": true, "attachments": [doc["id"]]}),
+            false,
+        )
+        .await;
+    assert!(
+        !ok && err
+            .to_string()
+            .contains("stay with the AI on this computer"),
+        "{err}"
+    );
+    assert_eq!(
+        cloud.requests().len(),
+        before,
+        "the document never reached the cloud"
+    );
     env.op("assign_role", json!({"role": "default", "model": chat}))
         .await;
     // Removing the model removes its key.

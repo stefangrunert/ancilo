@@ -1,7 +1,10 @@
 // The app talks to the daemon only through its HTTP API: operations
 // (`POST /api/v1/ops/<name>`) and events (SSE) – the same surface as CLI, MCP
 // and the assistant.
-import type { paths } from "./schema";
+import type { components, paths } from "./schema";
+
+/** A document read for a chat (its text stays on this computer). */
+export type AttachmentView = components["schemas"]["AttachmentView"];
 
 type OpPath = Extract<keyof paths, `/api/v1/ops/${string}`>;
 export type OpName = OpPath extends `/api/v1/ops/${infer N}` ? N : never;
@@ -100,6 +103,26 @@ export class Client {
       throw new ApiError(err.code ?? "internal", err.message ?? `HTTP ${res.status}`, res.status);
     }
     return body as OpOutput<N>;
+  }
+
+  /** Sends a document to read (PDF, Word, Excel, CSV, text): only its text is kept. */
+  async attach(name: string, file: Blob): Promise<AttachmentView> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.base}/api/v1/attachments?name=${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${this.token}`, "content-type": "application/octet-stream" },
+        body: file,
+      });
+    } catch {
+      throw new OfflineError("Ancilo is not reachable");
+    }
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      const err = body?.error ?? {};
+      throw new ApiError(err.code ?? "internal", err.message ?? `HTTP ${res.status}`, res.status);
+    }
+    return body as AttachmentView;
   }
 
   async health(): Promise<boolean> {

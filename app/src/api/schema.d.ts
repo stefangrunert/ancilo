@@ -80,6 +80,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ops/add_attachment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read a document (PDF, Word, Excel, CSV, text) to ask about it in a chat
+         * @description Reads the file in a sandboxed process (no network, time limit) and keeps only its text. Pass the returned id in `attachments` of `ask`. A conversation with a document stays with the AI on this computer: no cloud model, no tools, and every web search asks first.
+         */
+        post: operations["add_attachment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ops/add_model": {
         parameters: {
             query?: never;
@@ -757,6 +777,26 @@ export interface paths {
          * @description Statistics of model calls: outcomes, reliability interventions, latency
          */
         post: operations["gateway_stats"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ops/get_attachment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What was read of an attached document: kind, pages or sheets, length, warnings
+         * @description What was read of an attached document: kind, pages or sheets, length, warnings
+         */
+        post: operations["get_attachment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1477,6 +1517,26 @@ export interface paths {
          * @description Drop an action the assistant proposed
          */
         post: operations["reject_action"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ops/remove_attachment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove an attached document and its text
+         * @description Remove an attached document and its text
+         */
+        post: operations["remove_attachment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2510,6 +2570,30 @@ export interface components {
             /** @description e.g. `+12 −3 in 2 files` (median run by size) */
             typical_diff?: string | null;
         };
+        /** @description An attached document as the app shows it. */
+        AttachmentView: {
+            /** Format: uint */
+            chars: number;
+            /** @description The conversation it belongs to, once it was sent. */
+            conversation?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            kind: components["schemas"]["Kind"];
+            name: string;
+            /**
+             * Format: uint32
+             * @description Pages with text (PDF).
+             */
+            pages?: number | null;
+            /**
+             * Format: uint32
+             * @description Sheets (spreadsheets).
+             */
+            sheets?: number | null;
+            /** @default [] */
+            warnings: components["schemas"]["Warning"][];
+        };
         CatalogInfo: {
             /** @description Why a newer list could not be fetched (the bundled one is used). */
             error?: string | null;
@@ -2634,6 +2718,10 @@ export interface components {
         ConversationMessage: {
             /** Format: date-time */
             at: string;
+            /** @description Documents sent with this message (its text stays on this computer). */
+            attachments?: components["schemas"]["AttachmentView"][];
+            /** @description The answer drew on the user's documents. */
+            documents?: boolean;
             model?: string | null;
             /** @description Operations the assistant ran or proposed for this answer. */
             operations?: components["schemas"]["OperationCall"][];
@@ -2788,6 +2876,8 @@ export interface components {
             note: string;
             scores: components["schemas"]["JudgeScore"][];
         };
+        /** @enum {string} */
+        Kind: "text" | "pdf" | "word" | "spreadsheet";
         LeaderboardEntry: {
             /** Format: uint64 */
             duration_p50_ms?: number | null;
@@ -3383,6 +3473,8 @@ export interface components {
         /** @enum {string} */
         Via: "explicit" | "kind" | "role" | "default" | "ab_test";
         View: "simple" | "pro";
+        /** @description Something worth saying about a document that was read. */
+        Warning: "no_text" | "shortened" | "rows_left_out";
         /** @description A web search, as a message shows it. */
         WebNote: {
             /** @description Why the search failed. */
@@ -3644,6 +3736,64 @@ export interface operations {
             };
         };
     };
+    add_attachment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Full path of a PDF, Word (.docx), Excel, CSV or text file. */
+                    path: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uint */
+                        chars: number;
+                        /** @description The conversation it belongs to, once it was sent. */
+                        conversation?: string | null;
+                        /** Format: date-time */
+                        created_at: string;
+                        id: string;
+                        kind: components["schemas"]["Kind"];
+                        name: string;
+                        /**
+                         * Format: uint32
+                         * @description Pages with text (PDF).
+                         */
+                        pages?: number | null;
+                        /**
+                         * Format: uint32
+                         * @description Sheets (spreadsheets).
+                         */
+                        sheets?: number | null;
+                        /** @default [] */
+                        warnings: components["schemas"]["Warning"][];
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     add_model: {
         parameters: {
             query?: never;
@@ -3755,6 +3905,11 @@ export interface operations {
                         answer: string;
                         /** @description The conversation the exchange was kept in. */
                         conversation?: string | null;
+                        /**
+                         * @description The answer drew on the user's documents.
+                         * @default false
+                         */
+                        documents: boolean;
                         /**
                          * @description Passages from the knowledge base went along with the request.
                          * @default false
@@ -3938,6 +4093,12 @@ export interface operations {
             content: {
                 "application/json": {
                     /**
+                     * @description Documents to ask about (ids from `add_attachment` or the app's
+                     *     upload). The conversation then stays with the AI on this computer.
+                     * @default []
+                     */
+                    attachments?: string[];
+                    /**
                      * @description Continue this conversation (the earlier exchange goes along).
                      * @default null
                      */
@@ -3987,6 +4148,11 @@ export interface operations {
                         answer: string;
                         /** @description The conversation the exchange was kept in. */
                         conversation?: string | null;
+                        /**
+                         * @description The answer drew on the user's documents.
+                         * @default false
+                         */
+                        documents: boolean;
                         /**
                          * @description Passages from the knowledge base went along with the request.
                          * @default false
@@ -5444,6 +5610,63 @@ export interface operations {
                         requests: number;
                         /** Format: uint64 */
                         with_tools: number;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_attachment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uint */
+                        chars: number;
+                        /** @description The conversation it belongs to, once it was sent. */
+                        conversation?: string | null;
+                        /** Format: date-time */
+                        created_at: string;
+                        id: string;
+                        kind: components["schemas"]["Kind"];
+                        name: string;
+                        /**
+                         * Format: uint32
+                         * @description Pages with text (PDF).
+                         */
+                        pages?: number | null;
+                        /**
+                         * Format: uint32
+                         * @description Sheets (spreadsheets).
+                         */
+                        sheets?: number | null;
+                        /** @default [] */
+                        warnings: components["schemas"]["Warning"][];
                     };
                 };
             };
@@ -7015,6 +7238,43 @@ export interface operations {
                 content: {
                     "application/json": {
                         rejected: boolean;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    remove_attachment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        removed: boolean;
                     };
                 };
             };

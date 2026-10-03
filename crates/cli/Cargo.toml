@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 ancilo-core.workspace = true
 ancilo-daemon.workspace = true
+ancilo-docs.workspace = true
 ancilo-models.workspace = true
 anyhow.workspace = true
 clap.workspace = true

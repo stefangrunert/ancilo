@@ -498,3 +498,111 @@ steps:
     assert_eq!(last, "Gefunden.", "{s}");
     env.stop().await;
 }
+
+// covers: M10-AC-02
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_chat_answers_from_an_attached_document_and_keeps_it_local() {
+    let script = r#"
+steps:
+  # The document's text goes along, with its source.
+  - expect: { last_user_contains: "Was kostet", any_message_contains: "[Mietvertrag.txt]", has_tools: false }
+    respond: { text: "Die Miete beträgt 950 Euro [Mietvertrag.txt]." }
+  # Web search set to search by itself – with a document it still asks.
+  - expect: { any_message_contains: "Classify the user's last message" }
+    respond: { text: '{"type": "facts", "query": "Miete Oslo", "topic": "Oslo", "lang": "de"}' }
+  # About Ancilo – yet no tools in a conversation with documents.
+  - expect: { any_message_contains: "Classify the user's last message" }
+    respond: { text: '{"type": "chat", "query": "", "topic": "", "lang": "de"}' }
+  - expect: { last_user_contains: "Modelle", has_tools: false }
+    respond: { text: "Dafür öffne bitte einen neuen Chat." }
+"#;
+    let env = Env::start(script).await;
+    let d = env.d.as_ref().unwrap();
+    let upload = |name: &'static str, body: &'static [u8]| {
+        reqwest::Client::new()
+            .post(format!("{}/api/v1/attachments", d.url()))
+            .query(&[("name", name)])
+            .bearer_auth(&d.token)
+            .body(body)
+            .send()
+    };
+    // Something Ancilo cannot read: refused with the reason.
+    let r = upload("tool.exe", b"MZ").await.unwrap();
+    assert_eq!(r.status(), 400);
+    let e: Value = r.json().await.unwrap();
+    assert!(
+        e["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("reads PDF, Word"),
+        "{e}"
+    );
+    // Without a token nothing is read.
+    let r = reqwest::Client::new()
+        .post(format!("{}/api/v1/attachments?name=a.txt", d.url()))
+        .body("x")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+    let doc: Value = upload(
+        "Mietvertrag.txt",
+        "§ 3 Miete\nDie Miete beträgt 950 Euro im Monat.".as_bytes(),
+    )
+    .await
+    .unwrap()
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(
+        (doc["name"].as_str(), doc["kind"].as_str()),
+        (Some("Mietvertrag.txt"), Some("text")),
+        "{doc}"
+    );
+    let r = env
+        .op(
+            "ask",
+            json!({"prompt": "Was kostet die Miete?", "remember": true, "kind": "chat", "attachments": [doc["id"]]}),
+        )
+        .await;
+    assert_eq!(r["answer"], "Die Miete beträgt 950 Euro [Mietvertrag.txt].");
+    assert_eq!(r["documents"], true);
+    let c = r["conversation"].as_str().unwrap().to_string();
+    let conv = env.op("get_conversation", json!({"id": c})).await;
+    assert_eq!(
+        conv["messages"][0]["attachments"][0]["name"],
+        "Mietvertrag.txt"
+    );
+    assert_eq!(conv["messages"][1]["documents"], true);
+
+    env.op(
+        "set_web_search",
+        json!({"provider": "wikipedia", "mode": "auto"}),
+    )
+    .await;
+    let r = env
+        .op(
+            "ask",
+            json!({"prompt": "Wie hoch sind Mieten in Oslo?", "conversation": c}),
+        )
+        .await;
+    assert_eq!(r["web"]["state"], "proposed", "{r}");
+    assert!(
+        env.web.requests().is_empty(),
+        "nothing went out without the OK"
+    );
+    let r = env
+        .op(
+            "ask",
+            json!({"prompt": "Welche Modelle hat Ancilo?", "conversation": c}),
+        )
+        .await;
+    assert_eq!(r["answer"], "Dafür öffne bitte einen neuen Chat.", "{r}");
+    assert!(r["operations"].as_array().unwrap().is_empty());
+
+    // Deleting the conversation deletes the document's text.
+    env.op("delete_conversation", json!({"id": c})).await;
+    let (ok, _) = env.call("get_attachment", json!({"id": doc["id"]})).await;
+    assert!(!ok, "the text is gone");
+    env.stop().await;
+}

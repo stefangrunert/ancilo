@@ -7,6 +7,7 @@ import { useClient, useLive, useOp, useRefresh } from "../state/store";
 import { ChatLayout, Composer, Thinking, UserBubble } from "./Chat";
 import { Markdown } from "./Markdown";
 import { BackToChat, greetingOf, QuickActions } from "./QuickActions";
+import { DocChip, LocalNote, PendingDocs, usePendingDocs } from "./Documents";
 import { ErrorNote } from "./ui";
 import { WebSwitch } from "./WebSearch";
 
@@ -280,15 +281,19 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
   const [inflight, setInflight] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [searching, setSearching] = useState(false);
+  const pending = usePendingDocs();
   const messages = id ? (conversation.data?.messages ?? []) : [];
+  const local = messages.some((m) => m.documents || (m.attachments ?? []).length > 0) || pending.ids.length > 0;
   const liveIds = new Set((pendingActions.data ?? []).map((p) => p.id));
   const greeting = id ? null : greetingOf(kind, t);
 
   const ask = async (prompt: string) => {
     setError(null);
     setInflight(prompt);
+    const sent = pending.ids.length > 0 ? { attachments: pending.ids } : {};
     try {
-      const r = await client.op("ask", id ? { prompt, conversation: id } : { prompt, remember: true, kind, greeting: greeting?.text ?? null });
+      const r = await client.op("ask", id ? { prompt, conversation: id, ...sent } : { prompt, remember: true, kind, greeting: greeting?.text ?? null, ...sent });
+      pending.clear();
       await refresh("get_conversation", "list_conversations", "pending_actions");
       if (!id && r.conversation) navigate({ view: "chat", id: r.conversation }, true);
     } catch (e) {
@@ -315,8 +320,24 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
   // Setup chats are about Ancilo itself: no web there.
   const webSwitch = kind !== "setup" ? <WebSwitch onError={setError} /> : undefined;
 
+  // Setup chats are about Ancilo itself: no documents there either.
+  const docs = kind !== "setup" && (!id || conversation.data?.kind !== "setup");
   const composer = (
-    <Composer label={t("assistant.placeholder")} placeholder={t(greeting ? "assistant.placeholderReply" : "assistant.placeholderLong")} onSend={ask} busy={inflight !== null || searching} autoFocus extra={webSwitch} />
+    <Composer
+      label={t("assistant.placeholder")}
+      placeholder={t(greeting ? "assistant.placeholderReply" : "assistant.placeholderLong")}
+      onSend={ask}
+      busy={inflight !== null || searching || pending.reading}
+      autoFocus
+      extra={webSwitch}
+      onFiles={docs ? pending.add : undefined}
+      above={
+        <>
+          {local && <LocalNote />}
+          <PendingDocs docs={pending.docs} onRemove={pending.remove} />
+        </>
+      }
+    />
   );
   // A new plain chat: what one can do here.
   if (!id && !greeting && !inflight && messages.length === 0) {
@@ -347,7 +368,19 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
       )}
       {messages.map((m, i) =>
         m.role === "user" ? (
-          <UserBubble key={i} text={m.text} />
+          <UserBubble
+            key={i}
+            text={m.text}
+            files={
+              (m.attachments ?? []).length > 0 && (
+                <span className="doc-row">
+                  {(m.attachments ?? []).map((a) => (
+                    <DocChip key={a.id} name={a.name} view={a} />
+                  ))}
+                </span>
+              )
+            }
+          />
         ) : (
           <Reply key={i} m={m} live={liveIds} onAsk={pick} />
         ),

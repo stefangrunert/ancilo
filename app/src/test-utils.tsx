@@ -16,8 +16,10 @@ export function renderWithDaemon(ui: ReactNode, ops: Record<string, Handler>) {
       // An open stream that never sends anything.
       return new Response(new ReadableStream({ start() {} }), { status: 200 });
     }
-    const op = u.split("/api/v1/ops/")[1] ?? "";
-    const input = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    // A document sent to read: handled like an operation "upload" with its name.
+    const upload = u.includes("/api/v1/attachments");
+    const op = upload ? "upload" : (u.split("/api/v1/ops/")[1] ?? "");
+    const input = upload ? { name: new URL(u, "http://x").searchParams.get("name") } : (JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
     const confirmed = (init?.headers as Record<string, string>)["x-ancilo-confirm"] === "true";
     calls.push({ op, input, confirmed });
     const h = ops[op];

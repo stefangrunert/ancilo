@@ -117,6 +117,10 @@ pub fn register(registry: &mut Registry, assistant: Assistant) {
             .handler(move |_ctx, i: ConversationRef| {
                 let a = a.clone();
                 async move {
+                    // The documents' text goes with the conversation.
+                    if let Some(d) = a.documents() {
+                        d.forget_conversation(&i.id)?;
+                    }
                     a.conversations()
                         .delete(&i.id)
                         .map(|_| Deleted { deleted: true })
