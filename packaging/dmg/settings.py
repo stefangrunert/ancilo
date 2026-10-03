@@ -15,7 +15,8 @@ files = [app]
 symlinks = {"Applications": "/Applications"}
 icon = defines["volicon"]  # noqa: F821
 badge_icon = None
-hide_extensions = [name]
+# The ".app" stays: hiding it puts Finder information on the signed app,
+# which a strict signature check rejects.
 
 background = defines["background"]  # noqa: F821
 show_status_bar = False
