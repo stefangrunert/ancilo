@@ -114,6 +114,7 @@ th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line
 
 /* The handle between the left column and the page. */
 .resizer { cursor: col-resize; background: var(--sidebar); border-right: 1px solid var(--line); touch-action: none; }
+body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none; }
 .resizer:hover, .resizer:focus-visible { background: color-mix(in srgb, var(--accent) 35%, var(--sidebar)); outline: none; }
 
 /* The three areas on top of the left column; only symbols when it is narrow. */

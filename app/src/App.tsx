@@ -50,17 +50,27 @@ function useSidebarWidth(): [number, (w: number) => void] {
   return [width, set];
 }
 
-/** The handle between the left column and the page. */
+/** The handle between the left column and the page. Dragging follows the
+ * pointer over the whole window (not every engine keeps a pointer capture). */
 function Resizer({ width, onChange }: { width: number; onChange: (w: number) => void }) {
   const { t } = useI18n();
-  const drag = useRef<{ x: number; w: number } | null>(null);
+  const change = useRef(onChange);
+  change.current = onChange;
   const down = (e: PointerEvent<HTMLDivElement>) => {
-    drag.current = { x: e.clientX, w: width };
-    // Keeps following the pointer outside the handle (not in every test DOM).
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-  };
-  const move = (e: PointerEvent<HTMLDivElement>) => {
-    if (drag.current) onChange(drag.current.w + e.clientX - drag.current.x);
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const [x0, w0] = [e.clientX, width];
+    const move = (ev: globalThis.PointerEvent) => change.current(w0 + ev.clientX - x0);
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      document.body.classList.remove("resizing");
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    document.body.classList.add("resizing");
   };
   const key = (e: KeyboardEvent<HTMLDivElement>) => {
     const step = e.shiftKey ? 40 : 10;
@@ -83,8 +93,6 @@ function Resizer({ width, onChange }: { width: number; onChange: (w: number) => 
       tabIndex={0}
       title={t("nav.resizeHint")}
       onPointerDown={down}
-      onPointerMove={move}
-      onPointerUp={() => (drag.current = null)}
       onDoubleClick={() => onChange(WIDTH.start)}
       onKeyDown={key}
     />
