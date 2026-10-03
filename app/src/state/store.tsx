@@ -50,6 +50,8 @@ export function queriesFor(kind: string): string[][] {
       return kind === "agent.file_changed" ? [["get_session"], ["session_diff"]] : [];
     case "terminal":
       return [["list_terminals"]];
+    case "library":
+      return [["folder_documents"]];
     default:
       return [];
   }

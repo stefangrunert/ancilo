@@ -600,9 +600,12 @@ pub async fn start(
     if let Err(e) = attachments.prune() {
         tracing::warn!(error = %e.message(), "removing unsent attachments failed");
     }
-    docs::register(&mut registry, attachments.clone());
+    let library =
+        ancilo_docs::library::Library::new(db.clone(), attachments.extractor(), Some(bus.clone()));
+    docs::register(&mut registry, attachments.clone(), library.clone());
     let assistant = ancilo_assistant::Assistant::new(gateway.clone(), bus.clone(), db.clone())
-        .with_documents(attachments.clone());
+        .with_documents(attachments.clone())
+        .with_library(library.clone());
     ancilo_assistant::ops::register(&mut registry, assistant.clone());
     ancilo_sessions::ops::register(&mut registry, sessions.clone());
     let registry_cell: Arc<std::sync::OnceLock<Arc<Registry>>> = Arc::default();
@@ -616,7 +619,16 @@ pub async fn start(
     ancilo_tasks::ops::register(&mut registry, tasks.clone());
     ancilo_connect::register(&mut registry, clients(&paths, &config));
     register_update_settings(&mut registry, db.clone());
-    preferences::register(&mut registry, db.clone(), bus.clone());
+    preferences::register(
+        &mut registry,
+        db.clone(),
+        bus.clone(),
+        Some(library.clone()),
+    );
+    // Chat projects: what changed in their folders is read in the background.
+    for folder in preferences::load(&db).documents {
+        library.refresh_soon(&folder);
+    }
     web::register(&mut registry, web_search);
     register_delegation_eval(
         &mut registry,

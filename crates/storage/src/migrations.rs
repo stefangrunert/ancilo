@@ -198,6 +198,20 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX attachments_conversation ON attachments(conversation);
     "#,
+    // 11: chat projects – a folder's documents as text, and the folder of a chat
+    r#"
+    CREATE TABLE library (
+        folder  TEXT NOT NULL,
+        path    TEXT NOT NULL,
+        size    INTEGER NOT NULL,
+        mtime   INTEGER NOT NULL,
+        parts   TEXT,
+        error   TEXT,
+        read_at TEXT NOT NULL,
+        PRIMARY KEY (folder, path)
+    );
+    ALTER TABLE conversations ADD COLUMN folder TEXT;
+    "#,
 ];
 
 #[cfg(test)]

@@ -763,6 +763,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ops/folder_documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What Ancilo has read of a chat project's folder: documents read, still reading, and what could not be read and why
+         * @description What Ancilo has read of a chat project's folder: documents read, still reading, and what could not be read and why
+         */
+        post: operations["folder_documents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ops/gateway_stats": {
         parameters: {
             query?: never;
@@ -1417,6 +1437,26 @@ export interface paths {
          * @description Rate a finished comparison (reveals the models of a blind one)
          */
         post: operations["rate_comparison"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ops/read_folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read a chat project's folder again: new and changed documents, in the background
+         * @description Read a chat project's folder again: new and changed documents, in the background
+         */
+        post: operations["read_folder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2707,6 +2747,8 @@ export interface components {
         ConversationInfo: {
             /** Format: date-time */
             created_at: string;
+            /** @description The chat project (a folder Ancilo reads) it belongs to. */
+            folder?: string | null;
             id: string;
             kind: components["schemas"]["ChatKind"];
             /** Format: uint */
@@ -2965,6 +3007,12 @@ export interface components {
             /** @description Human description of the origin. */
             source: string;
             status: components["schemas"]["ModelStatus"];
+        };
+        /** @description A file that was not read, and why. */
+        NotRead: {
+            /** @description Relative to the folder. */
+            path: string;
+            reason: string;
         };
         OperationCall: {
             input: unknown;
@@ -4103,6 +4151,12 @@ export interface operations {
                      * @default null
                      */
                     conversation?: string | null;
+                    /**
+                     * @description A new conversation in this chat project (a folder Ancilo only reads):
+                     *     its documents go along with every question.
+                     * @default null
+                     */
+                    folder?: string | null;
                     /**
                      * @description Ancilo's words a new conversation starts with (shown in the app before
                      *     the user wrote anything).
@@ -5560,6 +5614,68 @@ export interface operations {
             };
         };
     };
+    folder_documents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A chat project's folder. */
+                    folder: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uint
+                         * @description Characters of text kept.
+                         */
+                        chars: number;
+                        folder: string;
+                        /** @description Files that could not be read – with the reason. */
+                        not_read: components["schemas"]["NotRead"][];
+                        /**
+                         * Format: uint
+                         * @description Documents still to read in a running pass.
+                         */
+                        pending: number;
+                        /**
+                         * Format: uint
+                         * @description Documents read (with text).
+                         */
+                        read: number;
+                        /** @description Reading is going on now. */
+                        reading: boolean;
+                        /**
+                         * @description More documents than Ancilo reads in one folder ([`MAX_FILES`]).
+                         * @default false
+                         */
+                        too_many: boolean;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     gateway_stats: {
         parameters: {
             query?: never;
@@ -5706,6 +5822,8 @@ export interface operations {
                     "application/json": {
                         /** Format: date-time */
                         created_at: string;
+                        /** @description The chat project (a folder Ancilo reads) it belongs to. */
+                        folder?: string | null;
                         id: string;
                         kind: components["schemas"]["ChatKind"];
                         messages: components["schemas"]["ConversationMessage"][];
@@ -7025,6 +7143,68 @@ export interface operations {
             };
         };
     };
+    read_folder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A chat project's folder. */
+                    folder: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uint
+                         * @description Characters of text kept.
+                         */
+                        chars: number;
+                        folder: string;
+                        /** @description Files that could not be read – with the reason. */
+                        not_read: components["schemas"]["NotRead"][];
+                        /**
+                         * Format: uint
+                         * @description Documents still to read in a running pass.
+                         */
+                        pending: number;
+                        /**
+                         * Format: uint
+                         * @description Documents read (with text).
+                         */
+                        read: number;
+                        /** @description Reading is going on now. */
+                        reading: boolean;
+                        /**
+                         * @description More documents than Ancilo reads in one folder ([`MAX_FILES`]).
+                         * @default false
+                         */
+                        too_many: boolean;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     recommend_models: {
         parameters: {
             query?: never;
@@ -7470,6 +7650,8 @@ export interface operations {
                     "application/json": {
                         /** Format: date-time */
                         created_at: string;
+                        /** @description The chat project (a folder Ancilo reads) it belongs to. */
+                        folder?: string | null;
                         id: string;
                         kind: components["schemas"]["ChatKind"];
                         /** Format: uint */

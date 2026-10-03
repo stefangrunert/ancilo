@@ -7,7 +7,9 @@
 //! a document stays with the AI on this computer (see the assistant).
 
 pub mod extract;
+pub mod library;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -343,50 +345,79 @@ impl Attachments {
     /// else the passages that fit `query` best – in document order, each with
     /// its source (`[file, page 3]`).
     pub fn passages(&self, ids: &[String], query: &str) -> Result<Vec<String>> {
-        let mut chunks: Vec<(String, String)> = Vec::new();
-        let mut whole: Vec<(String, String)> = Vec::new();
+        let mut docs = Vec::new();
         for id in ids {
-            let v = self.view(id)?;
-            for p in self.parts(id)? {
-                let label = source(&v.name, p.at.as_ref());
-                for c in ancilo_web::rank::passages(&p.text) {
-                    chunks.push((label.clone(), c));
-                }
-                whole.push((label, p.text));
-            }
+            docs.push((self.view(id)?.name, self.parts(id)?));
         }
-        let total: usize = whole.iter().map(|(_, t)| t.chars().count()).sum();
-        if total <= PASSAGE_BUDGET {
-            return Ok(whole
-                .into_iter()
-                .filter(|(_, t)| !t.trim().is_empty())
-                .map(|(l, t)| format!("{l}\n{}", t.trim()))
-                .collect());
-        }
-        let texts: Vec<String> = chunks.iter().map(|(_, t)| t.clone()).collect();
-        let scores = ancilo_web::rank::scores(&texts, query);
-        let mut order: Vec<usize> = (0..chunks.len()).collect();
-        order.sort_by(|a, b| scores[*b].total_cmp(&scores[*a]).then(a.cmp(b)));
-        let mut picked = Vec::new();
-        let mut used = 0;
-        for i in order {
-            let n = chunks[i].1.chars().count();
-            if used + n > PASSAGE_BUDGET {
-                continue;
-            }
-            used += n;
-            picked.push(i);
-        }
-        picked.sort();
-        Ok(picked
-            .into_iter()
-            .map(|i| format!("{}\n{}", chunks[i].0, chunks[i].1))
-            .collect())
+        Ok(choose(&docs, query, PASSAGE_BUDGET))
+    }
+
+    /// The reader, for a [`library::Library`] to share.
+    pub fn extractor(&self) -> Arc<Extractor> {
+        self.extractor.clone()
     }
 }
 
+/// Text of documents (name, parts) for a question: all of it when it fits
+/// `budget`, else the passages that fit `query` best, in document order –
+/// each headed by its source.
+pub(crate) fn choose(docs: &[(String, Vec<Part>)], query: &str, budget: usize) -> Vec<String> {
+    let mut chunks: Vec<(String, String)> = Vec::new();
+    let mut whole: Vec<(String, String)> = Vec::new();
+    for (name, parts) in docs {
+        for p in parts {
+            let label = source(name, p.at.as_ref());
+            for c in ancilo_web::rank::passages(&p.text) {
+                chunks.push((label.clone(), c));
+            }
+            whole.push((label, p.text.clone()));
+        }
+    }
+    let total: usize = whole.iter().map(|(_, t)| t.chars().count()).sum();
+    if total <= budget {
+        return whole
+            .into_iter()
+            .filter(|(_, t)| !t.trim().is_empty())
+            .map(|(l, t)| format!("{l}\n{}", t.trim()))
+            .collect();
+    }
+    let texts: Vec<String> = chunks.iter().map(|(_, t)| t.clone()).collect();
+    let scores = ancilo_web::rank::scores(&texts, query);
+    let mut order: Vec<usize> = (0..chunks.len()).filter(|i| scores[*i] > 0.0).collect();
+    order.sort_by(|a, b| scores[*b].total_cmp(&scores[*a]).then(a.cmp(b)));
+    // Nothing matches the words of the question ("summarise this"): the
+    // beginning of every document, in turn.
+    if order.is_empty() {
+        let mut firsts: Vec<usize> = Vec::new();
+        let mut seen = HashSet::new();
+        for (i, (label, _)) in chunks.iter().enumerate() {
+            let doc = label.split(',').next().unwrap_or(label).to_string();
+            if seen.insert(doc) {
+                firsts.push(i);
+            }
+        }
+        let rest = (0..chunks.len()).filter(|i| !firsts.contains(i));
+        order = firsts.iter().copied().chain(rest).collect();
+    }
+    let mut picked = Vec::new();
+    let mut used = 0;
+    for i in order {
+        let n = chunks[i].1.chars().count();
+        if used + n > budget {
+            continue;
+        }
+        used += n;
+        picked.push(i);
+    }
+    picked.sort();
+    picked
+        .into_iter()
+        .map(|i| format!("{}\n{}", chunks[i].0, chunks[i].1))
+        .collect()
+}
+
 /// Where a passage comes from, as the model is asked to cite it.
-fn source(name: &str, at: Option<&Locator>) -> String {
+pub(crate) fn source(name: &str, at: Option<&Locator>) -> String {
     match at {
         Some(Locator::Page(n)) => format!("[{name}, page {n}]"),
         Some(Locator::Sheet(s)) => format!("[{name}, sheet \"{s}\"]"),

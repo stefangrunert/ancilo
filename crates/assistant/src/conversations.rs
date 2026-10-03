@@ -2,6 +2,8 @@
 //! lists them, a follow-up question continues one, and proposed actions keep
 //! their outcome.
 
+use std::path::PathBuf;
+
 use ancilo_core::{Error, Result};
 use ancilo_storage::Db;
 use ancilo_storage::rusqlite::{OptionalExtension, params};
@@ -165,6 +167,9 @@ pub struct ConversationInfo {
     pub id: String,
     pub title: String,
     pub kind: ChatKind,
+    /// The chat project (a folder Ancilo reads) it belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<PathBuf>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub messages: usize,
@@ -175,6 +180,9 @@ pub struct Conversation {
     pub id: String,
     pub title: String,
     pub kind: ChatKind,
+    /// The chat project (a folder Ancilo reads) it belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<PathBuf>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub messages: Vec<ConversationMessage>,
@@ -187,6 +195,7 @@ impl Conversation {
             id: format!("c-{}", &uuid::Uuid::new_v4().simple().to_string()[..10]),
             kind,
             title: title_of(first_prompt),
+            folder: None,
             created_at: now,
             updated_at: now,
             messages: Vec::new(),
@@ -216,6 +225,7 @@ impl Conversation {
         self.messages
             .iter()
             .any(|m| m.documents || !m.attachments.is_empty())
+            || self.folder.is_some()
     }
 
     /// The documents attached anywhere in the conversation.
@@ -279,10 +289,10 @@ impl Conversations {
     }
 
     pub fn list(&self) -> Result<Vec<ConversationInfo>> {
-        type Row = (String, String, String, String, i64, String);
+        type Row = (String, String, String, String, i64, String, Option<String>);
         let rows: Vec<Row> = self.db.with(|c| {
             let mut s = c.prepare(
-                "SELECT id, title, created_at, updated_at, json_array_length(messages), kind
+                "SELECT id, title, created_at, updated_at, json_array_length(messages), kind, folder
                  FROM conversations ORDER BY updated_at DESC",
             )?;
             s.query_map([], |r| {
@@ -293,39 +303,44 @@ impl Conversations {
                     r.get(3)?,
                     r.get(4)?,
                     r.get(5)?,
+                    r.get(6)?,
                 ))
             })?
             .collect()
         })?;
         Ok(rows
             .into_iter()
-            .map(|(id, title, created, updated, n, kind)| ConversationInfo {
-                id,
-                title,
-                kind: ChatKind::parse(&kind),
-                created_at: time(&created),
-                updated_at: time(&updated),
-                messages: n.max(0) as usize,
-            })
+            .map(
+                |(id, title, created, updated, n, kind, folder)| ConversationInfo {
+                    id,
+                    title,
+                    kind: ChatKind::parse(&kind),
+                    folder: folder.map(PathBuf::from),
+                    created_at: time(&created),
+                    updated_at: time(&updated),
+                    messages: n.max(0) as usize,
+                },
+            )
             .collect())
     }
 
     pub fn get(&self, id: &str) -> Result<Conversation> {
-        type Row = (String, String, String, String, String);
+        type Row = (String, String, String, String, String, Option<String>);
         let row: Option<Row> = self.db.with(|c| {
             c.query_row(
-                "SELECT title, created_at, updated_at, messages, kind FROM conversations WHERE id = ?1",
+                "SELECT title, created_at, updated_at, messages, kind, folder FROM conversations WHERE id = ?1",
                 params![id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
             )
             .optional()
         })?;
-        let (title, created, updated, messages, kind) =
+        let (title, created, updated, messages, kind, folder) =
             row.ok_or_else(|| Error::not_found(format!("no conversation '{id}'")))?;
         Ok(Conversation {
             id: id.to_string(),
             title,
             kind: ChatKind::parse(&kind),
+            folder: folder.map(PathBuf::from),
             created_at: time(&created),
             updated_at: time(&updated),
             messages: serde_json::from_str(&messages).unwrap_or_default(),
@@ -335,7 +350,7 @@ impl Conversations {
     pub fn save(&self, c: &Conversation) -> Result<()> {
         self.db.with(|db| {
             db.execute(
-                "INSERT INTO conversations(id, created_at, updated_at, title, messages, kind) VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO conversations(id, created_at, updated_at, title, messages, kind, folder) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, title = excluded.title, messages = excluded.messages",
                 params![
                     c.id,
@@ -343,7 +358,8 @@ impl Conversations {
                     c.updated_at.to_rfc3339(),
                     c.title,
                     serde_json::to_string(&c.messages).unwrap_or_else(|_| "[]".into()),
-                    c.kind.as_str()
+                    c.kind.as_str(),
+                    c.folder.as_ref().map(|f| f.display().to_string())
                 ],
             )
             .map(|_| ())
@@ -361,6 +377,7 @@ impl Conversations {
         Ok(ConversationInfo {
             messages: c.messages.len(),
             kind: c.kind,
+            folder: c.folder,
             id: c.id,
             title: c.title,
             created_at: c.created_at,

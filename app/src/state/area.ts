@@ -13,6 +13,8 @@ const LAST_KEY = "ancilo.area.last";
 export function areaOf(r: Route): Area | null {
   switch (r.view) {
     case "chat":
+    case "folder":
+    case "add-folder":
       return "chat";
     case "tasks":
       return "tasks";

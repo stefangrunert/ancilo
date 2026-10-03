@@ -7,7 +7,9 @@ import { useClient, useLive, useOp, useRefresh } from "../state/store";
 import { ChatLayout, Composer, Thinking, UserBubble } from "./Chat";
 import { Markdown } from "./Markdown";
 import { BackToChat, greetingOf, QuickActions } from "./QuickActions";
+import { nameOf } from "./ChatProjects";
 import { DocChip, LocalNote, PendingDocs, usePendingDocs } from "./Documents";
+import { Icon } from "./Icon";
 import { ErrorNote } from "./ui";
 import { WebSwitch } from "./WebSearch";
 
@@ -283,7 +285,7 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
   const [searching, setSearching] = useState(false);
   const pending = usePendingDocs();
   const messages = id ? (conversation.data?.messages ?? []) : [];
-  const local = messages.some((m) => m.documents || (m.attachments ?? []).length > 0) || pending.ids.length > 0;
+  const local = Boolean(conversation.data?.folder) || messages.some((m) => m.documents || (m.attachments ?? []).length > 0) || pending.ids.length > 0;
   const liveIds = new Set((pendingActions.data ?? []).map((p) => p.id));
   const greeting = id ? null : greetingOf(kind, t);
 
@@ -355,6 +357,13 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
   return (
     <ChatLayout composer={composer} follow={`${messages.length}:${inflight ?? ""}:${activity.length}`}>
       {conversation.error && <ErrorNote error={conversation.error} />}
+      {conversation.data?.folder && (
+        <div>
+          <button type="button" className="ghost folder-chip" onClick={() => navigate({ view: "folder", path: conversation.data!.folder! })}>
+            <Icon name="folder" size={14} /> {nameOf(conversation.data.folder)}
+          </button>
+        </div>
+      )}
       {greeting && (
         <div>
           <BackToChat />

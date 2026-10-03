@@ -131,7 +131,13 @@ pub fn apply(db: &Db, change: SetPreferences) -> Result<Preferences> {
     Ok(p)
 }
 
-pub fn register(registry: &mut Registry, db: Db, bus: EventBus) {
+/// `library`: reads the documents of chat projects (the `documents` folders).
+pub fn register(
+    registry: &mut Registry,
+    db: Db,
+    bus: EventBus,
+    library: Option<ancilo_docs::library::Library>,
+) {
     let d = db.clone();
     registry.register(
         OpBuilder::new("get_preferences")
@@ -150,8 +156,20 @@ pub fn register(registry: &mut Registry, db: Db, bus: EventBus) {
             .handler(move |_ctx, i: SetPreferences| {
                 let db = db.clone();
                 let bus = bus.clone();
+                let library = library.clone();
                 async move {
+                    let (added, removed) = (i.add_documents.clone(), i.remove_documents.clone());
                     let p = apply(&db, i)?;
+                    // A chat project's documents are read at once – and
+                    // forgotten when it leaves the list.
+                    if let Some(lib) = &library {
+                        if let Some(dir) = added {
+                            lib.refresh_soon(&dir);
+                        }
+                        if let Some(dir) = removed {
+                            lib.forget(&dir)?;
+                        }
+                    }
                     bus.emit("preferences.changed", None, json!({"view": p.view}));
                     Ok(p)
                 }

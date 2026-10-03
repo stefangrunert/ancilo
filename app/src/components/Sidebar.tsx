@@ -3,13 +3,14 @@ import type { OpOutput } from "../api/client";
 import { useI18n } from "../i18n";
 import { AREAS, type Area } from "../state/area";
 import { navigate, type Route } from "../state/route";
-import { usePro } from "../state/prefs";
+import { usePreferences, usePro } from "../state/prefs";
 import { useClient, useOp, useRefresh } from "../state/store";
 import { Icon, type IconName } from "./Icon";
 import { useReorder } from "./reorder";
 import { Dialog, ErrorNote, StatusDot } from "./ui";
 
 type SessionInfo = OpOutput<"list_sessions">[number];
+type ChatInfo = OpOutput<"list_conversations">[number];
 
 function NavButton({ icon, label, current, onClick }: { icon: IconName; label: string; current?: boolean; onClick: () => void }) {
   return (
@@ -221,6 +222,7 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
   const client = useClient();
   const refresh = useRefresh();
   const pro = usePro();
+  const prefs = usePreferences();
   const projects = useOp("list_projects");
   const sessions = useOp("list_sessions", {});
   const conversations = useOp("list_conversations");
@@ -260,6 +262,57 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
     (paths) => saveOrder(() => client.op("reorder_projects", { paths })),
   );
 
+  const renderChat = (c: ChatInfo) => (
+    <Item
+        key={c.id}
+        active={route.view === "chat" && route.id === c.id}
+        actions={
+          renaming?.id === c.id ? undefined : (
+            <>
+              <RenameButton title={c.title} onClick={() => setRenaming({ id: c.id, title: c.title })} />
+              <button
+                type="button"
+                className="icon"
+                aria-label={t("nav.deleteChat", { title: c.title })}
+                title={t("nav.deleteChat", { title: c.title })}
+                onClick={() =>
+                  setConfirm({
+                    text: t("nav.deleteChatConfirm"),
+                    run: async () => {
+                      await client.op("delete_conversation", { id: c.id });
+                      if (route.view === "chat" && route.id === c.id) navigate({ view: "chat", id: null }, true);
+                    },
+                  })
+                }
+              >
+                <Icon name="trash" size={14} />
+              </button>
+            </>
+          )
+        }
+      >
+        {renaming?.id === c.id ? (
+          <RenameField
+            value={renaming.title}
+            onChange={(title) => setRenaming({ id: c.id, title })}
+            onCancel={() => setRenaming(null)}
+            onDone={() => {
+              const title = renaming.title.trim();
+              setRenaming(null);
+              if (title && title !== c.title) void act(() => client.op("rename_conversation", { id: c.id, title }));
+            }}
+          />
+        ) : (
+          <button type="button" className="nav-item" aria-current={route.view === "chat" && route.id === c.id ? "page" : undefined} onClick={() => navigate({ view: "chat", id: c.id })}>
+            <span className="text">{c.title}</span>
+          </button>
+        )}
+      </Item>
+  );
+  const folders = prefs.data?.documents ?? [];
+  const chatList = conversations.data ?? [];
+  const plainChats = chatList.filter((c) => !c.folder || !folders.includes(c.folder));
+  const currentFolder = route.view === "folder" ? route.path : route.view === "chat" && route.id ? chatList.find((c) => c.id === route.id)?.folder : undefined;
   return (
     <nav className="sidebar" aria-label={t("nav.label")}>
       <AreaTabs area={area} onArea={onArea} showCode={showCode} />
@@ -383,60 +436,88 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
         {area === "tasks" && <p className="nav-empty">{t("tasksArea.navEmpty")}</p>}
 
         {area === "chat" && (
+          <div className="nav-group">
+            <div className="nav-heading">
+              <span>{t("nav.chatProjects")}</span>
+              <span className="spacer" />
+              <button type="button" className="icon" aria-label={t("nav.addFolder")} title={t("nav.addFolder")} onClick={() => navigate({ view: "add-folder" })}>
+                <Icon name="plus" />
+              </button>
+            </div>
+            <ul className="nav-list" aria-label={t("nav.chatProjects")}>
+              {folders.map((f) => {
+                const name = f.split("/").filter(Boolean).pop() ?? f;
+                const mine = chatList.filter((c) => c.folder === f);
+                const expanded = (open[f] ?? f === currentFolder) && mine.length > 0;
+                return (
+                  <Item
+                    key={f}
+                    active={route.view === "folder" && route.path === f}
+                    actions={
+                      <>
+                        <button type="button" className="icon" aria-label={t("nav.newChatIn", { name })} title={t("nav.newChatIn", { name })} onClick={() => navigate({ view: "folder", path: f })}>
+                          <Icon name="plus" size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon"
+                          aria-label={t("nav.removeFolder", { name })}
+                          title={t("nav.removeFolder", { name })}
+                          onClick={() =>
+                            setConfirm({
+                              text: t("nav.removeFolderConfirm", { name }),
+                              run: async () => {
+                                await client.op("set_preferences", { remove_documents: f });
+                                await refresh("get_preferences");
+                                if (route.view === "folder" && route.path === f) navigate({ view: "chat", id: null }, true);
+                              },
+                            })
+                          }
+                        >
+                          <Icon name="close" size={14} />
+                        </button>
+                      </>
+                    }
+                    below={
+                      expanded && (
+                        <ul className="nav-list nested" aria-label={t("nav.chatsIn", { name })}>
+                          {mine.map(renderChat)}
+                        </ul>
+                      )
+                    }
+                  >
+                    <button
+                      type="button"
+                      className="nav-item"
+                      title={f}
+                      aria-expanded={mine.length > 0 ? expanded : undefined}
+                      onClick={() => {
+                        setOpen((o) => ({ ...o, [f]: route.view === "folder" && route.path === f ? !expanded : true }));
+                        navigate({ view: "folder", path: f });
+                      }}
+                    >
+                      <span className="glyph">
+                        <Icon name="folder" />
+                      </span>
+                      <span className="text">{name}</span>
+                    </button>
+                  </Item>
+                );
+              })}
+            </ul>
+            {folders.length === 0 && <p className="nav-empty">{t("nav.noFolders")}</p>}
+          </div>
+        )}
+
+        {area === "chat" && (
         <div className="nav-group">
           <div className="nav-heading">
             <span>{t("nav.chats")}</span>
           </div>
           <ul className="nav-list" aria-label={t("nav.chats")}>
-            {(conversations.data ?? []).map((c) => (
-              <Item
-                key={c.id}
-                active={route.view === "chat" && route.id === c.id}
-                actions={
-                  renaming?.id === c.id ? undefined : (
-                    <>
-                      <RenameButton title={c.title} onClick={() => setRenaming({ id: c.id, title: c.title })} />
-                      <button
-                        type="button"
-                        className="icon"
-                        aria-label={t("nav.deleteChat", { title: c.title })}
-                        title={t("nav.deleteChat", { title: c.title })}
-                        onClick={() =>
-                          setConfirm({
-                            text: t("nav.deleteChatConfirm"),
-                            run: async () => {
-                              await client.op("delete_conversation", { id: c.id });
-                              if (route.view === "chat" && route.id === c.id) navigate({ view: "chat", id: null }, true);
-                            },
-                          })
-                        }
-                      >
-                        <Icon name="trash" size={14} />
-                      </button>
-                    </>
-                  )
-                }
-              >
-                {renaming?.id === c.id ? (
-                  <RenameField
-                    value={renaming.title}
-                    onChange={(title) => setRenaming({ id: c.id, title })}
-                    onCancel={() => setRenaming(null)}
-                    onDone={() => {
-                      const title = renaming.title.trim();
-                      setRenaming(null);
-                      if (title && title !== c.title) void act(() => client.op("rename_conversation", { id: c.id, title }));
-                    }}
-                  />
-                ) : (
-                  <button type="button" className="nav-item" aria-current={route.view === "chat" && route.id === c.id ? "page" : undefined} onClick={() => navigate({ view: "chat", id: c.id })}>
-                    <span className="text">{c.title}</span>
-                  </button>
-                )}
-              </Item>
-            ))}
+            {plainChats.map(renderChat)}
           </ul>
-          {(conversations.data ?? []).length === 0 && <p className="nav-empty">{t("nav.noChats")}</p>}
+          {plainChats.length === 0 && <p className="nav-empty">{t("nav.noChats")}</p>}
         </div>
         )}
         <ErrorNote error={error} onDismiss={() => setError(null)} />

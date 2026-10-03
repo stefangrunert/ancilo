@@ -980,15 +980,18 @@ steps:
     env.stop().await;
 }
 
-// covers: M6-AC-13
-/// Chats draw on the user's own documents: a folder chosen in the setup is
-/// indexed, and its best passages go along with a plain chat's question.
+// covers: M6-AC-13, M10-AC-03
+/// Chats in a chat project draw on its folder's documents (with their
+/// source); a plain chat does not see them (decision
+/// `2026-10-03-drei-bereiche`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn chats_draw_on_the_users_documents() {
+async fn chats_in_a_project_draw_on_its_documents() {
     let script = r#"
 steps:
-  - expect: { last_user_contains: "Eier", has_tools: false, any_message_contains: "drei Eier" }
-    respond: { text: "Für den Kuchen brauchst du drei Eier (rezepte/kuchen.md)." }
+  - expect: { last_user_contains: "Eier", has_tools: false, any_message_contains: "[rezepte/kuchen.md]" }
+    respond: { text: "Für den Kuchen brauchst du drei Eier [rezepte/kuchen.md]." }
+  - expect: { last_user_contains: "Eier", no_message_contains: "drei Eier" }
+    respond: { text: "Das weiß ich nicht." }
 "#;
     let (env, _, _) = with_models(&[("Chat-Q8_0", script)]).await;
     let docs = env.home.scratch("meine-dokumente");
@@ -998,18 +1001,47 @@ steps:
         "# Kuchen\n\nFür den Rührkuchen braucht man drei Eier, 200 g Mehl und 150 g Zucker.\n",
     )
     .unwrap();
-    env.op("index_project", json!({"cwd": docs})).await;
+    std::fs::write(docs.join("kaputt.pdf"), "kein pdf").unwrap();
     let p = env
         .op("set_preferences", json!({"add_documents": docs}))
         .await;
     assert_eq!(p["documents"].as_array().unwrap().len(), 1);
+    // Read in the background; what could not be read says why.
+    let mut st = Value::Null;
+    for _ in 0..200 {
+        st = env.op("folder_documents", json!({"folder": docs})).await;
+        if st["read"] == 1
+            && st["reading"] == false
+            && st["not_read"].as_array().unwrap().len() == 1
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(st["read"], 1, "{st}");
+    assert_eq!(st["not_read"][0]["path"], "kaputt.pdf", "{st}");
+    let r = env
+        .op(
+            "ask",
+            json!({"prompt": "Wie viele Eier brauche ich für den Kuchen?", "remember": true, "kind": "chat", "folder": docs}),
+        )
+        .await;
+    assert_eq!(r["grounded"], true, "{r}");
+    assert_eq!(r["documents"], true, "{r}");
+    assert!(r["answer"].as_str().unwrap().contains("drei Eier"), "{r}");
+    let listed = env.op("list_conversations", json!({})).await;
+    assert_eq!(
+        listed[0]["folder"],
+        docs.canonicalize().unwrap().display().to_string()
+    );
+    // A plain chat does not see the project's documents.
     let r = env
         .op(
             "ask",
             json!({"prompt": "Wie viele Eier brauche ich für den Kuchen?", "remember": true, "kind": "chat"}),
         )
         .await;
-    assert_eq!(r["grounded"], true, "{r}");
-    assert!(r["answer"].as_str().unwrap().contains("drei Eier"), "{r}");
+    assert_eq!(r["answer"], "Das weiß ich nicht.", "{r}");
+    assert_eq!(r["documents"], false);
     env.stop().await;
 }

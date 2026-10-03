@@ -849,6 +849,13 @@
             "format": "date-time",
             "type": "string"
           },
+          "folder": {
+            "description": "The chat project (a folder Ancilo reads) it belongs to.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "type": "string"
           },
@@ -1783,6 +1790,23 @@
           "ctx_tokens",
           "expected_ram_bytes",
           "fit"
+        ],
+        "type": "object"
+      },
+      "NotRead": {
+        "description": "A file that was not read, and why.",
+        "properties": {
+          "path": {
+            "description": "Relative to the folder.",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "reason"
         ],
         "type": "object"
       },
@@ -4813,6 +4837,14 @@
                       "null"
                     ]
                   },
+                  "folder": {
+                    "default": null,
+                    "description": "A new conversation in this chat project (a folder Ancilo only reads):\nits documents go along with every question.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "greeting": {
                     "default": null,
                     "description": "Ancilo's words a new conversation starts with (shown in the app before\nthe user wrote anything).",
@@ -7718,6 +7750,106 @@
         "x-ancilo-permission": "read"
       }
     },
+    "/api/v1/ops/folder_documents": {
+      "post": {
+        "description": "What Ancilo has read of a chat project's folder: documents read, still reading, and what could not be read and why",
+        "operationId": "folder_documents",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "folder": {
+                    "description": "A chat project's folder.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "folder"
+                ],
+                "title": "FolderRef",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "chars": {
+                      "description": "Characters of text kept.",
+                      "format": "uint",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "folder": {
+                      "type": "string"
+                    },
+                    "not_read": {
+                      "description": "Files that could not be read – with the reason.",
+                      "items": {
+                        "$ref": "#/components/schemas/NotRead"
+                      },
+                      "type": "array"
+                    },
+                    "pending": {
+                      "description": "Documents still to read in a running pass.",
+                      "format": "uint",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "read": {
+                      "description": "Documents read (with text).",
+                      "format": "uint",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "reading": {
+                      "description": "Reading is going on now.",
+                      "type": "boolean"
+                    },
+                    "too_many": {
+                      "default": false,
+                      "description": "More documents than Ancilo reads in one folder ([`MAX_FILES`]).",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "folder",
+                    "read",
+                    "pending",
+                    "reading",
+                    "chars",
+                    "not_read"
+                  ],
+                  "title": "LibraryStatus",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "What Ancilo has read of a chat project's folder: documents read, still reading, and what could not be read and why",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
+      }
+    },
     "/api/v1/ops/gateway_stats": {
       "post": {
         "description": "Statistics of model calls: outcomes, reliability interventions, latency",
@@ -7981,6 +8113,13 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "folder": {
+                      "description": "The chat project (a folder Ancilo reads) it belongs to.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "id": {
                       "type": "string"
@@ -10312,6 +10451,106 @@
         "x-ancilo-permission": "manage"
       }
     },
+    "/api/v1/ops/read_folder": {
+      "post": {
+        "description": "Read a chat project's folder again: new and changed documents, in the background",
+        "operationId": "read_folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "folder": {
+                    "description": "A chat project's folder.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "folder"
+                ],
+                "title": "FolderRef",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "chars": {
+                      "description": "Characters of text kept.",
+                      "format": "uint",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "folder": {
+                      "type": "string"
+                    },
+                    "not_read": {
+                      "description": "Files that could not be read – with the reason.",
+                      "items": {
+                        "$ref": "#/components/schemas/NotRead"
+                      },
+                      "type": "array"
+                    },
+                    "pending": {
+                      "description": "Documents still to read in a running pass.",
+                      "format": "uint",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "read": {
+                      "description": "Documents read (with text).",
+                      "format": "uint",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "reading": {
+                      "description": "Reading is going on now.",
+                      "type": "boolean"
+                    },
+                    "too_many": {
+                      "default": false,
+                      "description": "More documents than Ancilo reads in one folder ([`MAX_FILES`]).",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "folder",
+                    "read",
+                    "pending",
+                    "reading",
+                    "chars",
+                    "not_read"
+                  ],
+                  "title": "LibraryStatus",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Read a chat project's folder again: new and changed documents, in the background",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
+      }
+    },
     "/api/v1/ops/recommend_models": {
       "post": {
         "description": "Picks from Ancilo's model list what runs well here for the given purposes (chat, code, documents): the best choice, two or three alternatives and everything else that fits. Considers the memory models may use and what other programs leave free right now; estimates speed from the chip; prefers installed models. `address` of a suggestion goes straight into add_model.",
@@ -11063,6 +11302,13 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "folder": {
+                      "description": "The chat project (a folder Ancilo reads) it belongs to.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "id": {
                       "type": "string"
