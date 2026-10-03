@@ -13,12 +13,15 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 /// Whether the release has an updater key (the owner creates it for a
 /// release). Without one there are no updates.
 pub fn configured<R: Runtime>(app: &AppHandle<R>) -> bool {
-    app.config()
-        .plugins
-        .0
-        .get("updater")
-        .and_then(|u| u["pubkey"].as_str())
-        .is_some_and(|k| !k.trim().is_empty())
+    // The development app never updates itself to a release.
+    !crate::variant::DEV
+        && app
+            .config()
+            .plugins
+            .0
+            .get("updater")
+            .and_then(|u| u["pubkey"].as_str())
+            .is_some_and(|k| !k.trim().is_empty())
 }
 
 /// A newer, correctly announced release – `None` if this is the latest.
@@ -121,7 +124,9 @@ mod tests {
         let key = base64::engine::general_purpose::STANDARD
             .decode(u["pubkey"].as_str().unwrap())
             .unwrap();
-        assert!(String::from_utf8_lossy(&key).starts_with("untrusted comment: minisign public key"));
+        assert!(
+            String::from_utf8_lossy(&key).starts_with("untrusted comment: minisign public key")
+        );
         assert_eq!(u["requireSignedVersion"], true);
         assert!(u["endpoints"][0].as_str().unwrap().starts_with("https://"));
     }

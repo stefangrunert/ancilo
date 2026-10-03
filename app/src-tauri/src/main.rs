@@ -8,6 +8,7 @@ mod daemon;
 mod links;
 mod monitor;
 mod update;
+mod variant;
 
 use std::sync::{Arc, Mutex};
 
@@ -45,7 +46,7 @@ fn show_window(app: &AppHandle, d: &daemon::Daemon) -> tauri::Result<()> {
             }
             true
         })
-        .title("Ancilo")
+        .title(variant::NAME)
         // Room for the sidebar, a chat column and the changes panel.
         .inner_size(1280.0, 840.0)
         .min_inner_size(720.0, 520.0)
@@ -93,7 +94,7 @@ fn anyhow_like(msg: String) -> std::io::Error {
 }
 
 fn main() {
-    let paths = ancilo_core::Paths::resolve();
+    let paths = variant::paths();
     let smoke = std::env::var_os("ANCILO_SMOKE").is_some();
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -104,11 +105,17 @@ fn main() {
             #[cfg(target_os = "macos")]
             if std::env::var_os("ANCILO_NO_LAUNCH_AGENT").is_none()
                 && !smoke
-                && let Err(e) = daemon::install_launch_agent()
+                && let Err(e) = daemon::install_launch_agent(&paths)
             {
                 eprintln!("LaunchAgent not installed: {e}");
             }
-            let open = MenuItem::with_id(app, "open", "Open Ancilo", true, None::<&str>)?;
+            let open = MenuItem::with_id(
+                app,
+                "open",
+                format!("Open {}", variant::NAME),
+                true,
+                None::<&str>,
+            )?;
             let updates = MenuItem::with_id(
                 app,
                 "update",
@@ -123,7 +130,7 @@ fn main() {
             let (p2, u2) = (pending.clone(), updates.clone());
             TrayIconBuilder::with_id("ancilo")
                 .icon(app.default_window_icon().cloned().expect("icon"))
-                .tooltip("Ancilo")
+                .tooltip(variant::NAME)
                 .menu(&menu)
                 .on_menu_event(move |app, e| match e.id().as_ref() {
                     "open" => {

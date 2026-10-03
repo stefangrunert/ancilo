@@ -1111,3 +1111,31 @@ async fn projects_and_sessions_are_renamed_and_ordered_by_hand() {
     assert!(!ok);
     env.stop().await;
 }
+
+// covers: M8-AC-03
+/// A turn whose model call fails says why in the chat – it must never look
+/// as if nothing happened.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_turn_says_why() {
+    let script = r#"
+fallback: { http_error: { status: 400, message: "the model refused the request" } }
+"#;
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
+    let dir = project(&env);
+    let s = env.op("create_session", json!({"cwd": dir})).await;
+    let id = s["id"].as_str().unwrap().to_string();
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Fix the quiz facts", "wait": true}),
+        )
+        .await;
+    let messages = s["messages"].as_array().unwrap();
+    let texts: Vec<&str> = messages.iter().filter_map(|m| m["text"].as_str()).collect();
+    assert!(texts.contains(&"Fix the quiz facts"), "{s}");
+    let last = texts.last().unwrap();
+    assert!(last.starts_with("(failed: model call failed"), "{s}");
+    assert!(last.contains("the model refused the request"), "{s}");
+    assert_eq!(s["status"], "idle");
+    env.stop().await;
+}

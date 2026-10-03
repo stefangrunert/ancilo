@@ -88,13 +88,17 @@ pub fn spawn(app: AppHandle, d: Daemon, window: &'static str) {
             let Some(h) = daemon::op(&d, "system_health") else {
                 continue;
             };
-            let in_front = app
-                .get_webview_window(window)
-                .is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
+            let in_front = app.get_webview_window(window).is_some_and(|w| {
+                w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false)
+            });
             if watch.decide(h["level"] == "critical", in_front, Instant::now()) {
                 let causes: Vec<String> = h["causes"]
                     .as_array()
-                    .map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|c| c.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 let (title, body) = text(german, &causes);
                 let _ = app.notification().builder().title(title).body(body).show();
@@ -113,12 +117,21 @@ mod tests {
         let t0 = Instant::now();
         let mut w = Watch::default();
         assert!(!w.decide(false, false, t0), "calm");
-        assert!(!w.decide(true, true, t0), "the window is in front: it shows there");
+        assert!(
+            !w.decide(true, true, t0),
+            "the window is in front: it shows there"
+        );
         assert!(!w.decide(true, false, t0), "still the same emergency");
         assert!(!w.decide(false, false, t0));
-        assert!(w.decide(true, false, t0 + Duration::from_secs(1)), "critical again, window away");
+        assert!(
+            w.decide(true, false, t0 + Duration::from_secs(1)),
+            "critical again, window away"
+        );
         assert!(!w.decide(false, false, t0 + Duration::from_secs(60)));
-        assert!(!w.decide(true, false, t0 + Duration::from_secs(120)), "not again within ten minutes");
+        assert!(
+            !w.decide(true, false, t0 + Duration::from_secs(120)),
+            "not again within ten minutes"
+        );
         assert!(!w.decide(false, false, t0 + QUIET));
         assert!(w.decide(true, false, t0 + QUIET + Duration::from_secs(5)));
     }

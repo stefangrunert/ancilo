@@ -856,6 +856,20 @@ impl Sessions {
                 if !o.messages.is_empty() {
                     history = o.messages.clone();
                 }
+                // A turn that failed (the model could not be loaded or did
+                // not answer) says why – otherwise it looks as if nothing
+                // happened.
+                if o.status == ancilo_agent::Status::Failed && !cancel.is_cancelled() {
+                    if !history
+                        .iter()
+                        .any(|m| m["role"] == "user" && m["content"] == text.as_str())
+                    {
+                        history.push(json!({"role": "user", "content": text}));
+                    }
+                    history.push(
+                        json!({"role": "assistant", "content": format!("(failed: {})", o.summary)}),
+                    );
+                }
                 // Stopped by the user or the daemon: whatever the agent saw
                 // last (a cancelled or a failed model call), it was interrupted.
                 if o.status == ancilo_agent::Status::Cancelled || cancel.is_cancelled() {

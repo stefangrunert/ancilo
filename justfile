@@ -97,6 +97,10 @@ app-bundle:
 app-install:
     packaging/app-local.sh install
 
+# "Ancilo Dev" beside the release: its own app, data, port 7425 and login item.
+app-dev:
+    packaging/app-local.sh dev
+
 # Release packages (CLI archive with llama.cpp, files for the app bundle) – reproducible.
 package *OUT:
     packaging/package.sh {{OUT}}

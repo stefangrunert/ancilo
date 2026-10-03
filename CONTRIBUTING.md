@@ -12,6 +12,7 @@ Thanks for your interest in Ancilo!
 ```bash
 just verify       # the gate for every commit: formatting, clippy, tests, app checks (~5 min, offline)
 just app-e2e      # app end-to-end tests (Chromium, WebKit)
+just app-dev      # "Ancilo Dev" beside the release: own app, data, port 7425, login item; `ancilo-dev` CLI
 ```
 
 Tests come in three tiers – the quick ones decide, the slow ones never block a fix:

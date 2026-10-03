@@ -13,6 +13,10 @@ publish = false
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# "Ancilo Dev": a second app beside the release (packaging/app-local.sh dev).
+dev = []
+
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 serde_json = "1"

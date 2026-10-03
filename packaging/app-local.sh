@@ -5,6 +5,10 @@
 #   packaging/app-local.sh            build → app/src-tauri/target/release/bundle/macos/Ancilo.app
 #   packaging/app-local.sh install    build, replace /Applications/Ancilo.app, link `ancilo` into
 #                                     ~/.local/bin (ANCILO_BIN_DIR), open the app
+#   packaging/app-local.sh dev        the same as "Ancilo Dev" – a second app beside the release:
+#                                     /Applications/Ancilo Dev.app, data in ~/Library/Application
+#                                     Support/ancilo-dev, port 7425, its own login item, no updates;
+#                                     `ancilo-dev` in the terminal
 #
 # Built on this Mac, so macOS does not quarantine it and notarization is not needed. Signed with
 # the Developer ID from the keychain when there is one (macOS then keeps granted permissions across
@@ -14,7 +18,17 @@ set -eu
 root=$(cd "$(dirname "$0")/.." && pwd -P)
 out="$root/target/app-local"
 target=aarch64-apple-darwin
-app="$root/app/src-tauri/target/release/bundle/macos/Ancilo.app"
+mode=${1:-}
+if [ "$mode" = dev ]; then
+    name="Ancilo Dev"
+    features="--features dev"
+    variant='{"productName":"Ancilo Dev","identifier":"app.ancilo.dev"}'
+else
+    name="Ancilo"
+    features=""
+    variant='{}'
+fi
+app="$root/app/src-tauri/target/release/bundle/macos/$name.app"
 
 "$root/packaging/package.sh" "$out"
 
@@ -32,13 +46,31 @@ echo "== app (signing: $APPLE_SIGNING_IDENTITY)"
 # No notarization credentials in the environment: Tauri signs but does not notarize.
 cd "$root/app"
 env -u APPLE_ID -u APPLE_API_KEY APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" \
-    npx tauri build --bundles app \
+    npx tauri build --bundles app $features \
     --config src-tauri/tauri.release.conf.json \
-    --config '{"bundle":{"createUpdaterArtifacts":false}}'
+    --config '{"bundle":{"createUpdaterArtifacts":false}}' \
+    --config "$variant"
 codesign --verify --deep --strict "$app"
 echo "== built $app"
 
-[ "${1:-}" = install ] || exit 0
+if [ "$mode" = dev ]; then
+    dev_home="$HOME/Library/Application Support/ancilo-dev"
+    echo "== install /Applications/Ancilo Dev.app (the release is left alone)"
+    osascript -e 'tell application "Ancilo Dev" to quit' 2>/dev/null || true
+    ANCILO_HOME="$dev_home" ANCILO_PORT=7425 "$app/Contents/MacOS/ancilo" daemon stop 2>/dev/null || true
+    rm -rf "/Applications/Ancilo Dev.app"
+    ditto "$app" "/Applications/Ancilo Dev.app"
+    bindir=${ANCILO_BIN_DIR:-$HOME/.local/bin}
+    mkdir -p "$bindir"
+    # `ancilo-dev`: the development app's CLI, on its own data and port.
+    printf '#!/bin/sh\nANCILO_HOME="%s" ANCILO_PORT=7425 exec "/Applications/Ancilo Dev.app/Contents/MacOS/ancilo" "$@"\n' "$dev_home" > "$bindir/ancilo-dev"
+    chmod +x "$bindir/ancilo-dev"
+    open "/Applications/Ancilo Dev.app"
+    echo "== installed Ancilo Dev"
+    exit 0
+fi
+
+[ "$mode" = install ] || exit 0
 
 echo "== install /Applications/Ancilo.app"
 osascript -e 'tell application "Ancilo" to quit' 2>/dev/null || true

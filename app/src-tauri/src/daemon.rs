@@ -108,6 +108,7 @@ pub fn ensure(paths: &Paths) -> Result<Daemon, String> {
                 // An orderly stop: tasks and models are shut down as usual.
                 let stopped = Command::new(ancilo_bin())
                     .args(["daemon", "stop"])
+                    .envs(crate::variant::daemon_env(paths))
                     .status()
                     .map_err(|e| format!("cannot run `ancilo`: {e}"))?;
                 if !stopped.success() {
@@ -118,6 +119,7 @@ pub fn ensure(paths: &Paths) -> Result<Daemon, String> {
     }
     let status = Command::new(ancilo_bin())
         .args(["daemon", "start"])
+        .envs(crate::variant::daemon_env(paths))
         .status()
         .map_err(|e| format!("cannot start `ancilo`: {e}"))?;
     if !status.success() {
@@ -135,19 +137,29 @@ pub fn ensure(paths: &Paths) -> Result<Daemon, String> {
 
 /// macOS: keeps the daemon running across logins (LaunchAgent). Idempotent.
 #[cfg(target_os = "macos")]
-pub fn install_launch_agent() -> Result<PathBuf, String> {
+pub fn install_launch_agent(paths: &Paths) -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME").ok_or("no HOME")?;
     let dir = PathBuf::from(home).join("Library/LaunchAgents");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let plist = dir.join("app.ancilo.daemon.plist");
+    let label = crate::variant::LAUNCH_AGENT;
+    let plist = dir.join(format!("{label}.plist"));
     let bin = ancilo_bin();
+    let env: String = crate::variant::daemon_env(paths)
+        .iter()
+        .map(|(k, v)| format!("<key>{k}</key><string>{v}</string>"))
+        .collect();
+    let env = if env.is_empty() {
+        String::new()
+    } else {
+        format!("\n  <key>EnvironmentVariables</key><dict>{env}</dict>")
+    };
     let content = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>app.ancilo.daemon</string>
-  <key>ProgramArguments</key><array><string>{}</string><string>daemon</string><string>run</string></array>
+  <key>Label</key><string>{label}</string>
+  <key>ProgramArguments</key><array><string>{}</string><string>daemon</string><string>run</string></array>{env}
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ProcessType</key><string>Background</string>
