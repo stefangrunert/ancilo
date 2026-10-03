@@ -4,12 +4,12 @@ The **Tasks** area (the computer symbol) is for things to get done with your fil
 
 ## Starting a task
 
-Say what to do – and give Ancilo what it needs. That decides how the task works; there is nothing to choose up front:
+A new task has two steps:
 
-- **Files** (drag them onto the input, or the paperclip): they are the material. Ancilo makes something new from them – a table, a summary, a letter. Your files stay as they are. At the end, **Save to Documents** – or **Somewhere else…** – puts the result where you want it (never over a file that is there: *Overview 2.xlsx*). Then **Open** it or **Show in Finder**.
-- **A folder** (the folder button next to the paperclip): Ancilo works *in* it – sorts, renames, adds files. It always works in a copy: you see every change and **keep** it or not (below).
+1. **Folder** – *Choose a folder* opens the system's dialog, in Documents. Ancilo works in a copy of it: only what you keep goes into the folder (below). On a folder's own page the folder is set; on *New task*, **Change** picks another one.
+2. **What should Ancilo do?** – say it in your own words, or start from an example (*For example:* – a click puts it into the input). Files dragged onto the input (or the paperclip) go into the copy too – Ancilo can use them, and they reach your folder only if you keep them.
 
-Folders Ancilo worked in show up in the Tasks area; a click starts a new task there.
+Until a folder is chosen there is nothing to type; an example clicked before asks for the folder first. Folders Ancilo worked in are listed in the Tasks area, each with its tasks; a click starts a new task there. Results you want somewhere else? Choose Documents (or any folder) as the task's folder.
 
 ## A folder: always in a copy
 
@@ -45,4 +45,4 @@ ancilo op apply_changes '{"session": "s-…"}' --confirm
 ancilo op undo_apply '{"session": "s-…"}' --confirm
 ```
 
-Without `folder`, `create_task` starts a task with files: `add_task_file` gives it a file, `save_results` (`dir`, default Documents) saves its results. `discard_changes` drops a folder task's changes.
+`add_task_file` puts a file into a task's copy; `discard_changes` drops a task's changes. Without `folder`, `create_task` still starts a task without a folder of its own (the app no longer offers it; such tasks are listed under *Tasks* and saved with `save_results`, `dir` default Documents).

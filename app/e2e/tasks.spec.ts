@@ -19,12 +19,13 @@ test("a task in a folder works in a copy: the changes are shown, kept – and un
   writeFileSync(join(dir, "power.txt"), "Power: 120 Euro");
   await daemon.open(page);
   await page.getByRole("tab", { name: "Tasks" }).click();
-  // No choice up front: a folder only when the task is about one.
-  await expect(page.getByTestId("tasks-area").getByRole("combobox")).toHaveCount(0);
+  // The folder comes first: until then there is nothing to type.
+  const ask = page.getByRole("textbox", { name: "What should Ancilo do?" });
+  await expect(ask).toBeDisabled();
   await dialogPicks(page, dir);
   await page.getByRole("button", { name: "Choose a folder" }).click();
-  await expect(page.getByTestId("task-folder-chip")).toContainText(`Works in: ${dir.split("/").pop()}`);
-  const ask = page.getByRole("textbox", { name: "What should Ancilo do?" });
+  await expect(page.getByTestId("task-folder-chosen")).toContainText(dir.split("/").pop()!);
+  await expect(page.getByTestId("task-folder-chosen")).toContainText("only what you keep goes into the folder");
   await ask.fill("Make a table of the invoices");
   await ask.press("Enter");
   const changes = page.getByTestId("task-changes");
@@ -45,24 +46,26 @@ test("a task in a folder works in a copy: the changes are shown, kept – and un
 });
 
 // covers: M10-AC-04
-test("a task with files makes something new from them – saved where the user wants", async ({ page, daemon }) => {
-  const out = tmp("ancilo-results-");
+test("an example starts a task: the folder first, then the files given go into its copy", async ({ page, daemon }) => {
+  const dir = tmp("ancilo-task-files-");
   await daemon.open(page);
   await page.getByRole("tab", { name: "Tasks" }).click();
+  // An example without a folder asks for the folder first – then fills the input.
+  await dialogPicks(page, dir);
+  await page.getByRole("group", { name: "For example:" }).getByRole("button", { name: "Make a table of the invoices" }).click();
+  await expect(page.getByTestId("task-folder-chosen")).toContainText(dir.split("/").pop()!);
+  const ask = page.getByRole("textbox", { name: "What should Ancilo do?" });
+  await expect(ask).toHaveValue("Make a table of the invoices");
   await page.locator('input[type="file"]').setInputFiles({ name: "power.txt", mimeType: "text/plain", buffer: Buffer.from("Power: 120 Euro") });
   await expect(page.getByTestId("task-files")).toContainText("power.txt");
-  const ask = page.getByRole("textbox", { name: "What should Ancilo do?" });
-  await ask.fill("Make a table of the invoices");
   await ask.press("Enter");
-  const results = page.getByTestId("task-results");
-  await expect(results).toBeVisible({ timeout: 20_000 });
-  await expect(results).toContainText("Overview.xlsx");
-  // The file given stays material – no folder shown, no "keep".
-  await expect(results.getByRole("button", { name: "Keep" })).toHaveCount(0);
-  await dialogPicks(page, out);
-  await results.getByRole("button", { name: "Somewhere else…" }).click();
-  const saved = page.getByTestId("task-saved");
-  await expect(saved).toContainText(`in “${out.split("/").pop()}”`);
-  expect(readdirSync(out)).toContain("Overview.xlsx");
-  await expect(page.getByRole("list", { name: "Tasks", exact: true })).toContainText("Make a table of the invoices");
+  const changes = page.getByTestId("task-changes");
+  await expect(changes).toBeVisible({ timeout: 20_000 });
+  await expect(changes).toContainText("Overview.xlsx");
+  // Nothing in the folder until the user keeps it.
+  expect(readdirSync(dir)).toEqual([]);
+  await changes.getByRole("button", { name: "Keep" }).click();
+  await expect(page.getByTestId("task-applied")).toBeVisible();
+  expect(existsSync(join(dir, "Overview.xlsx"))).toBe(true);
+  expect(existsSync(join(dir, "2025", "power.txt"))).toBe(true);
 });

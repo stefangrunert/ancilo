@@ -33,14 +33,14 @@ function PendingFiles({ files, onRemove }: { files: File[]; onRemove: (i: number
   );
 }
 
-/** Starts a task: with a folder, the agent works in a copy of it; without
- * one, the files given are its material and its results are saved at the end. */
+/** Starts a task in a folder: the agent works in a copy of it; the files
+ * given go into that copy. */
 function useStartTask() {
   const client = useClient();
   const refresh = useRefresh();
-  return async (text: string, folder: string | null, files: File[]) => {
+  return async (text: string, folder: string, files: File[]) => {
     const title = (text.trim().split("\n")[0] ?? "").slice(0, 60);
-    const s = await client.op("create_task", folder ? { folder, title } : { title });
+    const s = await client.op("create_task", { folder, title });
     for (const f of files) await client.addTaskFile(s.id, f.name, f);
     await client.op("send_message", { session: s.id, text });
     await refresh("list_sessions", "list_projects");
@@ -63,60 +63,79 @@ function useChooseFolder() {
   };
 }
 
-/** Where a task works, shown above the input – one click takes it away. */
-function FolderChip({ path, onRemove }: { path: string; onRemove: () => void }) {
-  const { t } = useI18n();
-  return (
-    <div className="doc-row">
-      <span className="doc-chip" data-testid="task-folder-chip">
-        <Icon name="folder" size={15} />
-        <span className="doc-name">{t("tasks.worksIn", { name: nameOf(path) })}</span>
-        <button type="button" className="icon" aria-label={t("tasks.removeFolder")} title={t("tasks.removeFolder")} onClick={onRemove}>
-          <Icon name="close" size={12} />
-        </button>
-      </span>
-    </div>
-  );
-}
+const EXAMPLES: Key[] = ["tasksArea.example1", "tasksArea.example2", "tasksArea.example3"];
 
-/** The Tasks area's start: say what to do; give files or a folder. */
+/** The Tasks area's start, in two steps: first the folder, then what to do
+ * (with examples to start from). `preset`: a folder's own page – fixed. */
 export function TasksAreaPage({ folder: preset = null }: { folder?: string | null }) {
   const { t } = useI18n();
   const start = useStartTask();
   const choose = useChooseFolder();
   const [folder, setFolder] = useState<string | null>(preset);
   const [files, setFiles] = useState<File[]>([]);
+  // A chosen example fills the input (a new key starts it with that text).
+  const [draft, setDraft] = useState({ text: "", n: 0 });
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const pick = async () => {
+    setError(null);
+    try {
+      const p = await choose();
+      if (p) setFolder(p);
+      return p;
+    } catch (e) {
+      setError(e);
+      return null;
+    }
+  };
   return (
     <div className="page" data-testid="tasks-area">
       <div className="build stack">
         <h1 className="page-title">
-          <Icon name="computer" size={24} /> {folder ? nameOf(folder) : t("tasks.new")}
+          <Icon name="computer" size={24} /> {t("tasks.new")}
         </h1>
-        <p>{t("tasksArea.intro")}</p>
-        <ul className="examples">
-          <li>{t("tasksArea.example1")}</li>
-          <li>{t("tasksArea.example2")}</li>
-          <li>{t("tasksArea.example3")}</li>
-        </ul>
+        <p className="muted">{t("tasksArea.intro")}</p>
+        <h2 className="task-step">
+          <span className="task-step-n">1</span> {t("tasks.stepFolder")}
+        </h2>
+        {folder ? (
+          <div className="task-folder-row" data-testid="task-folder-chosen">
+            <Icon name="folder" size={20} />
+            <div className="grow">
+              <strong title={folder}>{nameOf(folder)}</strong>
+              <div className="muted small">{t("tasks.folderSafe")}</div>
+            </div>
+            {!preset && (
+              <button type="button" className="secondary" onClick={() => void pick()}>
+                {t("tasks.changeFolder")}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="task-folder-pick">
+            <Icon name="folder" size={24} />
+            <p>{t("tasks.folderSafe")}</p>
+            <p className="muted">{t("tasks.folderPlease")}</p>
+            <button type="button" onClick={() => void pick()}>
+              {t("tasks.chooseFolder")}
+            </button>
+          </div>
+        )}
+        <h2 className={folder ? "task-step" : "task-step off"}>
+          <span className="task-step-n">2</span> {t("tasks.ask")}
+        </h2>
         <Composer
+          key={draft.n}
+          initial={draft.text}
           label={t("tasks.ask")}
-          placeholder={t(folder ? "tasks.askFolderHint" : "tasks.askHint")}
+          placeholder={t(folder ? "tasks.askFolderHint" : "tasks.folderFirst")}
           busy={busy}
-          autoFocus
-          onFiles={(f) => setFiles((x) => [...x, ...f])}
-          onFolder={async () => {
-            const p = await choose();
-            if (p) setFolder(p);
-          }}
-          above={
-            <>
-              {folder && <FolderChip path={folder} onRemove={() => setFolder(null)} />}
-              <PendingFiles files={files} onRemove={(i) => setFiles((x) => x.filter((_, j) => j !== i))} />
-            </>
-          }
+          disabled={!folder}
+          autoFocus={!!folder}
+          onFiles={folder ? (f) => setFiles((x) => [...x, ...f]) : undefined}
+          above={<PendingFiles files={files} onRemove={(i) => setFiles((x) => x.filter((_, j) => j !== i))} />}
           onSend={async (text) => {
+            if (!folder) return;
             setError(null);
             setBusy(true);
             try {
@@ -129,10 +148,23 @@ export function TasksAreaPage({ folder: preset = null }: { folder?: string | nul
             }
           }}
         />
-        <p className="local-note">
-          <Icon name="lock" size={13} />
-          {t(folder ? "tasksArea.safe" : "tasksArea.safeFree")}
-        </p>
+        <div className="task-examples" role="group" aria-label={t("tasks.examples")}>
+          <span className="muted small">{t("tasks.examples")}</span>
+          {EXAMPLES.map((k) => (
+            <button
+              key={k}
+              type="button"
+              className="chip"
+              onClick={async () => {
+                // No folder yet? It comes first – then the example.
+                if (!folder && !(await pick())) return;
+                setDraft((d) => ({ text: t(k), n: d.n + 1 }));
+              }}
+            >
+              {t(k)}
+            </button>
+          ))}
+        </div>
         <ErrorNote error={error} onDismiss={() => setError(null)} />
       </div>
     </div>

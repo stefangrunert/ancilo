@@ -394,10 +394,11 @@ pub struct Chosen {
 }
 
 /// AppleScript for the folder dialog, shown in front of the user's current app.
+/// It opens in Documents: where most people keep what they work on.
 fn choose_script(prompt: &str) -> String {
     let prompt = prompt.replace('\\', "").replace('"', "'");
     format!(
-        "tell application (path to frontmost application as text) to POSIX path of (choose folder with prompt \"{prompt}\")"
+        "tell application (path to frontmost application as text) to POSIX path of (choose folder with prompt \"{prompt}\" default location (path to documents folder))"
     )
 }
 
@@ -452,5 +453,9 @@ mod choose_tests {
         let s = super::choose_script(r#"x" & do shell script "rm -rf ~" & ""#);
         assert_eq!(s.matches('"').count(), 2, "{s}");
         assert!(s.starts_with("tell application (path to frontmost application as text) to POSIX path of (choose folder with prompt \""));
+        assert!(
+            s.ends_with("default location (path to documents folder))"),
+            "{s}"
+        );
     }
 }

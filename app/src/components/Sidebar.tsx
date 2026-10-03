@@ -311,7 +311,7 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
       </Item>
   );
   const folders = prefs.data?.documents ?? [];
-  // Tasks: free ones (in a folder of their own) and the Tasks area's folders.
+  // Tasks: the Tasks area's folders – and free tasks from before (no folder).
   const freeRoots = new Set((projects.data ?? []).filter((p) => p.area === "task").map((p) => p.root));
   const taskFolders = (projects.data ?? []).filter((p) => p.area === "tasks");
   const freeTasks = all.filter((x) => x.kind === "task" && (x.free || freeRoots.has(x.project)));
@@ -473,15 +473,6 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
           <>
             <div className="nav-group">
               <div className="nav-heading">
-                <span>{t("tasks.free")}</span>
-              </div>
-              <ul className="nav-list" aria-label={t("tasks.free")}>
-                {freeTasks.map(renderTask)}
-              </ul>
-              {freeTasks.length === 0 && <p className="nav-empty">{t("tasks.noTasks")}</p>}
-            </div>
-            <div className="nav-group">
-              <div className="nav-heading">
                 <span>{t("tasks.projects")}</span>
               </div>
               <ul className="nav-list" aria-label={t("tasks.projects")}>
@@ -537,6 +528,17 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
               </ul>
               {taskFolders.length === 0 && <p className="nav-empty">{t("tasks.noFolders")}</p>}
             </div>
+            {/* Tasks from before every task had a folder – still there to finish. */}
+            {freeTasks.length > 0 && (
+              <div className="nav-group">
+                <div className="nav-heading">
+                  <span>{t("tasks.free")}</span>
+                </div>
+                <ul className="nav-list" aria-label={t("tasks.free")}>
+                  {freeTasks.map(renderTask)}
+                </ul>
+              </div>
+            )}
           </>
         )}
 

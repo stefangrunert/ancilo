@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithDaemon } from "../test-utils";
-import { TaskView } from "./TasksArea";
+import { TasksAreaPage, TaskView } from "./TasksArea";
 
 function task(extra: Record<string, unknown> = {}) {
   return {
@@ -102,5 +102,35 @@ describe("A task", () => {
     await waitFor(() => expect(calls.find((c) => c.op === "open_document")?.input).toEqual({ path: "/Users/me/Documents/Übersicht.xlsx" }));
     await userEvent.click(within(saved).getByRole("button", { name: "Show in Finder" }));
     await waitFor(() => expect(calls.find((c) => c.op === "show_in_finder")?.input).toEqual({ path: "/Users/me/Documents/Übersicht.xlsx" }));
+  });
+});
+
+// covers: M10-AC-04
+describe("A new task", () => {
+  it("needs a folder first; the system's dialog chooses it, and an example fills the input", async () => {
+    const { calls } = renderWithDaemon(<TasksAreaPage />, {
+      choose_folder: () => ({ path: "/Users/me/Verträge" }),
+      get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }),
+    });
+    const ask = await screen.findByRole("textbox", { name: "What should Ancilo do?" });
+    expect(ask).toBeDisabled();
+    expect(screen.getByText("Please choose a folder. You can change it later or add more folders.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Choose a folder" }));
+    const chosen = await screen.findByTestId("task-folder-chosen");
+    expect(chosen).toHaveTextContent("Verträge");
+    expect(calls.find((c) => c.op === "choose_folder")?.input).toEqual({ prompt: "Choose the folder Ancilo should work in" });
+    await userEvent.click(within(screen.getByRole("group", { name: "For example:" })).getByRole("button", { name: "Sort the files by year" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "What should Ancilo do?" })).toHaveValue("Sort the files by year"));
+    expect(screen.getByRole("textbox", { name: "What should Ancilo do?" })).toBeEnabled();
+  });
+
+  it("on a folder's own page, the folder is fixed", async () => {
+    renderWithDaemon(<TasksAreaPage folder="/Users/me/Belege" />, {
+      get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }),
+    });
+    const chosen = await screen.findByTestId("task-folder-chosen");
+    expect(chosen).toHaveTextContent("Belege");
+    expect(within(chosen).queryByRole("button", { name: "Change" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "What should Ancilo do?" })).toBeEnabled();
   });
 });
