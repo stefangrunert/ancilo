@@ -7,8 +7,8 @@ import { useClient, useLive, useOp, useRefresh } from "../state/store";
 import { ChatLayout, Composer, Thinking, UserBubble } from "./Chat";
 import { Markdown } from "./Markdown";
 import { BackToChat, greetingOf, QuickActions } from "./QuickActions";
-import { Icon } from "./Icon";
 import { ErrorNote } from "./ui";
+import { WebSwitch } from "./WebSearch";
 
 type Conversation = OpOutput<"get_conversation">;
 type Message = Conversation["messages"][number];
@@ -279,10 +279,6 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
   const pendingActions = useOp("pending_actions");
   const [inflight, setInflight] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const webSettings = useOp("get_web_search");
-  const webOn = (webSettings.data?.provider ?? "off") !== "off" && kind !== "setup";
-  // The globe: search the web for the next message.
-  const [searchNext, setSearchNext] = useState(false);
   const [searching, setSearching] = useState(false);
   const messages = id ? (conversation.data?.messages ?? []) : [];
   const liveIds = new Set((pendingActions.data ?? []).map((p) => p.id));
@@ -292,13 +288,7 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
     setError(null);
     setInflight(prompt);
     try {
-      // Only when the user asked for it (the globe); otherwise as set.
-      const web = webOn && searchNext ? { web: "always" as const } : {};
-      const r = await client.op(
-        "ask",
-        id ? { prompt, conversation: id, ...web } : { prompt, remember: true, kind, greeting: greeting?.text ?? null, ...web },
-      );
-      setSearchNext(false);
+      const r = await client.op("ask", id ? { prompt, conversation: id } : { prompt, remember: true, kind, greeting: greeting?.text ?? null });
       await refresh("get_conversation", "list_conversations", "pending_actions");
       if (!id && r.conversation) navigate({ view: "chat", id: r.conversation }, true);
     } catch (e) {
@@ -322,21 +312,11 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
       setSearching(false);
     }
   };
-  const globe = webOn ? (
-    <button
-      type="button"
-      className={searchNext ? "web-toggle on" : "web-toggle"}
-      aria-pressed={searchNext}
-      title={t("web.chat.toggleHint")}
-      onClick={() => setSearchNext((v) => !v)}
-    >
-      <Icon name="globe" size={14} />
-      <span>{t("web.chat.toggle")}</span>
-    </button>
-  ) : undefined;
+  // Setup chats are about Ancilo itself: no web there.
+  const webSwitch = kind !== "setup" ? <WebSwitch onError={setError} /> : undefined;
 
   const composer = (
-    <Composer label={t("assistant.placeholder")} placeholder={t(greeting ? "assistant.placeholderReply" : "assistant.placeholderLong")} onSend={ask} busy={inflight !== null || searching} autoFocus extra={globe} />
+    <Composer label={t("assistant.placeholder")} placeholder={t(greeting ? "assistant.placeholderReply" : "assistant.placeholderLong")} onSend={ask} busy={inflight !== null || searching} autoFocus extra={webSwitch} />
   );
   // A new plain chat: what one can do here.
   if (!id && !greeting && !inflight && messages.length === 0) {

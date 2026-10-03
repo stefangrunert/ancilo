@@ -3,6 +3,7 @@ import type { OpOutput } from "../api/client";
 import { useI18n, type Key } from "../i18n";
 import { navigate } from "../state/route";
 import { useClient, useOp, useRefresh } from "../state/store";
+import { Icon } from "./Icon";
 import { ErrorNote } from "./ui";
 
 type View = OpOutput<"get_web_search">;
@@ -10,6 +11,32 @@ type Provider = View["provider"];
 
 const PROVIDERS: Provider[] = ["off", "wikipedia", "serper"];
 const SERPER = "https://serper.dev/";
+
+/** The web search switch beside the input (chats and coding): on – Ancilo
+ * searches without asking when it needs to; off – it asks before every search.
+ * Only there once web search is set up. */
+export function WebSwitch({ onError }: { onError?: (e: unknown) => void }) {
+  const { t } = useI18n();
+  const client = useClient();
+  const refresh = useRefresh();
+  const view = useOp("get_web_search").data;
+  if (!view || view.provider === "off") return null;
+  const on = view.mode === "auto";
+  const flip = async () => {
+    try {
+      await client.op("set_web_search", { mode: on ? "ask" : "auto" });
+      await refresh("get_web_search");
+    } catch (e) {
+      onError?.(e);
+    }
+  };
+  return (
+    <button type="button" role="switch" aria-checked={on} className={on ? "web-toggle on" : "web-toggle"} title={t(on ? "web.switch.onHint" : "web.switch.offHint")} onClick={() => void flip()}>
+      <Icon name="globe" size={14} />
+      <span>{t("web.switch")}</span>
+    </button>
+  );
+}
 
 /** The Serper key: how to get one, then check and save it. */
 function SerperSetup({ view, onSaved }: { view: View; onSaved: () => Promise<void> }) {

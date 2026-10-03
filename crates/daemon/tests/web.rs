@@ -393,7 +393,7 @@ impl Env {
 
 // covers: M8-AC-13
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_coding_agent_searches_only_with_an_ok_for_each_search() {
+async fn a_coding_agent_asks_before_each_search_unless_the_switch_is_on() {
     let script = r#"
 steps:
   # Web search off: the agent has no such tool.
@@ -406,6 +406,11 @@ steps:
     respond: { tool_calls: [{ name: web_search, arguments: { query: "Oslo Geschichte" } }] }
   - expect: { any_message_contains: "The user did not allow this action" }
     respond: { text: "Fertig." }
+  # The switch on: the agent searches without asking.
+  - expect: { last_user_contains: "Nochmal" }
+    respond: { tool_calls: [{ name: web_search, arguments: { query: "Oslo Einwohner" } }] }
+  - expect: { last_user_contains: "Nochmal", any_message_contains: "<<<web content>>>" }
+    respond: { text: "Gefunden." }
 "#;
     let env = Env::start(script).await;
     env.web.article("en", "Oslo", OSLO);
@@ -478,5 +483,18 @@ steps:
         .map(|m| m["text"].as_str().unwrap_or_default())
         .collect();
     assert!(text.contains("Fertig."), "{text}");
+
+    // The web search switch on: no question, the search goes out.
+    env.op("set_web_search", json!({"mode": "auto"})).await;
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Nochmal", "wait": true}),
+        )
+        .await;
+    assert!(s["approvals"].as_array().unwrap().is_empty());
+    assert!(env.web.requests().len() > sent, "the search went out");
+    let last = s["messages"].as_array().unwrap().last().unwrap()["text"].clone();
+    assert_eq!(last, "Gefunden.", "{s}");
     env.stop().await;
 }

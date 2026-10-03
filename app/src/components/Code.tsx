@@ -8,6 +8,7 @@ import { ChatLayout, Composer, Thinking, UserBubble } from "./Chat";
 import { Markdown } from "./Markdown";
 import { TerminalView } from "./Terminal";
 import { Dialog, ErrorNote, StatusDot } from "./ui";
+import { WebSwitch } from "./WebSearch";
 
 type Model = OpOutput<"list_models">[number];
 type Session = OpOutput<"get_session">;
@@ -537,6 +538,7 @@ export function SessionView({ id, models }: { id: string; models: Model[] }) {
               extra={
                 <>
                   <AccessChoice s={s} disabled={running} onChange={(permission) => void update({ permission })} />
+                  <WebSwitch onError={setError} />
                   {pro && modelChoice}
                 </>
               }

@@ -23,8 +23,8 @@ Each session has one of two modes, chosen under the input:
 
 | Mode | Without asking | Asks before |
 |---|---|---|
-| **Ask first** | read and search the project | every change, every command, every web search |
-| **Approve for me** (default) | change files in its copy, run commands in the sandbox | every web search |
+| **Ask first** | read and search the project | every change, every command |
+| **Approve for me** (default) | change files in its copy, run commands in the sandbox | – |
 
 Either way the agent works in its copy and **only you keep changes**. There is no mode that runs commands outside the sandbox.
 
@@ -42,7 +42,12 @@ The agent's commands run in a sandbox (Seatbelt on macOS, Bubblewrap on Linux; w
 
 ### Web search
 
-With web search turned on (System › Web search), the agent can look up documentation and error messages. **Every search asks first – in both modes**: you see exactly the search words and where they go (Wikipedia or Google through Serper), and the OK counts for this one search only. Nothing else from the project goes out. What comes back is marked for the agent as text from foreign pages.
+Once web search is set up (System › Web search), the agent can look up documentation and error messages. The **Web search** switch beside the input decides – the same switch as in chats:
+
+- **off** (default): every search asks first, in both modes. You see exactly the search words and where they go (Wikipedia or Google through Serper); the OK counts for this one search only.
+- **on**: the agent searches without asking. Its searches show among its steps.
+
+Only the search words go out, nothing else from the project. What comes back is marked for the agent as text from foreign pages.
 
 Text from the web can try to steer the agent. So before you keep changes, Ancilo says when the agent read web pages in the session – and marks changed files that **run code** when the project is built, installed or tested (build scripts, package files and lock files, hooks, CI, shell scripts). Look at those before you keep them: once in your project, they run outside the sandbox.
 

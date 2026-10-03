@@ -32,6 +32,9 @@ test("web search is off until chosen, asks before searching and answers with sou
   // A question that needs facts: Ancilo shows the query first.
   await page.getByRole("button", { name: "New chat" }).click();
   const box = page.getByRole("textbox", { name: "What should Ancilo do?" });
+  // The switch beside the input is off: Ancilo asks before searching.
+  const toggle = page.getByRole("switch", { name: "Web search" });
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
   await box.fill("Wie viele Einwohner hat Oslo?");
   await box.press("Enter");
   const proposal = page.getByTestId("web-proposal");
@@ -42,4 +45,10 @@ test("web search is off until chosen, asks before searching and answers with sou
   await expect(sources).toContainText("Searched the web for “Einwohnerzahl Oslo” · Wikipedia");
   await expect(sources.getByRole("link", { name: "Oslo" })).toHaveAttribute("href", /\/wiki\/Oslo$/);
   await expect(proposal).toHaveCount(0);
+  // Switched on: Ancilo searches without asking from now on.
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect.poll(async () => (await daemon.op("get_web_search")).mode).toBe("auto");
+  await page.getByRole("button", { name: "System", exact: true }).click();
+  await expect(status).toContainText("searches automatically");
 });

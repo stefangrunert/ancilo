@@ -2,10 +2,11 @@
 //! permission. A call above it pauses until the user decides
 //! (`session.approval_required` → `approve` / `reject`).
 //!
-//! With web search turned on, also `web_search` (decision
-//! `2026-10-03-coding-zugriff-websuche`): every search needs the user's OK,
-//! whatever the permission, and an OK is never remembered – the query leaves
-//! the computer.
+//! With web search set up, also `web_search` (decision
+//! `2026-10-03-coding-zugriff-websuche`). The user's web search switch decides:
+//! on – the agent searches without asking; off – every search needs the
+//! user's OK, whatever the permission, and an OK is never remembered (the
+//! query leaves the computer).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -23,6 +24,8 @@ use tokio_util::sync::CancellationToken;
 pub trait WebLookup: Send + Sync {
     /// The chosen provider (`wikipedia`, `serper`); `None`: web search is off.
     fn provider(&self) -> Option<String>;
+    /// The web search switch is on: search without asking.
+    fn automatic(&self) -> bool;
     /// Searches `query`: sources and the passages, ready for the agent.
     fn search<'a>(&'a self, query: &'a str) -> BoxFuture<'a, Result<String, String>>;
 }
@@ -248,9 +251,10 @@ impl SessionTools {
         }
         // Exactly what is asked is what is sent: only the query.
         let sent = json!({"query": query});
-        if let Err(e) = self
-            .ask(WEB_SEARCH, &sent, Access::Shell, Some(provider))
-            .await
+        if !web.automatic()
+            && let Err(e) = self
+                .ask(WEB_SEARCH, &sent, Access::Shell, Some(provider))
+                .await
         {
             return ToolOutput::err(e);
         }

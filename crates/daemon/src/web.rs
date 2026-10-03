@@ -198,8 +198,8 @@ impl WebSearch {
 }
 
 /// The web search as a coding agent's tool (decision
-/// `2026-10-03-coding-zugriff-websuche`): the session asks the user before
-/// every search; this only searches and marks what comes back as foreign.
+/// `2026-10-03-coding-zugriff-websuche`): with the switch off the session asks
+/// before every search; this only searches and marks what comes back as foreign.
 pub struct AgentWeb(pub WebSearch);
 
 /// What an agent gets back from a search.
@@ -226,6 +226,10 @@ impl ancilo_sessions::tools::WebLookup for AgentWeb {
                 .ok()
                 .and_then(|v| v.as_str().map(String::from)),
         }
+    }
+
+    fn automatic(&self) -> bool {
+        self.0.settings().mode == Mode::Auto
     }
 
     fn search<'a>(

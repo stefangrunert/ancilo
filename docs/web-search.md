@@ -19,9 +19,10 @@ Ancilo never pays anything by itself; when your free searches are used up, Ancil
 
 ## When Ancilo searches
 
-- **Ask me first** (default): when a question needs facts, Ancilo shows the search query – change it if you like – and searches only after you click **Search**. *Answer without the web* answers from what the AI knows.
-- **Automatically**: Ancilo searches by itself when a question needs current facts.
-- The **globe** next to the input (*Search the web*) searches for your next message in any case.
+The **Web search** switch beside the input (in chats and coding sessions) sets when Ancilo searches – the same setting as *When Ancilo searches* on the web search page:
+
+- **Off – Ask me first** (default): when a question needs facts, Ancilo shows the search query – change it if you like – and searches only after you click **Search**. *Answer without the web* answers from what the AI knows.
+- **On – Automatically**: Ancilo searches by itself when a question needs current facts.
 
 Writing, translating, explanations and small talk are not searched.
 
@@ -35,7 +36,7 @@ Every answer with a web search says what was searched and lists its **sources**;
 
 ## In coding sessions
 
-The coding agent can search, too – for documentation or error messages. Every search shows its search words and asks first, whatever the session's mode; only those words go out. See [coding.md](coding.md#web-search).
+The coding agent can search, too – for documentation or error messages. With the switch off, every search shows its search words and asks first, whatever the session's mode; with it on, the agent searches by itself. Only the search words go out. See [coding.md](coding.md#web-search).
 
 ## For experts
 

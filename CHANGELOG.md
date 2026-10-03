@@ -5,7 +5,8 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 ## Unreleased
 
 - **Coding: two access modes** for every session – *Ask first* or *Approve for me* (new default: changes in the copy and sandboxed commands without asking). No mode runs commands outside the sandbox.
-- **Coding: web search** for the agent, when web search is on – every search shows its words and asks first, in both modes.
+- **A web search switch** beside the input, in chats and coding sessions: off – Ancilo (and the coding agent) asks before every search; on – it searches without asking. It replaces the globe that searched only the next message.
+- **Coding: web search** for the agent, once web search is set up – with the switch off, every search shows its words and asks first.
 - **Coding: a stricter sandbox** – no `/tmp`, a temporary folder of its own, no reading of SSH/cloud keys, keychains, browser profiles or Ancilo's own data, no inherited environment, lower priority.
 - **Coding: before keeping**, files that run code on build or install are marked, and sessions that read web pages say so.
 - **Coding: new projects** – name, then the folder it goes into; **+** next to a project starts another chat; terminals open in the project folder.

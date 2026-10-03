@@ -113,23 +113,36 @@ describe("Web search in a chat", () => {
     expect(screen.queryByTestId("web-proposal")).toBeNull();
   });
 
-  it("offers to set it up while it is off – and a globe searches the next message", async () => {
+  it("offers to set it up while it is off – and has no switch then", async () => {
     const offer = { role: "assistant", text: "Etwa 700.000, das kann veraltet sein.", at: "", web: { state: "offer" } };
     chat([question, offer], {}, settings());
     const card = await screen.findByTestId("web-offer");
+    expect(screen.queryByRole("switch", { name: "Web search" })).toBeNull();
     await userEvent.click(within(card).getByRole("button", { name: "Set up web search" }));
     expect(window.location.hash).toBe("#/web");
     window.history.replaceState(null, "", "#/");
   });
 
-  it("searches the next message when the globe is on", async () => {
-    const { calls } = chat([], { ask: () => ({ answer: "ok", conversation: "c-1" }) });
-    const globe = await screen.findByRole("button", { name: "Search the web" });
-    expect(globe).toHaveAttribute("aria-pressed", "false");
-    await userEvent.click(globe);
-    expect(globe).toHaveAttribute("aria-pressed", "true");
+  it("has a web search switch: off asks first, on searches without asking", async () => {
+    let web = settings({ provider: "wikipedia" });
+    const { calls } = renderWithDaemon(<ConversationView id="c-1" />, {
+      get_conversation: () => ({ id: "c-1", title: "Oslo", kind: "chat", created_at: "", updated_at: "", messages: [] }),
+      pending_actions: () => [],
+      get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }),
+      get_web_search: () => web,
+      set_web_search: (i) => (web = settings({ ...web, ...i })),
+      list_conversations: () => [],
+      ask: () => ({ answer: "ok", conversation: "c-1" }),
+    });
+    const toggle = await screen.findByRole("switch", { name: "Web search" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await userEvent.click(toggle);
+    await waitFor(() => expect(calls.find((c) => c.op === "set_web_search")?.input).toEqual({ mode: "auto" }));
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    // A message goes as it is: the switch is the setting, not a per-message flag.
     await userEvent.type(screen.getByRole("textbox", { name: "What should Ancilo do?" }), "Wetter in Oslo?{Enter}");
-    await waitFor(() => expect(calls.find((c) => c.op === "ask")?.input).toEqual({ prompt: "Wetter in Oslo?", conversation: "c-1", web: "always" }));
-    await waitFor(() => expect(globe).toHaveAttribute("aria-pressed", "false"));
+    await waitFor(() => expect(calls.find((c) => c.op === "ask")?.input).toEqual({ prompt: "Wetter in Oslo?", conversation: "c-1" }));
+    await userEvent.click(toggle);
+    await waitFor(() => expect(calls.filter((c) => c.op === "set_web_search").pop()?.input).toEqual({ mode: "ask" }));
   });
 });
