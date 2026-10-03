@@ -1362,3 +1362,107 @@ steps:
     assert!(!ok);
     env.stop().await;
 }
+
+// covers: M10-AC-04
+/// Files given to a task in a folder: one the folder already holds is meant
+/// as it is (no second copy); a new one goes into the copy. The agent learns
+/// where they are with the next message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn files_given_to_a_task_are_named_to_the_agent_and_never_doubled() {
+    let script = r#"
+steps:
+  - expect: { last_user_contains: "(Files the user gave for this:\n- Rechnungen/strom.txt\n- quittung.txt)" }
+    respond: { text: "Gesehen." }
+  - expect: { last_user_contains: "Und jetzt?" }
+    respond: { text: "Nichts weiter." }
+"#;
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
+    let folder = env.home.scratch("Quittungen");
+    std::fs::create_dir_all(folder.join("Rechnungen")).unwrap();
+    std::fs::write(folder.join("Rechnungen/strom.txt"), "Stadtwerke: 120 Euro").unwrap();
+    let folder = folder.canonicalize().unwrap();
+    let s = env
+        .op(
+            "create_task",
+            json!({"folder": folder, "title": "Quittungen"}),
+        )
+        .await;
+    let id = s["id"].as_str().unwrap().to_string();
+    let give = |name: &'static str, body: &'static str| {
+        let (url, token, id) = (env.d().url(), env.d().token.clone(), id.clone());
+        async move {
+            let r = reqwest::Client::new()
+                .post(format!("{url}/api/v1/sessions/{id}/files"))
+                .query(&[("name", name)])
+                .bearer_auth(token)
+                .body(body)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status(), 200);
+            r.json::<Value>().await.unwrap()
+        }
+    };
+    give("strom.txt", "Stadtwerke: 120 Euro").await;
+    give("quittung.txt", "Bäcker: 4 Euro").await;
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Fass die Quittungen zusammen", "wait": true}),
+        )
+        .await;
+    let last = s["messages"].as_array().unwrap().last().unwrap()["text"].clone();
+    assert_eq!(last, "Gesehen.", "{s}");
+    // Only the new file is a change – the folder's own is not doubled.
+    let changes: Vec<(String, String)> = s["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["change"].as_str().unwrap().to_string(),
+                c["path"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(changes, [("added".to_string(), "quittung.txt".to_string())]);
+    assert!(!folder.join("quittung.txt").exists() && !folder.join("strom.txt").exists());
+    // Named once: the next message carries no files.
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Und jetzt?", "wait": true}),
+        )
+        .await;
+    let last = s["messages"].as_array().unwrap().last().unwrap()["text"].clone();
+    assert_eq!(last, "Nichts weiter.", "{s}");
+    env.stop().await;
+}
+
+// covers: M10-AC-04
+/// A task sees everything in its folder that is not hidden: the home folder
+/// itself, Library and system folders are never one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_task_never_works_in_the_home_folder_or_system_folders() {
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", "fallback: { text: \"-\" }\n")]).await;
+    let home = dirs::home_dir().unwrap();
+    for folder in [
+        home.clone(),
+        home.join("Library"),
+        "/".into(),
+        "/usr".into(),
+    ] {
+        if !folder.is_dir() {
+            continue;
+        }
+        let (ok, e) = env
+            .call("create_task", json!({"folder": folder, "title": "x"}), true)
+            .await;
+        assert!(!ok && e.to_string().contains("too wide"), "{folder:?}: {e}");
+        let (ok, _) = env
+            .call("open_task_folder", json!({"path": folder}), true)
+            .await;
+        assert!(!ok, "{folder:?}");
+    }
+    env.stop().await;
+}

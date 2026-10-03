@@ -241,6 +241,14 @@
       "Applied": {
         "description": "What an apply did – kept for undo.",
         "properties": {
+          "after": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "What the folder holds after it (path → SHA-256): what an undo\nexpects there – whatever the copy did since.",
+            "type": "object"
+          },
           "at": {
             "format": "date-time",
             "type": "string"
@@ -16359,6 +16367,14 @@
                 "schema": {
                   "description": "What an apply did – kept for undo.",
                   "properties": {
+                    "after": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "default": {},
+                      "description": "What the folder holds after it (path → SHA-256): what an undo\nexpects there – whatever the copy did since.",
+                      "type": "object"
+                    },
                     "at": {
                       "format": "date-time",
                       "type": "string"

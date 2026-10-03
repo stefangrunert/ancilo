@@ -1,17 +1,20 @@
 //! The tools of a task (decision `2026-10-03-drei-bereiche`): an agent that
-//! works with the user's documents – in the session's copy of the folder,
+//! works with the user's documents – through the session's copy of the
+//! folder ([`WorkCopy`]: it reads the folder, but writes only the copy),
 //! never anywhere else. It reads documents (in the sandboxed reader), finds
 //! things in them, writes new ones (text, spreadsheets, Word) and sorts
 //! files. No commands, no network: nothing here can leave the copy.
 
 use std::collections::HashMap;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use ancilo_agent::{FileChange, ToolOutput, Toolbox};
 use ancilo_core::BoxFuture;
 use ancilo_docs::{Extractor, Part};
 use serde_json::{Value, json};
+
+use crate::workcopy::WorkCopy;
 
 /// What `write_file` may write: text that never runs when opened.
 const TEXT_KINDS: &[&str] = &[
@@ -31,9 +34,12 @@ const TEXT_KINDS: &[&str] = &[
 const READ_CHARS: usize = 24_000;
 /// Entries `list_files` shows at most.
 const LIST_MAX: usize = 400;
+/// Entries `list_files` and `search_documents` look at at most (a folder
+/// like Documents can hold very many).
+const WALK_MAX: usize = 50_000;
 
 pub struct DocTools {
-    root: PathBuf,
+    copy: WorkCopy,
     extractor: Arc<Extractor>,
     /// Read documents (path, size, mtime → parts): one reading per version.
     cache: Mutex<HashMap<(PathBuf, u64, i64), Vec<Part>>>,
@@ -46,44 +52,66 @@ fn def(name: &str, description: &str, properties: Value, required: &[&str]) -> V
 }
 
 impl DocTools {
-    pub fn new(root: PathBuf, extractor: Arc<Extractor>) -> Self {
+    pub fn new(copy: WorkCopy, extractor: Arc<Extractor>) -> Self {
         Self {
-            root,
+            copy,
             extractor,
             cache: Mutex::default(),
             touched: Mutex::default(),
         }
     }
 
-    /// A path inside the folder – nothing outside it, nothing hidden.
-    fn inside(&self, rel: &str) -> Result<PathBuf, String> {
-        let rel = rel.trim().trim_start_matches("./");
-        let p = Path::new(rel);
-        if rel.is_empty() || p.is_absolute() {
+    /// A path inside the folder in its one spelling – nothing outside it,
+    /// nothing hidden (links are never followed: the copy checks each step).
+    fn inside(rel: &str) -> Result<String, String> {
+        let r = rel.trim();
+        let r = r.strip_prefix("./").unwrap_or(r).trim_end_matches('/');
+        if r.is_empty() || r.starts_with('/') {
             return Err("give a path inside the folder, like \"Invoices/2025.xlsx\"".into());
         }
-        for c in p.components() {
-            match c {
-                Component::Normal(n) if n.to_string_lossy().starts_with('.') => {
-                    return Err("hidden files are not part of the task".into());
-                }
-                Component::Normal(_) => {}
-                _ => return Err("the path must stay inside the folder".into()),
+        for part in r.split('/') {
+            if part.is_empty() || part == "." || part == ".." {
+                return Err("the path must stay inside the folder".into());
+            }
+            if part.starts_with('.') {
+                return Err("hidden files are not part of the task".into());
             }
         }
-        // No part of the path may be a link – not even a broken one.
-        let mut at = self.root.clone();
-        for c in p.components() {
-            at.push(c);
-            match std::fs::symlink_metadata(&at) {
-                Ok(m) if m.file_type().is_symlink() => {
-                    return Err("the path must stay inside the folder".into());
+        crate::workcopy::clean(r).ok_or_else(|| "the path must stay inside the folder".into())
+    }
+
+    /// The file the task sees at `rel` (from the copy or the folder).
+    fn file(&self, rel: &str) -> Result<PathBuf, String> {
+        self.copy
+            .file(rel)
+            .ok_or_else(|| format!("{rel} is not a file – list_files shows what there is"))
+    }
+
+    /// Every file under `dir` (`""`: all), at most [`WALK_MAX`] entries looked
+    /// at; `true` if there were more.
+    fn walk(&self, dir: &str, mut each: impl FnMut(&str, &crate::workcopy::Item) -> bool) -> bool {
+        let mut seen = 0;
+        let mut stack = vec![dir.to_string()];
+        while let Some(dir) = stack.pop() {
+            for item in self.copy.list(&dir) {
+                seen += 1;
+                if seen > WALK_MAX {
+                    return true;
                 }
-                Ok(_) => {}
-                Err(_) => break,
+                let rel = if dir.is_empty() {
+                    item.name.clone()
+                } else {
+                    format!("{dir}/{}", item.name)
+                };
+                if item.dir {
+                    stack.push(rel.clone());
+                }
+                if !each(&rel, &item) {
+                    return false;
+                }
             }
         }
-        Ok(self.root.join(p))
+        false
     }
 
     fn touch(&self, rel: &str) {
@@ -98,53 +126,38 @@ impl DocTools {
             .as_str()
             .filter(|p| !p.trim().is_empty() && p.trim() != ".")
         {
-            Some(p) => match self.inside(p) {
-                Ok(p) => p,
+            Some(p) => match Self::inside(p) {
+                Ok(p) if self.copy.is_dir(&p) => p,
+                Ok(p) => return ToolOutput::err(format!("{p} is not a folder")),
                 Err(e) => return ToolOutput::err(e),
             },
-            None => self.root.clone(),
+            None => String::new(),
         };
         let mut out = Vec::new();
-        let mut stack = vec![base.clone()];
         let mut more = 0;
-        while let Some(dir) = stack.pop() {
-            let Ok(rd) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            let mut entries: Vec<_> = rd.flatten().collect();
-            entries.sort_by_key(|e| e.file_name());
-            for e in entries {
-                let name = e.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') {
-                    continue;
-                }
-                let Ok(meta) = std::fs::symlink_metadata(e.path()) else {
-                    continue;
-                };
-                let rel = e
-                    .path()
-                    .strip_prefix(&self.root)
-                    .unwrap_or(&e.path())
-                    .to_string_lossy()
-                    .into_owned();
-                if out.len() >= LIST_MAX {
-                    more += 1;
-                    continue;
-                }
-                if meta.is_dir() {
-                    out.push(format!("{rel}/"));
-                    stack.push(e.path());
-                } else if meta.is_file() {
-                    out.push(format!("{rel}  ({})", size(meta.len())));
-                }
+        let cut = self.walk(&base, |rel, item| {
+            if out.len() >= LIST_MAX {
+                more += 1;
+            } else if item.dir {
+                out.push(format!("{rel}/"));
+            } else {
+                out.push(format!("{rel}  ({})", size(item.size)));
             }
-        }
+            true
+        });
         if out.is_empty() {
             return ToolOutput::ok("the folder is empty");
         }
         let mut s = out.join("\n");
-        if more > 0 {
-            s.push_str(&format!("\n… and {more} more"));
+        if more > 0 || cut {
+            s.push_str(&format!(
+                "\n… and {}more – list a subfolder with `path`, or use search_documents",
+                if cut {
+                    String::new()
+                } else {
+                    format!("{more} ")
+                }
+            ));
         }
         ToolOutput::ok(s)
     }
@@ -174,16 +187,14 @@ impl DocTools {
     }
 
     async fn read(&self, args: &Value) -> ToolOutput {
-        let rel = args["path"].as_str().unwrap_or_default();
-        let full = match self.inside(rel) {
+        let rel = match Self::inside(args["path"].as_str().unwrap_or_default()) {
+            Ok(r) => r,
+            Err(e) => return ToolOutput::err(e),
+        };
+        let full = match self.file(&rel) {
             Ok(p) => p,
             Err(e) => return ToolOutput::err(e),
         };
-        if !std::fs::symlink_metadata(&full).is_ok_and(|m| m.is_file()) {
-            return ToolOutput::err(format!(
-                "{rel} is not a file – list_files shows what there is"
-            ));
-        }
         let parts = match self.parts(&full).await {
             Ok(p) => p,
             Err(e) => return ToolOutput::err(e),
@@ -225,40 +236,21 @@ impl DocTools {
         if query.trim().is_empty() {
             return ToolOutput::err("give a few search words as `query`");
         }
+        // The documents first (links are never part of the copy's view),
+        // then read – each once per version.
+        let mut found = Vec::new();
+        self.walk("", |rel, item| {
+            if !item.dir && ancilo_docs::extract::kind_of(&item.name).is_some() {
+                found.push(rel.to_string());
+            }
+            found.len() < 500
+        });
         let mut docs = Vec::new();
-        let mut stack = vec![self.root.clone()];
-        while let Some(dir) = stack.pop() {
-            let Ok(rd) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for e in rd.flatten() {
-                let name = e.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') {
-                    continue;
-                }
-                let p = e.path();
-                // Links are not followed: nothing outside the copy, no cycles.
-                let Ok(meta) = std::fs::symlink_metadata(&p) else {
-                    continue;
-                };
-                if meta.file_type().is_symlink() {
-                    continue;
-                }
-                if meta.is_dir() {
-                    stack.push(p);
-                } else if meta.is_file()
-                    && ancilo_docs::extract::kind_of(&name).is_some()
-                    && docs.len() < 500
-                {
-                    let rel = p
-                        .strip_prefix(&self.root)
-                        .unwrap_or(&p)
-                        .to_string_lossy()
-                        .into_owned();
-                    if let Ok(parts) = self.parts(&p).await {
-                        docs.push((rel, parts));
-                    }
-                }
+        for rel in found {
+            if let Some(p) = self.copy.file(&rel)
+                && let Ok(parts) = self.parts(&p).await
+            {
+                docs.push((rel, parts));
             }
         }
         docs.sort_by(|a, b| a.0.cmp(&b.0));
@@ -273,27 +265,22 @@ impl DocTools {
     }
 
     fn write_bytes(&self, rel: &str, bytes: &[u8], overwrite: bool) -> ToolOutput {
-        let full = match self.inside(rel) {
-            Ok(p) => p,
+        let rel = match Self::inside(rel) {
+            Ok(r) => r,
             Err(e) => return ToolOutput::err(e),
         };
-        if full.is_dir() {
+        if self.copy.is_dir(&rel) {
             return ToolOutput::err(format!("{rel} is a folder"));
         }
-        let existed = full.exists();
+        let existed = self.copy.file(&rel).is_some();
         if existed && !overwrite {
             return ToolOutput::err(format!(
                 "{rel} exists already – choose another name, or pass overwrite: true"
             ));
         }
-        if let Some(parent) = full.parent()
-            && let Err(e) = std::fs::create_dir_all(parent)
-        {
-            return ToolOutput::err(e.to_string());
-        }
-        match std::fs::write(&full, bytes) {
+        match self.copy.write(&rel, bytes) {
             Ok(()) => {
-                self.touch(rel);
+                self.touch(&rel);
                 ToolOutput::ok(format!(
                     "{} {rel} ({}) – in the copy; the user decides whether it is kept",
                     if existed { "replaced" } else { "wrote" },
@@ -364,15 +351,15 @@ impl DocTools {
     }
 
     fn move_file(&self, args: &Value) -> ToolOutput {
-        let (from, to) = (
-            args["from"].as_str().unwrap_or_default(),
-            args["to"].as_str().unwrap_or_default(),
-        );
-        let (src, dst) = match (self.inside(from), self.inside(to)) {
+        let (from, to) = match (
+            Self::inside(args["from"].as_str().unwrap_or_default()),
+            Self::inside(args["to"].as_str().unwrap_or_default()),
+        ) {
             (Ok(a), Ok(b)) => (a, b),
             (Err(e), _) | (_, Err(e)) => return ToolOutput::err(e),
         };
-        if !src.exists() {
+        let is_file = self.copy.file(&from).is_some();
+        if !is_file && !self.copy.is_dir(&from) {
             return ToolOutput::err(format!("{from} does not exist"));
         }
         // A file keeps its kind: renaming never turns a document into
@@ -382,23 +369,15 @@ impl DocTools {
                 .extension()
                 .map(|e| e.to_string_lossy().to_ascii_lowercase())
         };
-        if src.is_file() && ext(from) != ext(to) {
+        if is_file && ext(&from) != ext(&to) {
             return ToolOutput::err(format!(
                 "{to} would change the kind of {from} – keep its ending (.{})",
-                ext(from).unwrap_or_default()
+                ext(&from).unwrap_or_default()
             ));
         }
-        if dst.exists() {
-            return ToolOutput::err(format!("{to} exists already"));
-        }
-        if let Some(parent) = dst.parent()
-            && let Err(e) = std::fs::create_dir_all(parent)
-        {
-            return ToolOutput::err(e.to_string());
-        }
-        match std::fs::rename(&src, &dst) {
+        match self.copy.rename(&from, &to) {
             Ok(()) => {
-                self.touch(to);
+                self.touch(&to);
                 ToolOutput::ok(format!("moved {from} to {to} (in the copy)"))
             }
             Err(e) => ToolOutput::err(e.to_string()),
@@ -406,28 +385,30 @@ impl DocTools {
     }
 
     fn make_folder(&self, args: &Value) -> ToolOutput {
-        let rel = args["path"].as_str().unwrap_or_default();
-        match self
-            .inside(rel)
-            .map(|p| std::fs::create_dir_all(p).map_err(|e| e.to_string()))
-        {
-            Ok(Ok(())) => ToolOutput::ok(format!("folder {rel} is there (in the copy)")),
-            Ok(Err(e)) | Err(e) => ToolOutput::err(e),
+        let rel = match Self::inside(args["path"].as_str().unwrap_or_default()) {
+            Ok(r) => r,
+            Err(e) => return ToolOutput::err(e),
+        };
+        if self.copy.file(&rel).is_some() {
+            return ToolOutput::err(format!("{rel} is a file"));
+        }
+        match self.copy.make_dir(&rel) {
+            Ok(()) => ToolOutput::ok(format!("folder {rel} is there (in the copy)")),
+            Err(e) => ToolOutput::err(e.to_string()),
         }
     }
 
     fn delete(&self, args: &Value) -> ToolOutput {
-        let rel = args["path"].as_str().unwrap_or_default();
-        let full = match self.inside(rel) {
-            Ok(p) => p,
+        let rel = match Self::inside(args["path"].as_str().unwrap_or_default()) {
+            Ok(r) => r,
             Err(e) => return ToolOutput::err(e),
         };
-        if !full.is_file() {
+        if self.copy.file(&rel).is_none() {
             return ToolOutput::err(format!("{rel} is not a file (folders are not deleted)"));
         }
-        match std::fs::remove_file(&full) {
+        match self.copy.delete(&rel) {
             Ok(()) => {
-                self.touch(rel);
+                self.touch(&rel);
                 ToolOutput::ok(format!(
                     "deleted {rel} in the copy – the user decides whether that is kept"
                 ))
@@ -584,11 +565,9 @@ impl Toolbox for DocTools {
 
     fn context(&self) -> Option<String> {
         Some(format!(
-            "{}the user's folder, as a copy – {} files)",
+            "{}the user's folder, through a copy – {} files and folders at the top)",
             crate::tools::CONTEXT_MARK,
-            std::fs::read_dir(&self.root)
-                .map(|r| r.count())
-                .unwrap_or(0)
+            self.copy.list("").len()
         ))
     }
 }
@@ -597,6 +576,7 @@ impl Toolbox for DocTools {
 mod tests {
     use super::*;
 
+    /// The user's folder is `<tmp>/work`; the session's copy lives elsewhere.
     fn tools() -> (tempfile::TempDir, DocTools) {
         let t = tempfile::tempdir().unwrap();
         let root = t.path().join("work");
@@ -604,7 +584,8 @@ mod tests {
         std::fs::write(root.join("Rechnungen/strom.txt"), "Stadtwerke: 120 Euro").unwrap();
         std::fs::write(root.join("Rechnungen/wasser.txt"), "Wasserwerk: 40 Euro").unwrap();
         let ex = Arc::new(Extractor::new(None, t.path().join("scratch"), Vec::new()));
-        (t, DocTools::new(root, ex))
+        let copy = WorkCopy::create(&root, &t.path().join("session")).unwrap();
+        (t, DocTools::new(copy, ex))
     }
 
     async fn run(d: &DocTools, name: &str, args: Value) -> ToolOutput {
@@ -666,6 +647,28 @@ mod tests {
         assert!(again.is_error);
         let (touched, _) = d.changes();
         assert_eq!(touched.len(), 4);
+        // All of it in the copy: the folder is as it was.
+        let folder = &d.copy.source;
+        assert!(
+            folder.join("Rechnungen/strom.txt").exists()
+                && folder.join("Rechnungen/wasser.txt").exists()
+        );
+        assert!(!folder.join("Übersicht.xlsx").exists() && !folder.join("2025").exists());
+        let l = run(&d, "list_files", json!({})).await;
+        assert!(
+            l.content.contains("2025/Strom.txt") && !l.content.contains("wasser.txt"),
+            "{}",
+            l.content
+        );
+        // A whole folder moves too.
+        let m = run(
+            &d,
+            "move_file",
+            json!({"from": "2025", "to": "Archiv/2025"}),
+        )
+        .await;
+        assert!(!m.is_error, "{}", m.content);
+        assert!(d.copy.file("Archiv/2025/Strom.txt").is_some());
     }
 
     #[tokio::test]
@@ -716,7 +719,7 @@ mod tests {
     async fn long_documents_are_read_in_pieces() {
         let (_t, d) = tools();
         let long = "Zeile mit Text.\n".repeat(2000);
-        std::fs::write(d.root.join("lang.txt"), &long).unwrap();
+        std::fs::write(d.copy.source.join("lang.txt"), &long).unwrap();
         let first = run(&d, "read_document", json!({"path": "lang.txt"})).await;
         assert!(
             first.content.contains("read on with from: 24000"),
@@ -744,6 +747,11 @@ mod tests {
             ("read_document", json!({"path": "link/geheim.txt"})),
             ("write_file", json!({"path": "../raus.txt", "content": "x"})),
             ("write_file", json!({"path": ".env", "content": "x"})),
+            (
+                "write_file",
+                json!({"path": "Rechnungen/./neu.txt", "content": "x"}),
+            ),
+            ("read_document", json!({"path": "Rechnungen//strom.txt"})),
             (
                 "move_file",
                 json!({"from": "Rechnungen/strom.txt", "to": "../strom.txt"}),

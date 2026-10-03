@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithDaemon } from "../test-utils";
-import { TasksAreaPage, TaskView } from "./TasksArea";
+import { splitGiven, TasksAreaPage, TaskView } from "./TasksArea";
 
 function task(extra: Record<string, unknown> = {}) {
   return {
@@ -132,5 +132,15 @@ describe("A new task", () => {
     expect(chosen).toHaveTextContent("Belege");
     expect(within(chosen).queryByRole("button", { name: "Change" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "What should Ancilo do?" })).toBeEnabled();
+  });
+});
+
+describe("Files given with a message", () => {
+  it("are shown as files, not as text", () => {
+    expect(splitGiven("Fass zusammen\n\n(Files the user gave for this:\n- Belege/a, b.pdf\n- c.pdf)")).toEqual({
+      text: "Fass zusammen",
+      files: ["Belege/a, b.pdf", "c.pdf"],
+    });
+    expect(splitGiven("Nur Text (mit Klammer)")).toEqual({ text: "Nur Text (mit Klammer)", files: [] });
   });
 });

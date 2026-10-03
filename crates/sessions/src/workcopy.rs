@@ -2,11 +2,21 @@
 //! `2026-10-03-drei-bereiche`, Codex's review): the agent changes only the
 //! copy; the user keeps the changes – or not.
 //!
-//! - **Copy**: every file (hidden ones, links and iCloud-only placeholders
-//!   left out) is copied – on APFS as a clone that costs no space – after
-//!   checking limits and free space. Its SHA-256 is the baseline.
+//! - **Copy on change**: nothing is copied up front – a task starts at once,
+//!   whatever the folder's size. The task sees the folder through the copy:
+//!   a file it has not changed is read from the folder (never written
+//!   there); before it changes a file, the folder's file is noted – its
+//!   SHA-256 is the baseline – and, if the change needs its content, cloned
+//!   into the copy (on APFS a clone that costs no space). A file is deleted
+//!   in the copy only when its entry says so (`gone`) – a crash in the
+//!   middle of a step never turns into a deletion. Every step notes first
+//!   and touches files after, writes through a temporary file, and never
+//!   replaces a file of the copy from the folder. Hidden files, links and
+//!   iCloud-only placeholders are never part of it; each path has one
+//!   spelling.
 //! - **Changes**: added, modified, deleted, renamed (same content, new
-//!   place), compared by content, not by size or time.
+//!   place), compared by content, not by size or time – only the files the
+//!   task touched are looked at.
 //! - **Apply** is planned from exactly the changes shown, checked against
 //!   the folder as it is now (anything changed meanwhile is a conflict and
 //!   nothing is written), then done step by step: originals backed up first,
@@ -26,18 +36,19 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Files a folder may hold to be copied.
-pub const MAX_FILES: usize = 20_000;
-/// Bytes a folder may hold to be copied.
-pub const MAX_BYTES: u64 = 50 * 1024 * 1024 * 1024;
-/// Free space kept on the disk besides the copy.
-const SPARE_BYTES: u64 = 1024 * 1024 * 1024;
+/// Files a folder (with its own folders) moved as one may hold.
+pub const MAX_MOVE: usize = 2_000;
 
-/// One file of the baseline (the folder as it was copied, or last applied).
+/// One file of the baseline (the folder's file as the task first touched
+/// it, or as last applied).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Entry {
     size: u64,
     hash: String,
+    /// Deleted in the copy (removed or moved away). Only this marks a
+    /// deletion: an entry without a file in the copy is otherwise untouched.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    gone: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -68,6 +79,10 @@ pub struct Applied {
     pub id: String,
     pub changes: Vec<Change>,
     pub at: chrono::DateTime<chrono::Utc>,
+    /// What the folder holds after it (path → SHA-256): what an undo
+    /// expects there – whatever the copy did since.
+    #[serde(default)]
+    pub after: BTreeMap<String, String>,
 }
 
 /// The folders being written now: one apply or undo per folder at a time
@@ -183,6 +198,72 @@ fn only_in_cloud(_meta: &std::fs::Metadata) -> bool {
     false
 }
 
+/// One entry of a folder as the task sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Item {
+    pub name: String,
+    pub dir: bool,
+    /// Bytes (0 for a folder).
+    pub size: u64,
+}
+
+/// `rel` in the one spelling a task uses: plain parts joined by `/` – no
+/// empty, `.`, `..` or hidden part. `None` for anything else.
+pub fn clean(rel: &str) -> Option<String> {
+    let rel = rel.trim();
+    let rel = rel.strip_prefix("./").unwrap_or(rel).trim_end_matches('/');
+    let ok = !rel.is_empty() && rel.split('/').all(|p| !p.is_empty() && !p.starts_with('.'));
+    ok.then(|| rel.to_string())
+}
+
+/// A path in its one spelling (see [`clean`]) – an alias like `a/./b` would
+/// be a second key for the same file.
+fn valid(rel: &str) -> std::io::Result<()> {
+    if clean(rel).as_deref() == Some(rel) {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{rel}: not a plain path inside the folder"),
+        ))
+    }
+}
+
+/// `rel` under `root` – `None` if a link is anywhere on the way (not even a
+/// broken one is followed).
+fn plain_under(root: &Path, rel: &str) -> Option<PathBuf> {
+    let mut at = root.to_path_buf();
+    for c in Path::new(rel).components() {
+        let std::path::Component::Normal(n) = c else {
+            return None;
+        };
+        at.push(n);
+        match std::fs::symlink_metadata(&at) {
+            Ok(m) if m.file_type().is_symlink() => return None,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    Some(root.join(rel))
+}
+
+/// Writes `to` through a temporary file next to it: never half written.
+fn put_file(to: &Path, fill: impl FnOnce(&Path) -> std::io::Result<()>) -> std::io::Result<()> {
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = tmp_next_to(to);
+    fill(&tmp)
+        .and_then(|_| std::fs::rename(&tmp, to))
+        .inspect_err(|_| {
+            std::fs::remove_file(&tmp).ok();
+        })
+}
+
+fn io_err(e: Error) -> std::io::Error {
+    std::io::Error::other(e.message())
+}
+
 /// The regular files under `root` (relative path → size), hidden files,
 /// links and iCloud-only placeholders left out.
 fn files(root: &Path) -> Result<BTreeMap<String, u64>> {
@@ -215,36 +296,6 @@ fn files(root: &Path) -> Result<BTreeMap<String, u64>> {
         }
     }
     Ok(out)
-}
-
-/// Free bytes on the disk that holds `path`, and whether it is APFS (where
-/// a copy is a clone that costs no space). Asks only that disk – never all
-/// of them (network disks could take seconds to answer).
-fn disk_of(path: &Path) -> Option<(u64, bool)> {
-    let st = rustix::fs::statfs(path).ok()?;
-    let free = (st.f_bavail as u64).saturating_mul(st.f_bsize as u64);
-    #[cfg(target_os = "macos")]
-    let apfs = {
-        let name: Vec<u8> = st
-            .f_fstypename
-            .iter()
-            .take_while(|c| **c != 0)
-            .map(|c| *c as u8)
-            .collect();
-        name == b"apfs"
-    };
-    #[cfg(not(target_os = "macos"))]
-    let apfs = false;
-    Some((free, apfs))
-}
-
-/// Whether two paths are on the same disk (a clone is only possible there).
-fn same_disk(a: &Path, b: &Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match (std::fs::metadata(a), std::fs::metadata(b)) {
-        (Ok(x), Ok(y)) => x.dev() == y.dev(),
-        _ => false,
-    }
 }
 
 /// Copies `from` to `to` (a clone on APFS: `std::fs::copy` uses one there).
@@ -309,7 +360,8 @@ impl WorkCopy {
         self.dir.join("backup").join(id)
     }
 
-    /// Copies `source` into `dir/work` after checking limits and space.
+    /// A copy of `source` in `dir/work` – empty at first: files come into
+    /// it only when the task changes them.
     pub fn create(source: &Path, dir: &Path) -> Result<Self> {
         let source = std::fs::canonicalize(source)
             .map_err(|e| Error::invalid(format!("cannot open {}: {e}", source.display())))?;
@@ -319,55 +371,373 @@ impl WorkCopy {
                 source.display()
             )));
         }
-        let list = files(&source)?;
-        let total: u64 = list.values().sum();
-        if list.len() > MAX_FILES {
-            return Err(Error::invalid(format!(
-                "this folder holds {} files – Ancilo works on folders with up to {MAX_FILES}; choose a smaller one",
-                list.len()
-            )));
-        }
-        if total > MAX_BYTES {
-            return Err(Error::invalid(format!(
-                "this folder holds {:.1} GB – Ancilo works on folders up to {} GB; choose a smaller one",
-                total as f64 / 1e9,
-                MAX_BYTES / 1024 / 1024 / 1024
-            )));
-        }
         std::fs::create_dir_all(dir).map_err(Error::internal)?;
         let dir = std::fs::canonicalize(dir).map_err(Error::internal)?;
-        // On the same APFS disk the copy is a clone; elsewhere it needs room.
-        if let Some((free, apfs)) = disk_of(&dir) {
-            let needs = if apfs && same_disk(&dir, &source) {
-                0
+        let wc = Self { source, dir };
+        std::fs::create_dir_all(wc.work()).map_err(Error::internal)?;
+        wc.save_baseline(&BTreeMap::new())?;
+        Ok(wc)
+    }
+
+    /// `rel` as the copy or the folder spell it. A disk that ignores case or
+    /// Unicode normalisation (APFS by default) finds `brief.txt` as
+    /// `Brief.txt` – one file must have one key, so each part takes the name
+    /// of the entry that is that file.
+    fn spelled(&self, rel: &str) -> String {
+        use std::os::unix::fs::MetadataExt;
+        if valid(rel).is_err() {
+            return rel.to_string();
+        }
+        let mut out = String::new();
+        for part in rel.split('/') {
+            let mut name = part.to_string();
+            for (root, ours) in [(self.work(), true), (self.source.clone(), false)] {
+                // Never a look through a link – not even at names.
+                if !ours && !self.root_ok() {
+                    continue;
+                }
+                let dir = if out.is_empty() {
+                    Some(root)
+                } else {
+                    plain_under(&root, &out)
+                };
+                let Some(dir) = dir else {
+                    continue;
+                };
+                // Nothing there by any spelling: a new name, kept as given.
+                let Ok(meta) = std::fs::symlink_metadata(dir.join(part)) else {
+                    continue;
+                };
+                let Ok(names) = std::fs::read_dir(&dir)
+                    .map(|rd| rd.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
+                else {
+                    continue;
+                };
+                if names.iter().any(|n| n.to_string_lossy() == part) {
+                    break;
+                }
+                if let Some(n) = names.iter().find(|n| {
+                    std::fs::symlink_metadata(dir.join(n))
+                        .is_ok_and(|m| m.dev() == meta.dev() && m.ino() == meta.ino())
+                }) {
+                    name = n.to_string_lossy().into_owned();
+                    break;
+                }
+            }
+            if !out.is_empty() {
+                out.push('/');
+            }
+            out.push_str(&name);
+        }
+        out
+    }
+
+    /// The folder is still where it was – not moved, not replaced by a link
+    /// (then nothing of it is read or written).
+    fn root_ok(&self) -> bool {
+        std::fs::canonicalize(&self.source).is_ok_and(|c| c == self.source)
+    }
+
+    /// The folder's own file at `rel`: a plain file, no link on the way, not
+    /// only in iCloud.
+    fn folder_file(&self, rel: &str) -> Option<(PathBuf, std::fs::Metadata)> {
+        if !self.root_ok() {
+            return None;
+        }
+        let p = plain_under(&self.source, rel)?;
+        let m = std::fs::symlink_metadata(&p).ok()?;
+        (m.is_file() && !only_in_cloud(&m)).then_some((p, m))
+    }
+
+    /// The copy's own file at `rel`.
+    fn copy_file_at(&self, rel: &str) -> Option<PathBuf> {
+        let p = plain_under(&self.work(), rel)?;
+        std::fs::symlink_metadata(&p)
+            .is_ok_and(|m| m.is_file())
+            .then_some(p)
+    }
+
+    /// The file the task sees at `rel` – the copy's, or else the folder's
+    /// (unless deleted in the copy). `None`: no such file.
+    pub fn file(&self, rel: &str) -> Option<PathBuf> {
+        valid(rel).ok()?;
+        let rel = &self.spelled(rel);
+        if let Some(p) = self.copy_file_at(rel) {
+            return Some(p);
+        }
+        if self.baseline().ok()?.get(rel).is_some_and(|e| e.gone) {
+            return None;
+        }
+        self.folder_file(rel).map(|(p, _)| p)
+    }
+
+    /// Whether the task sees a folder at `rel` (`""`: the folder itself).
+    pub fn is_dir(&self, rel: &str) -> bool {
+        if rel.is_empty() {
+            return true;
+        }
+        let rel = &self.spelled(rel);
+        let at = |root: &Path| {
+            plain_under(root, rel)
+                .and_then(|p| std::fs::symlink_metadata(p).ok())
+                .is_some_and(|m| m.is_dir())
+        };
+        valid(rel).is_ok() && (at(&self.work()) || (self.root_ok() && at(&self.source)))
+    }
+
+    /// What the task sees in the folder `rel` (`""`: the top), by name.
+    pub fn list(&self, rel: &str) -> Vec<Item> {
+        if !rel.is_empty() && valid(rel).is_err() {
+            return Vec::new();
+        }
+        let rel = &self.spelled(rel);
+        let base = self.baseline().unwrap_or_default();
+        let mut items: BTreeMap<String, Item> = BTreeMap::new();
+        let mut roots = vec![(self.work(), true)];
+        if self.root_ok() {
+            // The folder first; the copy's own files then take their place.
+            roots.insert(0, (self.source.clone(), false));
+        }
+        for (root, ours) in roots {
+            let dir = if rel.is_empty() {
+                Some(root.clone())
             } else {
-                total
+                plain_under(&root, rel)
             };
-            if needs + SPARE_BYTES > free {
-                return Err(Error::InsufficientResources(format!(
-                    "the copy needs {:.1} GB, but only {:.1} GB are free",
-                    (needs + SPARE_BYTES) as f64 / 1e9,
-                    free as f64 / 1e9
+            let Some(Ok(rd)) = dir.map(std::fs::read_dir) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.') {
+                    continue;
+                }
+                let Ok(m) = std::fs::symlink_metadata(e.path()) else {
+                    continue;
+                };
+                let path = if rel.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{rel}/{name}")
+                };
+                if m.file_type().is_symlink() {
+                    continue;
+                } else if m.is_dir() {
+                    items.entry(name.clone()).or_insert(Item {
+                        name,
+                        dir: true,
+                        size: 0,
+                    });
+                } else if m.is_file() && !only_in_cloud(&m) {
+                    if !ours && base.get(&path).is_some_and(|e| e.gone) {
+                        continue;
+                    }
+                    items.insert(
+                        name.clone(),
+                        Item {
+                            name,
+                            dir: false,
+                            size: m.len(),
+                        },
+                    );
+                }
+            }
+        }
+        items.into_values().collect()
+    }
+
+    /// Before the task changes `rel`: the folder's file is noted in the
+    /// baseline first – with `clone`, its content then goes into the copy
+    /// (and if the folder's file changed meanwhile, the clone is what the
+    /// change starts from). A file the copy already has is never replaced
+    /// from the folder.
+    fn take_over(&self, rel: &str, clone: bool) -> std::io::Result<()> {
+        if self.copy_file_at(rel).is_some() {
+            return Ok(());
+        }
+        let mut base = self.baseline().map_err(io_err)?;
+        if base.get(rel).is_some_and(|e| e.gone) {
+            return Ok(());
+        }
+        // Not in the copy: whatever was noted is stale – the folder now.
+        let Some((from, meta)) = self.folder_file(rel) else {
+            if base.remove(rel).is_some() {
+                self.save_baseline(&base).map_err(io_err)?;
+            }
+            return Ok(());
+        };
+        let hash = hash_file(&from)?;
+        base.insert(
+            rel.to_string(),
+            Entry {
+                size: meta.len(),
+                hash: hash.clone(),
+                gone: false,
+            },
+        );
+        self.save_baseline(&base).map_err(io_err)?;
+        if clone {
+            let to = self.work_path(rel)?;
+            put_file(&to, |tmp| copy_file(&from, tmp))?;
+            let got = hash_file(&to)?;
+            if got != hash {
+                base.insert(
+                    rel.to_string(),
+                    Entry {
+                        size: std::fs::metadata(&to)?.len(),
+                        hash: got,
+                        gone: false,
+                    },
+                );
+                self.save_baseline(&base).map_err(io_err)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Sets the `gone` mark of the noted entries.
+    fn mark(&self, marks: &[(&str, bool)]) -> std::io::Result<()> {
+        let mut base = self.baseline().map_err(io_err)?;
+        let mut changed = false;
+        for (rel, gone) in marks {
+            if let Some(e) = base.get_mut(*rel)
+                && e.gone != *gone
+            {
+                e.gone = *gone;
+                changed = true;
+            }
+        }
+        if changed {
+            self.save_baseline(&base).map_err(io_err)?;
+        }
+        Ok(())
+    }
+
+    /// Where `rel` goes in the copy – no link on the way, in the copy nor in
+    /// the folder (where it would go when kept).
+    fn work_path(&self, rel: &str) -> std::io::Result<PathBuf> {
+        if !self.root_ok() || plain_under(&self.source, rel).is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{rel}: a link is in the way"),
+            ));
+        }
+        self.own_path(rel)
+    }
+
+    /// `rel` in the copy (no link on the way there).
+    fn own_path(&self, rel: &str) -> std::io::Result<PathBuf> {
+        valid(rel)?;
+        plain_under(&self.work(), rel).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{rel}: a link is in the way"),
+            )
+        })
+    }
+
+    /// Writes `rel` in the copy (new, or replacing the file the task sees).
+    pub fn write(&self, rel: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let rel = &self.spelled(rel);
+        let to = self.work_path(rel)?;
+        if self.is_dir(rel) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::IsADirectory,
+                format!("{rel} is a folder"),
+            ));
+        }
+        // What it replaces is noted – its content is not needed.
+        self.take_over(rel, false)?;
+        put_file(&to, |tmp| std::fs::write(tmp, bytes))?;
+        // Written where one was deleted: it is there again.
+        self.mark(&[(rel, false)])
+    }
+
+    /// Deletes the file `rel` in the copy.
+    pub fn delete(&self, rel: &str) -> std::io::Result<()> {
+        let rel = &self.spelled(rel);
+        if self.file(rel).is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{rel} is not a file"),
+            ));
+        }
+        self.take_over(rel, false)?;
+        match std::fs::remove_file(self.own_path(rel)?) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+        // Only a file of the folder is deleted in it; the copy's own new
+        // file is simply gone.
+        self.mark(&[(rel, true)])
+    }
+
+    /// Makes the folder `rel` in the copy.
+    pub fn make_dir(&self, rel: &str) -> std::io::Result<()> {
+        std::fs::create_dir_all(self.work_path(&self.spelled(rel))?)
+    }
+
+    /// Moves a file – or a folder with everything in it (up to
+    /// [`MAX_MOVE`] files) – to `to`, which must not exist.
+    pub fn rename(&self, from: &str, to: &str) -> std::io::Result<()> {
+        valid(from)?;
+        valid(to)?;
+        let (from, to) = (&self.spelled(from), &self.spelled(to));
+        if self.file(to).is_some() || self.is_dir(to) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("{to} exists already"),
+            ));
+        }
+        if self.file(from).is_some() {
+            return self.move_one(from, to);
+        }
+        if !self.is_dir(from) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{from} does not exist"),
+            ));
+        }
+        if Path::new(to).starts_with(from) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{from} cannot go into itself"),
+            ));
+        }
+        // A folder: every file in it, each moved like one file.
+        let mut files = Vec::new();
+        let mut stack = vec![from.to_string()];
+        while let Some(dir) = stack.pop() {
+            for item in self.list(&dir) {
+                let rel = format!("{dir}/{}", item.name);
+                if item.dir {
+                    stack.push(rel);
+                } else {
+                    files.push(rel);
+                }
+            }
+            if files.len() > MAX_MOVE {
+                return Err(std::io::Error::other(format!(
+                    "{from} holds more than {MAX_MOVE} files – move its folders one by one"
                 )));
             }
         }
-        let wc = Self {
-            source: source.clone(),
-            dir: dir.clone(),
-        };
-        let work = wc.work();
-        std::fs::create_dir_all(&work).map_err(Error::internal)?;
-        let mut baseline = BTreeMap::new();
-        for (rel, size) in &list {
-            let from = source.join(rel);
-            copy_file(&from, &work.join(rel))
-                .map_err(|e| Error::internal(format!("copying {rel}: {e}")))?;
-            // The copy's hash is the original's: the file was just copied.
-            let hash = hash_file(&work.join(rel)).map_err(Error::internal)?;
-            baseline.insert(rel.clone(), Entry { size: *size, hash });
+        for rel in &files {
+            let rest = &rel[from.len()..];
+            self.move_one(rel, &format!("{to}{rest}"))?;
         }
-        wc.save_baseline(&baseline)?;
-        Ok(wc)
+        std::fs::create_dir_all(self.work_path(to)?)
+    }
+
+    fn move_one(&self, from: &str, to: &str) -> std::io::Result<()> {
+        let dst = self.work_path(to)?;
+        self.take_over(from, true)?;
+        let src = self.own_path(from)?;
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        rename_new(&src, &dst)?;
+        self.mark(&[(from, true), (to, false)])
     }
 
     fn baseline(&self) -> Result<BTreeMap<String, Entry>> {
@@ -406,7 +776,7 @@ impl WorkCopy {
         }
         let mut deleted: Vec<(&String, &Entry)> = base
             .iter()
-            .filter(|(rel, _)| !now.contains_key(*rel))
+            .filter(|(rel, e)| e.gone && !now.contains_key(*rel))
             .collect();
         // A deleted file whose content reappears elsewhere was moved.
         for (rel, size, hash) in added {
@@ -681,16 +1051,33 @@ impl WorkCopy {
             .map_err(Error::internal)
     }
 
-    /// Moves the committed baseline and history into place.
-    fn finish_commit(&self) -> Result<()> {
+    /// Moves the committed baseline and history into place; after an undo,
+    /// the copy lets go of the paths it took back (the baseline no longer
+    /// notes them).
+    fn finish_commit(&self, j: &Journal) -> Result<()> {
         for name in ["baseline.json", "applied.json"] {
             let next = self.dir.join(format!("{name}.next"));
             if next.exists() {
                 std::fs::rename(&next, self.dir.join(name)).map_err(Error::internal)?;
             }
         }
+        // Durable before the journal goes: baseline and history in place.
+        let sync_dir = || {
+            std::fs::File::open(&self.dir)
+                .and_then(|d| d.sync_all())
+                .map_err(Error::internal)
+        };
+        sync_dir()?;
+        if j.id.starts_with("un-") {
+            let base = self.baseline()?;
+            for rel in j.ops.iter().flat_map(op_paths) {
+                if !base.contains_key(rel) {
+                    self.let_go(rel);
+                }
+            }
+        }
         std::fs::remove_file(self.journal_file()).ok();
-        Ok(())
+        sync_dir()
     }
 
     /// Runs `ops` as one transaction: the originals they need backed up and
@@ -787,7 +1174,7 @@ impl WorkCopy {
         self.write_next("applied.json", &serde_json::to_vec(&applied)?)?;
         journal.phase = Phase::Committed;
         self.write_journal(&journal)?;
-        self.finish_commit()
+        self.finish_commit(&journal)
     }
 
     /// Puts back what the journal says was done (and the one that may have
@@ -822,7 +1209,7 @@ impl WorkCopy {
         };
         let j: Journal = serde_json::from_str(&text)?;
         if j.phase == Phase::Committed {
-            self.finish_commit()?;
+            self.finish_commit(&j)?;
             return Ok(true);
         }
         self.roll_back(&j).map_err(|why| {
@@ -904,10 +1291,26 @@ impl WorkCopy {
             });
         }
         let changes: Vec<Change> = plan.iter().map(|(c, _)| c.clone()).collect();
+        // What the folder holds after it: a renamed file the content it had.
+        let after = plan
+            .iter()
+            .filter_map(|(c, hash)| match c.kind {
+                ChangeKind::Added | ChangeKind::Modified => {
+                    hash.clone().map(|h| (c.path.clone(), h))
+                }
+                ChangeKind::Renamed => c
+                    .from
+                    .as_deref()
+                    .and_then(|f| base.get(f))
+                    .map(|e| (c.path.clone(), e.hash.clone())),
+                ChangeKind::Deleted => None,
+            })
+            .collect();
         let applied = Applied {
             id: id.clone(),
             changes: changes.clone(),
             at: chrono::Utc::now(),
+            after,
         };
         let done = applied.clone();
         self.transact(&id, ops, true, fault, || {
@@ -926,6 +1329,7 @@ impl WorkCopy {
                             Entry {
                                 size: c.size,
                                 hash: h.clone(),
+                                gone: false,
                             },
                         );
                     }
@@ -961,7 +1365,14 @@ impl WorkCopy {
         let backup = self.backup(&last.id);
         let mut ops = Vec::new();
         for c in last.changes.iter().rev() {
-            let base_hash = |rel: &str| base.get(rel).map(|e| e.hash.clone()).unwrap_or_default();
+            // As applied – older records without it: as noted since.
+            let base_hash = |rel: &str| {
+                last.after
+                    .get(rel)
+                    .cloned()
+                    .or_else(|| base.get(rel).map(|e| e.hash.clone()))
+                    .unwrap_or_default()
+            };
             ops.push(match c.kind {
                 ChangeKind::Added => Op::Remove {
                     rel: c.path.clone(),
@@ -989,121 +1400,111 @@ impl WorkCopy {
             });
         }
         let id = format!("un-{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
-        let mirror = ops.clone();
-        self.transact(&id, ops, true, fault, || {
-            let mut next = base.clone();
-            for op in &mirror {
-                match op {
-                    Op::Put { rel, after, .. } => {
-                        let size = std::fs::metadata(self.source.join(rel))
-                            .map(|m| m.len())
-                            .unwrap_or(0);
-                        next.insert(
-                            rel.clone(),
-                            Entry {
-                                size,
-                                hash: after.clone(),
-                            },
-                        );
-                    }
-                    Op::Remove { rel, .. } => {
-                        next.remove(rel);
-                    }
-                    Op::Move { from, to, .. } => {
-                        if let Some(e) = next.remove(from) {
-                            next.insert(to.clone(), e);
-                        }
-                    }
-                }
-            }
-            Ok((next, history))
-        })?;
-        // The copy follows the folder (it had no open changes).
-        let work = self.work();
-        for op in &mirror {
-            match op {
-                Op::Put { rel, content, .. } => {
-                    copy_file(content, &work.join(rel)).map_err(Error::internal)?
-                }
-                Op::Remove { rel, .. } => {
-                    std::fs::remove_file(work.join(rel)).ok();
-                }
-                Op::Move { from, to, .. } => {
-                    if let Some(parent) = work.join(to).parent() {
-                        std::fs::create_dir_all(parent).map_err(Error::internal)?;
-                    }
-                    std::fs::rename(work.join(from), work.join(to)).map_err(Error::internal)?;
-                }
+        // The copy lets go of every path the undo touched: the task sees the
+        // folder's files again (taken out of the copy as the commit
+        // finishes – after a crash too).
+        let mut next = base.clone();
+        for op in &ops {
+            for rel in op_paths(op) {
+                next.remove(rel);
             }
         }
+        self.transact(&id, ops, true, fault, || Ok((next, history)))?;
         std::fs::remove_dir_all(backup).ok();
         Ok(last)
     }
 
     /// Makes the copy equal to the folder for `paths` (or everything):
-    /// changes not applied are dropped. The folder is never touched.
+    /// changes not applied are dropped – the task sees the folder's files
+    /// again. The folder is never touched. Noted first, files after: a crash
+    /// in between leaves files the folder has as "new" (never written over
+    /// a file there), never a deletion.
     pub fn discard(&self, paths: Option<&[String]>) -> Result<Vec<Change>> {
         let all = self.changes()?;
         let plan: Vec<Change> = match paths {
             None => all,
             Some(ps) => all.into_iter().filter(|c| ps.contains(&c.path)).collect(),
         };
-        let base = self.baseline()?;
-        let work = self.work();
-        for c in &plan {
-            let restore = |rel: &str| -> Result<()> {
-                if !base.contains_key(rel) {
-                    return Ok(());
-                }
-                // Only the folder's own file – never through a link, never
-                // a placeholder that is only in iCloud.
-                let from = self
-                    .target(rel, false)
-                    .map_err(|e| Error::Conflict(format!("cannot restore {rel}: {e}")))?;
-                let meta = std::fs::symlink_metadata(&from)
-                    .map_err(|e| Error::Conflict(format!("cannot restore {rel}: {e}")))?;
-                if !meta.is_file() || only_in_cloud(&meta) {
-                    return Err(Error::Conflict(format!(
-                        "cannot restore {rel}: it is not a plain file in the folder anymore"
-                    )));
-                }
-                copy_file(&from, &work.join(rel))
-                    .map_err(|e| Error::internal(format!("restoring {rel}: {e}")))
-            };
-            match c.kind {
-                ChangeKind::Added => {
-                    std::fs::remove_file(work.join(&c.path)).ok();
-                }
-                ChangeKind::Modified | ChangeKind::Deleted => restore(&c.path)?,
-                ChangeKind::Renamed => {
-                    std::fs::remove_file(work.join(&c.path)).ok();
-                    if let Some(from) = &c.from {
-                        restore(from)?;
-                    }
-                }
-            }
+        let mut base = self.baseline()?;
+        let rels: Vec<&String> = plan
+            .iter()
+            .flat_map(|c| std::iter::once(&c.path).chain(c.from.as_ref()))
+            .collect();
+        for rel in &rels {
+            base.remove(*rel);
+        }
+        self.save_baseline(&base)?;
+        for rel in rels {
+            self.let_go(rel);
         }
         Ok(plan)
     }
 
+    /// Takes the copy's file at `rel` out (and folders left empty by it).
+    fn let_go(&self, rel: &str) {
+        let Ok(p) = self.own_path(rel) else {
+            return;
+        };
+        std::fs::remove_file(&p).ok();
+        let work = self.work();
+        let mut dir = p;
+        while dir.pop() && dir.starts_with(&work) && dir != work {
+            if std::fs::remove_dir(&dir).is_err() {
+                break;
+            }
+        }
+    }
+
     /// Material for a free task (a file the user gave it): into the task's
-    /// own folder and its copy, as part of the baseline – not a change, not a
-    /// result. Returns the name it got.
+    /// own folder – which the task sees – not a change, not a result.
+    /// Returns the name it got.
     pub fn add_input(&self, name: &str, bytes: &[u8]) -> Result<String> {
         let name = unique_in(&[&self.source, &self.work()], name);
-        let into = self.source.join(&name);
-        std::fs::write(&into, bytes).map_err(Error::internal)?;
-        copy_file(&into, &self.work().join(&name)).map_err(Error::internal)?;
-        let mut base = self.baseline()?;
-        base.insert(
-            name.clone(),
-            Entry {
-                size: bytes.len() as u64,
-                hash: hash_file(&into).map_err(Error::internal)?,
-            },
-        );
-        self.save_baseline(&base)?;
+        valid(&name).map_err(|e| Error::invalid(e.to_string()))?;
+        let to = match plain_under(&self.source, &name) {
+            Some(p) if self.root_ok() => p,
+            _ => {
+                return Err(Error::Conflict(
+                    "the task's folder moved or became a link".into(),
+                ));
+            }
+        };
+        put_file(&to, |tmp| std::fs::write(tmp, bytes)).map_err(Error::internal)?;
         Ok(name)
+    }
+
+    /// A file of the folder with this name and exactly this content, if
+    /// there is one (looked for among at most `limit` entries): what the user
+    /// gave is already there.
+    pub fn find_same(&self, name: &str, bytes: &[u8], limit: usize) -> Option<String> {
+        let want = hex::encode(Sha256::digest(bytes));
+        let mut seen = 0;
+        let mut stack = vec![String::new()];
+        while let Some(dir) = stack.pop() {
+            for item in self.list(&dir) {
+                seen += 1;
+                if seen > limit {
+                    return None;
+                }
+                let rel = if dir.is_empty() {
+                    item.name.clone()
+                } else {
+                    format!("{dir}/{}", item.name)
+                };
+                if item.dir {
+                    stack.push(rel);
+                } else if item.name == name
+                    && item.size == bytes.len() as u64
+                    && self
+                        .file(&rel)
+                        .and_then(|p| hash_file(&p).ok())
+                        .is_some_and(|h| h == want)
+                {
+                    return Some(rel);
+                }
+            }
+        }
+        None
     }
 
     /// The copy and its backups are removed (the folder stays as it is).
@@ -1158,6 +1559,14 @@ pub fn save_copy(from: &Path, dir: &Path) -> Result<PathBuf> {
     }
 }
 
+/// The paths of the folder an operation touches.
+fn op_paths(op: &Op) -> Vec<&String> {
+    match op {
+        Op::Put { rel, .. } | Op::Remove { rel, .. } => vec![rel],
+        Op::Move { from, to, .. } => vec![from, to],
+    }
+}
+
 fn version_of(changes: &[(Change, Option<String>)]) -> String {
     let mut h = Sha256::new();
     for (c, hash) in changes {
@@ -1194,13 +1603,13 @@ mod tests {
     #[test]
     fn changes_in_the_copy_are_found_by_content_and_applied_with_a_way_back() {
         let (_t, src, wc) = setup();
-        let w = wc.work();
-        assert!(!w.join(".DS_Store").exists(), "hidden files stay out");
-        std::fs::write(w.join("notiz.txt"), "neu").unwrap();
-        std::fs::create_dir_all(w.join("Archiv")).unwrap();
-        std::fs::rename(w.join("2025/rechnung-a.pdf"), w.join("Archiv/2025-a.pdf")).unwrap();
-        std::fs::remove_file(w.join("2025/rechnung-b.pdf")).unwrap();
-        std::fs::write(w.join("tabelle.csv"), "a;b").unwrap();
+        assert!(wc.file(".DS_Store").is_none(), "hidden files stay out");
+        wc.write("notiz.txt", b"neu").unwrap();
+        wc.make_dir("Archiv").unwrap();
+        wc.rename("2025/rechnung-a.pdf", "Archiv/2025-a.pdf")
+            .unwrap();
+        wc.delete("2025/rechnung-b.pdf").unwrap();
+        wc.write("tabelle.csv", b"a;b").unwrap();
         let ch = wc.changes().unwrap();
         let kinds: Vec<(ChangeKind, &str, Option<&str>)> = ch
             .iter()
@@ -1245,9 +1654,8 @@ mod tests {
     #[test]
     fn a_folder_changed_meanwhile_is_a_conflict_and_nothing_is_written() {
         let (_t, src, wc) = setup();
-        let w = wc.work();
-        std::fs::write(w.join("notiz.txt"), "neu").unwrap();
-        std::fs::write(w.join("neu.txt"), "x").unwrap();
+        wc.write("notiz.txt", b"neu").unwrap();
+        wc.write("neu.txt", b"x").unwrap();
         std::fs::write(src.join("notiz.txt"), "vom Nutzer").unwrap();
         let e = wc.apply(None, None).unwrap_err();
         assert!(matches!(e, Error::Conflict(_)), "{e:?}");
@@ -1276,9 +1684,9 @@ mod tests {
     #[test]
     fn what_is_applied_is_exactly_what_was_shown() {
         let (_t, src, wc) = setup();
-        std::fs::write(wc.work().join("notiz.txt"), "neu").unwrap();
+        wc.write("notiz.txt", b"neu").unwrap();
         let shown = wc.version().unwrap();
-        std::fs::write(wc.work().join("notiz.txt"), "anders").unwrap();
+        wc.write("notiz.txt", b"anders").unwrap();
         let e = wc.apply(None, Some(&shown)).unwrap_err();
         assert!(
             e.message().contains("not the ones you saw"),
@@ -1291,11 +1699,9 @@ mod tests {
     #[test]
     fn a_failing_step_rolls_back_every_step_before_it() {
         let (_t, src, wc) = setup();
-        let w = wc.work();
-        std::fs::write(w.join("notiz.txt"), "neu").unwrap();
-        std::fs::remove_file(w.join("2025/rechnung-b.pdf")).unwrap();
-        std::fs::create_dir_all(w.join("neu/tief")).unwrap();
-        std::fs::write(w.join("neu/tief/a.txt"), "x").unwrap();
+        wc.write("notiz.txt", b"neu").unwrap();
+        wc.delete("2025/rechnung-b.pdf").unwrap();
+        wc.write("neu/tief/a.txt", b"x").unwrap();
         for at in 0..3 {
             let e = wc
                 .apply_with(None, None, &|i| {
@@ -1322,7 +1728,7 @@ mod tests {
     #[test]
     fn a_crash_in_the_middle_is_put_back_and_a_committed_one_finished() {
         let (_t, src, wc) = setup();
-        std::fs::write(wc.work().join("notiz.txt"), "neu").unwrap();
+        wc.write("notiz.txt", b"neu").unwrap();
         let after = hash_file(&wc.work().join("notiz.txt")).unwrap();
         let before = hash_file(&src.join("notiz.txt")).unwrap();
         // As if Ancilo stopped right after writing the note.
@@ -1388,19 +1794,18 @@ mod tests {
     #[test]
     fn undo_refuses_when_the_folder_changed_since_or_changes_are_open() {
         let (_t, src, wc) = setup();
-        let w = wc.work();
-        std::fs::write(w.join("notiz.txt"), "neu").unwrap();
-        std::fs::rename(w.join("2025/rechnung-a.pdf"), w.join("a.pdf")).unwrap();
+        wc.write("notiz.txt", b"neu").unwrap();
+        wc.rename("2025/rechnung-a.pdf", "a.pdf").unwrap();
         wc.apply(None, None).unwrap();
         // Open changes in the copy would be lost.
-        std::fs::write(w.join("offen.txt"), "x").unwrap();
+        wc.write("offen.txt", b"x").unwrap();
         let e = wc.undo().unwrap_err();
         assert!(
             e.message().contains("keep or drop the open changes first"),
             "{}",
             e.message()
         );
-        std::fs::remove_file(w.join("offen.txt")).unwrap();
+        wc.delete("offen.txt").unwrap();
         // A new file where a moved one was: never overwritten.
         std::fs::write(src.join("2025/rechnung-a.pdf"), "neu vom Nutzer").unwrap();
         let e = wc.undo().unwrap_err();
@@ -1426,7 +1831,7 @@ mod tests {
     #[test]
     fn a_link_in_the_folder_never_leads_writing_outside() {
         let (t, src, wc) = setup();
-        std::fs::write(wc.work().join("2025/neu.txt"), "x").unwrap();
+        wc.write("2025/neu.txt", b"x").unwrap();
         // Meanwhile the subfolder became a link to somewhere else.
         let outside = t.path().join("woanders");
         std::fs::create_dir_all(&outside).unwrap();
@@ -1441,43 +1846,307 @@ mod tests {
     #[test]
     fn discarding_never_takes_a_link_into_the_copy() {
         let (t, src, wc) = setup();
-        std::fs::write(wc.work().join("notiz.txt"), "neu").unwrap();
+        wc.write("notiz.txt", b"neu").unwrap();
         std::fs::write(t.path().join("geheim.txt"), "s3cret").unwrap();
         std::fs::remove_file(src.join("notiz.txt")).unwrap();
         std::os::unix::fs::symlink(t.path().join("geheim.txt"), src.join("notiz.txt")).unwrap();
-        assert!(wc.discard(None).is_err());
-        assert_eq!(read(&wc.work().join("notiz.txt")), "neu");
+        wc.discard(None).unwrap();
+        // The task sees the folder again – but never through the link.
+        assert!(wc.file("notiz.txt").is_none());
+        assert!(!wc.list("").iter().any(|i| i.name == "notiz.txt"));
+        assert!(!wc.work().join("notiz.txt").exists());
     }
 
     #[test]
     fn discarding_brings_the_copy_back_to_the_folder() {
-        let (_t, _src, wc) = setup();
-        let w = wc.work();
-        std::fs::write(w.join("notiz.txt"), "neu").unwrap();
-        std::fs::rename(w.join("2025/rechnung-a.pdf"), w.join("a.pdf")).unwrap();
-        std::fs::write(w.join("x.txt"), "x").unwrap();
+        let (_t, src, wc) = setup();
+        wc.write("notiz.txt", b"neu").unwrap();
+        wc.rename("2025/rechnung-a.pdf", "a.pdf").unwrap();
+        wc.write("x.txt", b"x").unwrap();
         wc.discard(None).unwrap();
         assert!(wc.changes().unwrap().is_empty());
-        assert_eq!(read(&w.join("notiz.txt")), "alt");
+        assert_eq!(wc.file("notiz.txt"), Some(src.join("notiz.txt")));
+        assert_eq!(
+            wc.file("2025/rechnung-a.pdf"),
+            Some(src.join("2025/rechnung-a.pdf"))
+        );
+        assert!(wc.file("x.txt").is_none() && wc.file("a.pdf").is_none());
+        assert!(
+            files(&wc.work()).unwrap().is_empty(),
+            "the copy is empty again"
+        );
     }
 
+    // covers: M10-AC-04
     #[test]
-    fn too_large_folders_are_refused_before_anything_is_copied() {
+    fn a_large_folder_starts_at_once_and_the_task_sees_it_through_the_copy() {
         let t = tempfile::tempdir().unwrap();
         let src = t.path().join("viel");
-        std::fs::create_dir_all(&src).unwrap();
-        for i in 0..=MAX_FILES {
+        for i in 0..=20_000 {
             if i % 1000 == 0 {
                 std::fs::create_dir_all(src.join(format!("d{}", i / 1000))).unwrap();
             }
             std::fs::write(src.join(format!("d{}/{i}.txt", i / 1000)), "").unwrap();
         }
-        let e = WorkCopy::create(&src, &t.path().join("s")).unwrap_err();
+        std::fs::write(src.join("brief.txt"), "Hallo").unwrap();
+        let wc = WorkCopy::create(&src, &t.path().join("s")).unwrap();
+        // Nothing was copied or hashed up front.
+        assert!(files(&wc.work()).unwrap().is_empty());
+        assert!(wc.baseline().unwrap().is_empty());
+        let src = std::fs::canonicalize(&src).unwrap();
+        // Untouched files are read from the folder …
+        assert_eq!(wc.file("brief.txt"), Some(src.join("brief.txt")));
+        assert_eq!(wc.list("d3").len(), 1000);
+        // … a changed one from the copy; the folder stays as it is.
+        wc.write("brief.txt", b"Hallo Welt").unwrap();
+        assert_eq!(wc.file("brief.txt"), Some(wc.work().join("brief.txt")));
+        assert_eq!(read(&src.join("brief.txt")), "Hallo");
+        let top: Vec<(String, bool, u64)> = wc
+            .list("")
+            .into_iter()
+            .filter(|i| !i.dir)
+            .map(|i| (i.name, i.dir, i.size))
+            .collect();
+        assert_eq!(top, [("brief.txt".to_string(), false, 10)]);
+        // A file deleted in the copy is gone for the task – not in the folder.
+        wc.delete("d0/0.txt").unwrap();
+        assert!(wc.file("d0/0.txt").is_none());
+        assert_eq!(wc.list("d0").len(), 999);
+        assert!(src.join("d0/0.txt").exists());
+        let kinds: Vec<ChangeKind> = wc.changes().unwrap().iter().map(|c| c.kind).collect();
+        assert_eq!(kinds, [ChangeKind::Modified, ChangeKind::Deleted]);
+    }
+
+    #[test]
+    fn a_folder_moves_with_everything_in_it() {
+        let (_t, src, wc) = setup();
+        wc.rename("2025", "Archiv/2025").unwrap();
+        assert!(wc.file("2025/rechnung-a.pdf").is_none());
+        assert!(wc.file("Archiv/2025/rechnung-b.pdf").is_some());
         assert!(
-            e.message().contains("choose a smaller one"),
+            wc.rename("Archiv", "Archiv/innen").is_err(),
+            "never into itself"
+        );
+        assert!(
+            wc.rename("notiz.txt", "Archiv/2025/rechnung-a.pdf")
+                .is_err(),
+            "never over a file"
+        );
+        wc.apply(None, None).unwrap();
+        assert_eq!(read(&src.join("Archiv/2025/rechnung-a.pdf")), "A");
+        assert!(!src.join("2025/rechnung-a.pdf").exists());
+    }
+
+    #[test]
+    fn the_same_file_is_found_in_the_folder() {
+        let (_t, _src, wc) = setup();
+        assert_eq!(
+            wc.find_same("rechnung-b.pdf", b"B", 1000).as_deref(),
+            Some("2025/rechnung-b.pdf")
+        );
+        assert_eq!(wc.find_same("rechnung-b.pdf", b"anders", 1000), None);
+        assert_eq!(wc.find_same("rechnung-b.pdf", b"B", 1), None, "only so far");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_replaced_by_a_link_is_neither_read_nor_written() {
+        let (t, src, wc) = setup();
+        let outside = t.path().join("draussen");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("notiz.txt"), "s3cret").unwrap();
+        std::fs::rename(&src, t.path().join("Belege-weg")).unwrap();
+        std::os::unix::fs::symlink(&outside, &src).unwrap();
+        assert!(wc.file("notiz.txt").is_none());
+        assert!(wc.list("").is_empty());
+        assert!(!wc.is_dir("2025"));
+        assert!(wc.write("neu.txt", b"x").is_err());
+        assert!(!outside.join("neu.txt").exists());
+    }
+
+    // covers: M10-AC-04
+    #[test]
+    fn a_crash_in_the_middle_of_a_step_never_becomes_a_deletion() {
+        let (_t, src, wc) = setup();
+        // Noted, but the file never reached the copy (crash): untouched.
+        wc.take_over("notiz.txt", false).unwrap();
+        assert!(wc.changes().unwrap().is_empty());
+        assert_eq!(wc.file("notiz.txt"), Some(src.join("notiz.txt")));
+        // Moved in the copy, but not yet marked (crash): the folder's file
+        // stays, the moved one is new – nothing is lost when kept.
+        wc.take_over("2025/rechnung-a.pdf", true).unwrap();
+        std::fs::rename(
+            wc.work().join("2025/rechnung-a.pdf"),
+            wc.work().join("a.pdf"),
+        )
+        .unwrap();
+        let kinds: Vec<(ChangeKind, String)> = wc
+            .changes()
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.kind, c.path))
+            .collect();
+        assert_eq!(kinds, [(ChangeKind::Added, "a.pdf".to_string())]);
+        assert!(wc.file("2025/rechnung-a.pdf").is_some());
+        // Dropped, but the copy's file not yet taken out (crash): it shows as
+        // new where the folder has one – keeping it never writes over that.
+        wc.discard(None).unwrap();
+        wc.write("notiz.txt", b"neu").unwrap();
+        let mut base = wc.baseline().unwrap();
+        base.remove("notiz.txt");
+        wc.save_baseline(&base).unwrap();
+        let e = wc.apply(None, None).unwrap_err();
+        assert!(
+            e.message().contains("appeared in the folder meanwhile"),
             "{}",
             e.message()
         );
-        assert!(!t.path().join("s/work").exists());
+        assert_eq!(read(&src.join("notiz.txt")), "alt");
+    }
+
+    #[test]
+    fn the_copys_own_file_is_never_taken_from_the_folder() {
+        let (_t, src, wc) = setup();
+        wc.write("neu.txt", b"vom Agenten").unwrap();
+        // The user makes a file of the same name meanwhile.
+        std::fs::write(src.join("neu.txt"), "vom Nutzer").unwrap();
+        wc.rename("neu.txt", "b.txt").unwrap();
+        assert_eq!(read(&wc.work().join("b.txt")), "vom Agenten");
+        let kinds: Vec<(ChangeKind, String)> = wc
+            .changes()
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.kind, c.path))
+            .collect();
+        assert_eq!(kinds, [(ChangeKind::Added, "b.txt".to_string())]);
+        // Deleting the copy's own file never deletes the user's.
+        wc.write("c.txt", b"vom Agenten").unwrap();
+        std::fs::write(src.join("c.txt"), "auch vom Nutzer").unwrap();
+        wc.delete("c.txt").unwrap();
+        assert!(
+            !wc.changes().unwrap().iter().any(|c| c.path == "c.txt"),
+            "no deletion of the user's file"
+        );
+        wc.apply(None, None).unwrap();
+        assert_eq!(read(&src.join("neu.txt")), "vom Nutzer");
+        assert_eq!(read(&src.join("c.txt")), "auch vom Nutzer");
+    }
+
+    #[test]
+    fn each_path_has_one_spelling() {
+        let (_t, _src, wc) = setup();
+        for alias in [
+            "2025/./neu.txt",
+            "2025//neu.txt",
+            "./neu.txt",
+            "2025/../neu.txt",
+            "neu.txt/",
+        ] {
+            assert!(wc.write(alias, b"x").is_err(), "{alias}");
+            assert!(wc.file(alias).is_none(), "{alias}");
+        }
+        assert_eq!(clean("./2025/neu.txt/").as_deref(), Some("2025/neu.txt"));
+        assert_eq!(clean("2025/./neu.txt"), None);
+        assert!(wc.changes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_undo_lets_go_of_the_copy_even_after_a_crash() {
+        let (_t, src, wc) = setup();
+        wc.write("notiz.txt", b"neu").unwrap();
+        wc.delete("2025/rechnung-b.pdf").unwrap();
+        wc.apply(None, None).unwrap();
+        wc.undo().unwrap();
+        assert!(wc.changes().unwrap().is_empty());
+        assert_eq!(wc.file("notiz.txt"), Some(src.join("notiz.txt")));
+        assert_eq!(
+            wc.file("2025/rechnung-b.pdf"),
+            Some(src.join("2025/rechnung-b.pdf"))
+        );
+        assert!(files(&wc.work()).unwrap().is_empty());
+        // Committed, then a crash before the copy let go: finished at the next start.
+        wc.write("notiz.txt", b"neu").unwrap();
+        wc.apply(None, None).unwrap();
+        let mut base = wc.baseline().unwrap();
+        base.remove("notiz.txt");
+        wc.write_next("baseline.json", &serde_json::to_vec(&base).unwrap())
+            .unwrap();
+        wc.write_journal(&Journal {
+            id: "un-crash".into(),
+            ops: vec![Op::Remove {
+                rel: "notiz.txt".into(),
+                before: "x".into(),
+                prune: false,
+            }],
+            done: 1,
+            started: None,
+            phase: Phase::Committed,
+        })
+        .unwrap();
+        assert!(wc.recover().unwrap());
+        assert!(!wc.work().join("notiz.txt").exists());
+        assert!(wc.changes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn undo_follows_what_was_applied_not_what_the_copy_did_since() {
+        let (_t, src, wc) = setup();
+        wc.write("notiz.txt", b"eins").unwrap();
+        wc.apply(None, None).unwrap();
+        wc.write("notiz.txt", b"zwei").unwrap();
+        wc.apply(None, None).unwrap();
+        // Changed again and dropped: the copy forgets the file.
+        wc.write("notiz.txt", b"drei").unwrap();
+        wc.discard(None).unwrap();
+        wc.undo().unwrap();
+        assert_eq!(read(&src.join("notiz.txt")), "eins");
+        wc.undo().unwrap();
+        assert_eq!(read(&src.join("notiz.txt")), "alt");
+    }
+
+    #[test]
+    fn a_name_spelled_otherwise_is_the_same_file() {
+        let (_t, src, wc) = setup();
+        // Only where the disk ignores case (APFS by default).
+        if !src.join("NOTIZ.TXT").exists() {
+            return;
+        }
+        wc.write("Neu.txt", b"x").unwrap();
+        wc.delete("neu.txt").unwrap();
+        assert!(wc.changes().unwrap().is_empty());
+        wc.delete("NOTIZ.txt").unwrap();
+        let ch = wc.changes().unwrap();
+        assert_eq!(
+            (ch[0].kind, ch[0].path.as_str()),
+            (ChangeKind::Deleted, "notiz.txt")
+        );
+        assert!(wc.file("Notiz.TXT").is_none(), "deleted by any spelling");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn material_never_goes_through_a_replaced_folder() {
+        let t = tempfile::tempdir().unwrap();
+        let own = t.path().join("eigen");
+        std::fs::create_dir_all(&own).unwrap();
+        let wc = WorkCopy::create(&own, &t.path().join("s")).unwrap();
+        let outside = t.path().join("draussen");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::remove_dir(&own).unwrap();
+        std::os::unix::fs::symlink(&outside, &own).unwrap();
+        assert!(wc.add_input("a.txt", b"x").is_err());
+        assert!(!outside.join("a.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_spelling_is_never_looked_up_through_a_link() {
+        let (t, src, wc) = setup();
+        let outside = t.path().join("draussen");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("Datei.txt"), "s3cret").unwrap();
+        std::os::unix::fs::symlink(&outside, src.join("link")).unwrap();
+        assert_eq!(wc.spelled("link/datei.txt"), "link/datei.txt");
+        assert!(wc.file("link/datei.txt").is_none());
     }
 }

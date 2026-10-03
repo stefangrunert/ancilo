@@ -13,7 +13,11 @@ Until a folder is chosen there is nothing to type; an example clicked before ask
 
 ## A folder: always in a copy
 
-Ancilo never works in your folder directly. A task starts with a **copy** of the folder (on APFS a clone that takes no extra space; Ancilo checks the space first and refuses folders with more than 20,000 files or 50 GB). Hidden files, links and files that are only in iCloud are left out – and never touched.
+Ancilo never works in your folder directly. It works in a **copy** – one that holds only what the task changes, so a task starts at once, whatever the folder's size (Documents included). The task reads your folder as it is; before it changes a file, Ancilo notes the file's content (that is what the change starts from) and, where needed, puts it into the copy (on APFS a clone that takes no extra space). Hidden files, links and files that are only in iCloud are never part of it – and never touched.
+
+A task's folder is a folder of your documents – Documents, or any folder in it or elsewhere. Your home folder itself, the folders above it, Library and the system's folders are refused: a task sees everything in its folder that is not hidden.
+
+Files you give the task (drag them onto the input, or the paperclip) go into the copy – unless the folder already holds the same file (same name and content): then the task uses that one, without a second copy. The agent is told which files you gave.
 
 The agent can:
 
@@ -21,7 +25,7 @@ The agent can:
 |---|---|
 | look | list the files, read documents (PDF by page, Word, Excel by sheet, CSV, text), find passages in all of them |
 | write | new text files (`.txt`, `.md`, `.csv` and other plain text – nothing that runs when opened), Excel files (`write_spreadsheet`: numbers stay numbers, nothing ever becomes a formula), Word documents (`write_document`) |
-| sort | move and rename files (a file keeps its ending), make folders, delete files |
+| sort | move and rename files (a file keeps its ending) and folders (up to 2,000 files at once), make folders, delete files |
 
 It cannot run commands or reach the network, and no path leads out of the copy (no `..`, no absolute paths, no links). Text in documents is treated as content, never as instructions.
 
@@ -32,7 +36,7 @@ It cannot run commands or reach the network, and no path leads out of the copy (
 When the agent is done, a card lists what changed: **new**, **changed**, **deleted**, **moved** (with where from).
 
 - **Keep** puts the changes into your folder. Before anything is written, Ancilo checks that the folder still holds what the copy started from – if you changed a file there meanwhile, or a file of a new name appeared, **nothing** is written and Ancilo says which files. Originals are backed up first; every step is noted in a journal; files are written next to their place and moved in at once. If a step fails, everything before it is put back. If Ancilo stops in the middle (a crash), it puts things back at the next start.
-- **Drop** sets the copy back to your folder – your folder is not touched.
+- **Drop** takes the changes out of the copy – the task sees your folder as it is again; your folder is not touched.
 - **Undo** (after keeping) takes the changes back out of your folder – as long as nothing changed there since; folders that were made for the changes go too.
 
 ## From the command line or other tools

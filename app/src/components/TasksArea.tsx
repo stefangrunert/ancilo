@@ -33,6 +33,35 @@ function PendingFiles({ files, onRemove }: { files: File[]; onRemove: (i: number
   );
 }
 
+/** How the daemon names the files given with a message (`GIVEN_MARK`):
+ * shown as files, not as text. */
+const GIVEN = "\n\n(Files the user gave for this:";
+
+export function splitGiven(text: string): { text: string; files: string[] } {
+  const at = text.lastIndexOf(GIVEN);
+  if (at < 0 || !text.endsWith(")")) return { text, files: [] };
+  const files = text
+    .slice(at + GIVEN.length, -1)
+    .split("\n- ")
+    .map((f) => f.trim())
+    .filter(Boolean);
+  return { text: text.slice(0, at), files };
+}
+
+function GivenFiles({ files }: { files: string[] }) {
+  if (files.length === 0) return null;
+  return (
+    <div className="doc-row" data-testid="given-files">
+      {files.map((f) => (
+        <span key={f} className="doc-chip" title={f}>
+          <Icon name="doc" size={15} />
+          <span className="doc-name">{nameOf(f)}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /** Starts a task in a folder: the agent works in a copy of it; the files
  * given go into that copy. */
 function useStartTask() {
@@ -441,7 +470,10 @@ export function TaskView({ id }: { id: string }) {
           <div className="stack" data-testid="messages" aria-live="polite">
             {parts.map((p, i) =>
               p.kind === "user" ? (
-                <UserBubble key={i} text={p.text} />
+                (() => {
+                  const g = splitGiven(p.text);
+                  return <UserBubble key={i} text={g.text} files={<GivenFiles files={g.files} />} />;
+                })()
               ) : p.kind === "say" ? (
                 <Markdown key={i} text={p.text} />
               ) : pro ? (

@@ -2691,6 +2691,14 @@ export interface components {
         };
         /** @description What an apply did – kept for undo. */
         Applied: {
+            /**
+             * @description What the folder holds after it (path → SHA-256): what an undo
+             *     expects there – whatever the copy did since.
+             * @default {}
+             */
+            after: {
+                [key: string]: string;
+            };
             /** Format: date-time */
             at: string;
             changes: components["schemas"]["Change"][];
@@ -10344,6 +10352,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /**
+                         * @description What the folder holds after it (path → SHA-256): what an undo
+                         *     expects there – whatever the copy did since.
+                         * @default {}
+                         */
+                        after: {
+                            [key: string]: string;
+                        };
                         /** Format: date-time */
                         at: string;
                         changes: components["schemas"]["Change"][];
