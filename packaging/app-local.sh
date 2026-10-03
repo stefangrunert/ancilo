@@ -32,7 +32,9 @@ app="$root/app/src-tauri/target/release/bundle/macos/$name.app"
 
 "$root/packaging/package.sh" "$out"
 
-pkg=$(ls -d "$out"/ancilo-*-$target)
+# This version's package – older ones may still lie next to it.
+version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)
+pkg="$out/ancilo-$version-$target"
 mkdir -p "$root/app/src-tauri/binaries"
 cp "$pkg/bin/ancilo" "$root/app/src-tauri/binaries/ancilo-$target"
 cp "$pkg/libexec/ancilo/llama-server" "$root/app/src-tauri/binaries/llama-server-$target"
