@@ -1252,12 +1252,6 @@ impl Sessions {
                 "this task works in a folder – keep its changes instead",
             ));
         }
-        let dir = dir
-            .or_else(dirs::document_dir)
-            .ok_or_else(|| Error::invalid("say where to save the results"))?;
-        if !dir.is_absolute() || !dir.is_dir() {
-            return Err(Error::invalid(format!("not a folder: {}", dir.display())));
-        }
         let Changes::Folder { copy, .. } = &meta.changes else {
             return Err(Error::invalid("this task has no results"));
         };
@@ -1269,6 +1263,19 @@ impl Sessions {
             .collect();
         if results.is_empty() {
             return Err(Error::invalid("there is nothing to save yet"));
+        }
+        // The user's Documents – or, where there is none, the home folder.
+        let dir = dir
+            .or_else(dirs::document_dir)
+            .or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Documents"))
+                    .filter(|d| d.is_dir())
+            })
+            .or_else(dirs::home_dir)
+            .ok_or_else(|| Error::invalid("say where to save the results"))?;
+        if !dir.is_absolute() || !dir.is_dir() {
+            return Err(Error::invalid(format!("not a folder: {}", dir.display())));
         }
         let work = copy.work();
         let mut files = Vec::new();
