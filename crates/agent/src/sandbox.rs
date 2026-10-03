@@ -137,6 +137,7 @@ fn user_temp() -> Option<&'static Path> {
     .as_deref()
 }
 
+#[cfg(target_os = "macos")]
 fn quoted(p: &Path) -> String {
     p.display().to_string().replace(['"', '\\'], "")
 }
