@@ -246,6 +246,8 @@ struct Inner {
     last_used: Mutex<HashMap<String, Instant>>,
     /// Requests in flight per model; busy models are never evicted.
     busy: Mutex<HashMap<String, usize>>,
+    /// Models an agent is working with (see [`ModelManager::begin_work`]).
+    working: Mutex<HashMap<String, usize>>,
     /// Serialises on-demand loading so two requests do not evict each other.
     loading: tokio::sync::Mutex<()>,
     /// How much of the computer Ancilo may take.
@@ -311,6 +313,26 @@ pub struct ResourceStatus {
 pub struct UseGuard {
     inner: Arc<Inner>,
     id: String,
+}
+
+/// An agent works with a model – see [`ModelManager::begin_work`].
+pub struct WorkGuard {
+    inner: Arc<Inner>,
+    id: String,
+}
+
+impl Drop for WorkGuard {
+    fn drop(&mut self) {
+        let mut working = self.inner.working.lock().unwrap();
+        if let Some(n) = working.get_mut(&self.id) {
+            *n = n.saturating_sub(1);
+        }
+        self.inner
+            .last_used
+            .lock()
+            .unwrap()
+            .insert(self.id.clone(), Instant::now());
+    }
 }
 
 impl Drop for UseGuard {
@@ -394,6 +416,7 @@ impl ModelManager {
                 binary: Default::default(),
                 last_used: Default::default(),
                 busy: Default::default(),
+                working: Default::default(),
                 loading: Default::default(),
                 resources: Mutex::new(ResourceSettings::default()),
                 guard: Mutex::new(GuardLog::default()),
@@ -584,6 +607,7 @@ impl ModelManager {
             .map(|(id, i)| (id.clone(), i.clone()))
             .collect();
         let busy = self.inner.busy.lock().unwrap().clone();
+        let working = self.inner.working.lock().unwrap().clone();
         let last = self.inner.last_used.lock().unwrap().clone();
         let mut out = Vec::new();
         for (id, instance) in instances {
@@ -600,6 +624,7 @@ impl ModelManager {
             out.push((
                 Loaded {
                     busy: busy.get(&id).copied().unwrap_or(0) > 0,
+                    working: working.get(&id).copied().unwrap_or(0) > 0,
                     pinned: record.as_ref().is_some_and(|r| r.pinned),
                     idle_secs,
                     id: id.clone(),
@@ -644,7 +669,7 @@ impl ModelManager {
                     id: m.id,
                     name,
                     ram_bytes: ram,
-                    busy: m.busy,
+                    busy: m.busy || m.working,
                     pinned: m.pinned,
                     idle_secs: m.idle_secs,
                 })
@@ -761,6 +786,8 @@ impl ModelManager {
                 self.inner
                     .bus
                     .emit("model.evicted", Some(&victim), json!({"for": id}));
+                self.wait_for_memory(id, need, Duration::from_secs(10))
+                    .await;
                 continue;
             }
             let loaded: Vec<String> = self
@@ -792,7 +819,7 @@ impl ModelManager {
         self.loaded()
             .await
             .into_iter()
-            .filter(|(m, _, _)| m.id != except && !m.busy && !m.pinned)
+            .filter(|(m, _, _)| m.id != except && !m.busy && !m.working && !m.pinned)
             .map(|(_, ram, _)| ram)
             .sum()
     }
@@ -1871,7 +1898,16 @@ impl ModelManager {
     /// Restarts a model with a larger context so that a request of
     /// `needed_tokens` fits (next power of two with headroom, capped by what
     /// the model supports). Returns `false` if the context cannot grow.
-    pub async fn grow_context(&self, id: &str, needed_tokens: u64) -> Result<bool> {
+    ///
+    /// A model that works keeps working: it is only restarted when the larger
+    /// context fits now (counting the memory it frees itself), and if the
+    /// restart fails anyway it comes back with its old context.
+    pub async fn grow_context(
+        &self,
+        id: &str,
+        needed_tokens: u64,
+        timeout: Duration,
+    ) -> Result<bool> {
         let mut r = self.find(id)?;
         let model_max = r
             .meta
@@ -1908,18 +1944,101 @@ impl ModelManager {
             )));
         }
         let from = r.plan.ctx_tokens;
+        let old_plan = r.plan.clone();
+        let need = plan.expected_ram_bytes;
+        // Fits now? A fresh look, crediting what the running model frees.
+        let running = self.endpoint(&r.id).await.is_some();
+        let own = if running {
+            old_plan.expected_ram_bytes
+        } else {
+            0
+        };
+        self.forget_measurement();
+        let state = self.system_state();
+        let reclaimable = self.reclaimable(&r.id).await + own;
+        let used = self.used_bytes(Some(&r.id)).await?;
+        let room = resources::admit(&self.resource_settings(), &state, need, reclaimable);
+        if room.is_err() || used + need > self.model_budget() {
+            tracing::info!(
+                model = %r.id,
+                from,
+                to = plan.ctx_tokens,
+                why = %room.err().unwrap_or_else(|| "over the budget".into()),
+                "the context cannot grow now – the model keeps running as it is"
+            );
+            return Ok(false);
+        }
         let instance = self.inner.instances.lock().await.remove(&r.id);
         if let Some(i) = instance {
             i.stop().await;
         }
         r.plan = plan;
         self.save(&r)?;
+        // The memory comes back with a delay (the OS reports it late).
+        self.wait_for_memory(&r.id, need, Duration::from_secs(15))
+            .await;
+        if let Err(e) = self.ensure_running(&r.id, timeout).await {
+            tracing::warn!(model = %r.id, error = %e.message(), "the larger context did not start – back to the old one");
+            r.plan = old_plan;
+            self.save(&r)?;
+            self.wait_for_memory(&r.id, r.plan.expected_ram_bytes, Duration::from_secs(15))
+                .await;
+            if running {
+                self.ensure_running(&r.id, timeout).await?;
+            }
+            return Ok(false);
+        }
         self.inner.bus.emit(
             "model.context_grown",
             Some(&r.id),
             json!({"from": from, "to": r.plan.ctx_tokens}),
         );
         Ok(true)
+    }
+
+    /// The next look at the system measures again (after a model stopped).
+    fn forget_measurement(&self) {
+        self.inner.measured.lock().unwrap().take();
+    }
+
+    /// Waits – at most `max` – until the system reports the memory a model
+    /// needs as free: memory of a stopped model comes back with a delay.
+    async fn wait_for_memory(&self, id: &str, need: u64, max: Duration) {
+        // Test probes do not change by themselves.
+        if self.inner.config.system_probe_override.is_some() {
+            return;
+        }
+        let settings = self.resource_settings();
+        let until = Instant::now() + max;
+        loop {
+            self.forget_measurement();
+            let state = self.system_state();
+            let reclaimable = self.reclaimable(id).await;
+            if resources::admit(&settings, &state, need, reclaimable).is_ok()
+                || Instant::now() >= until
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+
+    /// Marks a model as the one an agent works with, for the whole turn –
+    /// also while its tools run between requests. It is not unloaded for
+    /// being idle or because memory got tight, and not evicted for another
+    /// model; only an emergency (critical memory or heat) unloads it.
+    pub fn begin_work(&self, id: &str) -> WorkGuard {
+        *self
+            .inner
+            .working
+            .lock()
+            .unwrap()
+            .entry(id.to_string())
+            .or_default() += 1;
+        WorkGuard {
+            inner: self.inner.clone(),
+            id: id.to_string(),
+        }
     }
 
     /// Marks a model as in use: protects it from eviction and records the
@@ -1998,10 +2117,13 @@ impl ModelManager {
             .map(|(id, _)| id.clone())
             .collect();
         let busy = self.inner.busy.lock().unwrap().clone();
+        let working = self.inner.working.lock().unwrap().clone();
         let last = self.inner.last_used.lock().unwrap().clone();
         let mut candidates = Vec::new();
         for id in running {
-            if busy.get(&id).copied().unwrap_or(0) > 0 {
+            // Not the model of an agent at work, either: its next step needs it.
+            if busy.get(&id).copied().unwrap_or(0) > 0 || working.get(&id).copied().unwrap_or(0) > 0
+            {
                 continue;
             }
             if self.record(&id)?.is_some_and(|r| r.pinned) {

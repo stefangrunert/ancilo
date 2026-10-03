@@ -34,6 +34,11 @@ fn options() -> DaemonOptions {
 
 impl Env {
     async fn start() -> Self {
+        Self::with_scripts(None).await
+    }
+
+    /// `scripts`: per-model scripts of the fake llama-server.
+    async fn with_scripts(scripts: Option<PathBuf>) -> Self {
         let home = TestHome::new();
         let hf = FakeHf::start(vec![
             FakeRepo::new(
@@ -43,6 +48,11 @@ impl Env {
             FakeRepo::new(
                 "o/B-GGUF",
                 vec![FakeFile::gguf("B-Q8_0.gguf", "qwen3", 4096, 100_000)],
+            ),
+            // A model whose context could grow a lot.
+            FakeRepo::new(
+                "o/Long-GGUF",
+                vec![FakeFile::gguf("Long-Q8_0.gguf", "qwen3", 131_072, 100_000)],
             ),
         ])
         .await;
@@ -63,6 +73,9 @@ impl Env {
             system_probe_override: Some(probe.clone()),
             llama_server_env: [("FAKE_LLM_ARGS_FILE".to_string(), args.display().to_string())]
                 .into_iter()
+                .chain(
+                    scripts.map(|d| ("FAKE_LLM_SCRIPT_DIR".to_string(), d.display().to_string())),
+                )
                 .collect(),
             ..home.config()
         };
@@ -390,5 +403,61 @@ async fn the_system_monitor_names_the_cause_offers_fixes_and_acts_in_an_emergenc
         env.op("resource_status", json!({})).await["recent"][0]["reason"] == "heat"
     })
     .await;
+    env.stop().await;
+}
+
+/// A model that works keeps working: the conversation outgrows its context
+/// while a larger one does not fit right now – the model is not restarted
+/// (and lost), the agent shortens older tool output and goes on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_working_model_keeps_working_when_its_context_cannot_grow() {
+    let scripts = std::env::temp_dir().join(format!("ancilo-grow-{}", std::process::id()));
+    std::fs::create_dir_all(&scripts).unwrap();
+    std::fs::write(
+        scripts.join("Long-Q8_0.yaml"),
+        r#"
+steps:
+  - respond: { tool_calls: [{ name: read_file, arguments: { path: "big.txt" } }] }
+  - respond: { tool_calls: [{ name: read_file, arguments: { path: "small.txt" } }] }
+  - expect: { any_message_contains: "TAIL-OF-BIG" }
+    respond: { http_error: { status: 400, message: "request (30000 tokens) exceeds the available context size (4096 tokens), try increasing it" } }
+  - expect: { no_message_contains: "TAIL-OF-BIG", any_message_contains: "shortened to fit the context" }
+    respond: { text: "Done." }
+"#,
+    )
+    .unwrap();
+    let env = Env::with_scripts(Some(scripts.clone())).await;
+    let id = env.add("o/Long-GGUF").await;
+    env.op("start_model", json!({"model": id})).await;
+    env.until("running", || async { env.status(&id).await == "running" })
+        .await;
+    let started_with = std::fs::read_to_string(&env.args).unwrap();
+    // Now hardly anything is free: a larger context would not fit.
+    env.computer(0, "normal", "nominal");
+    let project = env.home.scratch("project");
+    std::fs::write(
+        project.join("big.txt"),
+        format!("{}TAIL-OF-BIG\n", "a line of the big file\n".repeat(250)),
+    )
+    .unwrap();
+    std::fs::write(project.join("small.txt"), "small").unwrap();
+    let s = env
+        .op("create_session", json!({"cwd": project, "model": id}))
+        .await;
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": s["id"], "text": "Look at the files", "wait": true}),
+        )
+        .await;
+    let last = &s["messages"].as_array().unwrap().last().unwrap()["text"];
+    assert_eq!(last, "Done.", "{s}");
+    assert_eq!(env.status(&id).await, "running", "the model still runs");
+    assert_eq!(
+        std::fs::read_to_string(&env.args).unwrap(),
+        started_with,
+        "never restarted"
+    );
+    std::fs::remove_dir_all(&scripts).ok();
     env.stop().await;
 }

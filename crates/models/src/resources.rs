@@ -356,7 +356,11 @@ fn gb(bytes: u64) -> String {
 #[derive(Debug, Clone)]
 pub struct Loaded {
     pub id: String,
+    /// Answering a request right now.
     pub busy: bool,
+    /// An agent is working with it (between its requests, too): only an
+    /// emergency unloads it.
+    pub working: bool,
     pub pinned: bool,
     pub idle_secs: u64,
 }
@@ -395,6 +399,7 @@ pub fn to_unload(
     loaded
         .iter()
         .filter(|m| !m.busy)
+        .filter(|m| !m.working || critical || burning)
         .filter_map(|m| {
             let idle = settings.keep_loaded_secs.is_some_and(|k| m.idle_secs >= k);
             let reason = if critical || (memory && !m.pinned) {
@@ -413,7 +418,7 @@ pub fn to_unload(
 
 /// Seconds until an idle model is unloaded (None: it stays).
 pub fn unload_in(settings: &ResourceSettings, m: &Loaded) -> Option<u64> {
-    if m.pinned || m.busy {
+    if m.pinned || m.busy || m.working {
         return None;
     }
     settings
@@ -471,6 +476,7 @@ mod tests {
         Loaded {
             id: id.into(),
             busy,
+            working: false,
             pinned,
             idle_secs,
         }
@@ -575,6 +581,31 @@ mod tests {
     }
 
     // covers: M1-AC-14
+    #[test]
+    fn the_model_of_an_agent_at_work_goes_only_in_an_emergency() {
+        let s = ResourceSettings::default();
+        let working = Loaded {
+            working: true,
+            ..model("agent", false, false, 99 * 60)
+        };
+        let loaded = [working.clone()];
+        // Long idle between its requests, memory tight, the Mac warm: it stays.
+        for st in [
+            state(Some(32), Pressure::Normal, Thermal::Nominal),
+            state(Some(1), Pressure::Warn, Thermal::Nominal),
+            state(Some(32), Pressure::Normal, Thermal::Heavy),
+        ] {
+            assert_eq!(to_unload(&s, &st, &loaded), vec![], "{st:?}");
+        }
+        assert_eq!(unload_in(&s, &working), None);
+        // An emergency still unloads it: the computer comes first.
+        let critical = state(Some(1), Pressure::Critical, Thermal::Nominal);
+        assert_eq!(
+            to_unload(&s, &critical, &loaded),
+            vec![("agent".into(), Reason::Memory)]
+        );
+    }
+
     #[test]
     fn idle_hot_or_short_models_are_unloaded_but_never_while_answering() {
         let s = ResourceSettings::default();

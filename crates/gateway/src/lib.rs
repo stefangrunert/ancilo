@@ -184,6 +184,13 @@ impl Gateway {
         }
     }
 
+    /// Keeps `model` loaded while an agent works with it (between its
+    /// requests, too) – see `ModelManager::begin_work`.
+    pub fn hold(&self, model: &str) -> Option<ancilo_models::manager::WorkGuard> {
+        let id = self.inner.manager.resolve_name(model).ok()?;
+        Some(self.inner.manager.begin_work(&id))
+    }
+
     pub fn manager(&self) -> &ModelManager {
         &self.inner.manager
     }
@@ -380,7 +387,7 @@ impl Gateway {
                 if self
                     .inner
                     .manager
-                    .grow_context(&routed.model, needed)
+                    .grow_context(&routed.model, needed, self.inner.load_timeout)
                     .await?
                 {
                     self.chat_once(req, opts).await

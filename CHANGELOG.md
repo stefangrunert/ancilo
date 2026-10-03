@@ -4,6 +4,9 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **A model that works keeps working.** When a conversation outgrows the model's context, Ancilo restarts it with a larger one only if that fits right now – counting the memory the model frees itself, and waiting until the system really reports it free. If the restart fails anyway, the model comes back as it was. Before, the model could be gone with "only … GB are free".
+- **The coding agent shortens older tool output** when its conversation no longer fits the context, instead of failing.
+- **The model an agent works with stays loaded for the whole turn** – also while its commands run: no unloading for being idle, for tight memory or for another model. Only an emergency (critical memory or heat) still unloads it.
 - **Coding: two access modes** for every session – *Ask first* or *Approve for me* (new default: changes in the copy and sandboxed commands without asking). No mode runs commands outside the sandbox.
 - **A web search switch** beside the input, in chats and coding sessions: off – Ancilo (and the coding agent) asks before every search; on – it searches without asking. It replaces the globe that searched only the next message.
 - **Coding: web search** for the agent, once web search is set up – with the switch off, every search shows its words and asks first.

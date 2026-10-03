@@ -103,6 +103,34 @@ fn preview(s: &str) -> String {
     }
 }
 
+/// How far older tool outputs are cut when the conversation no longer fits
+/// the model's context – one step per attempt.
+const SHORTEN_TO: [usize; 3] = [2000, 600, 150];
+const SHORTENED: &str = "… (shortened to fit the context)";
+
+/// Cuts tool outputs longer than `cap` – all but those of the latest step,
+/// which the model is working with. Returns whether anything got shorter.
+fn shorten_tool_outputs(messages: &mut [Value], cap: usize) -> bool {
+    let latest = messages
+        .iter()
+        .rposition(|m| m["role"] == "assistant")
+        .unwrap_or(messages.len());
+    let mut changed = false;
+    for m in messages[..latest].iter_mut() {
+        if m["role"] != "tool" {
+            continue;
+        }
+        if let Some(c) = m["content"].as_str()
+            && c.chars().count() > cap + SHORTENED.chars().count()
+        {
+            let short: String = c.chars().take(cap).collect();
+            m["content"] = json!(format!("{short}{SHORTENED}"));
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Runs the agent loop until the model answers without tool calls, a limit is
 /// reached, or `cancel` fires.
 pub async fn run(
@@ -113,6 +141,8 @@ pub async fn run(
     events: Option<(EventBus, String)>,
 ) -> AgentOutcome {
     let tools = ws.definitions();
+    // The model stays loaded for the whole turn, also while tools run.
+    let _work = gateway.hold(&spec.model);
     let mut messages = vec![json!({"role": "system", "content": spec.system})];
     messages.extend(spec.history.iter().cloned());
     messages.push(json!({"role": "user", "content": match ws.context() {
@@ -123,6 +153,7 @@ pub async fn run(
     let timing = std::sync::Mutex::new((0u32, 0u64, 0u64)); // interventions, generation, load
     let mut recent: Vec<String> = Vec::new();
     let mut warned_repeat = false;
+    let mut shortened = 0usize;
     let finish = |status: Status, summary: String, steps, calls, ptok, ctok, msgs: &[Value]| {
         let (interventions, generation_ms, load_ms) = *timing.lock().unwrap();
         let (changed_files, mut diff) = ws.changes();
@@ -212,6 +243,36 @@ pub async fn run(
                 return finish(
                     Status::Failed,
                     "unexpected stream from the gateway".into(),
+                    steps,
+                    calls,
+                    ptok,
+                    ctok,
+                    &messages,
+                );
+            }
+            // Longer than the model's context (and it could not grow): older
+            // tool outputs get shorter, and the same step runs again.
+            Err(e)
+                if ancilo_gateway::context_overflow(&e).is_some()
+                    && shortened < SHORTEN_TO.len() =>
+            {
+                let mut cut = false;
+                while shortened < SHORTEN_TO.len() && !cut {
+                    cut = shorten_tool_outputs(&mut messages, SHORTEN_TO[shortened]);
+                    shortened += 1;
+                }
+                if cut {
+                    emit(
+                        &events,
+                        "agent.context_shortened",
+                        json!({"step": steps, "cap": SHORTEN_TO[shortened - 1]}),
+                    );
+                    steps -= 1;
+                    continue;
+                }
+                return finish(
+                    Status::Failed,
+                    format!("model call failed: {}", e.message()),
                     steps,
                     calls,
                     ptok,
@@ -311,5 +372,31 @@ pub async fn run(
             warned_repeat = true;
             messages.push(json!({"role": "user", "content": "You are repeating the same tool call. Change your approach, or finish with a summary."}));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_tool_outputs_get_shorter_the_latest_stays() {
+        let long = "x".repeat(5000);
+        let mut m = vec![
+            json!({"role": "system", "content": "s"}),
+            json!({"role": "user", "content": "task"}),
+            json!({"role": "assistant", "content": "", "tool_calls": []}),
+            json!({"role": "tool", "content": long}),
+            json!({"role": "assistant", "content": "", "tool_calls": []}),
+            json!({"role": "tool", "content": long}),
+        ];
+        assert!(shorten_tool_outputs(&mut m, 600));
+        assert!(m[3]["content"].as_str().unwrap().len() < 700);
+        assert_eq!(
+            m[5]["content"].as_str().unwrap().len(),
+            5000,
+            "the latest result stays"
+        );
+        assert!(!shorten_tool_outputs(&mut m, 600), "nothing more to cut");
     }
 }
