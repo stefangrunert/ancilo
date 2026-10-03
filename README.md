@@ -9,9 +9,11 @@ Ancilo runs open models (e.g. Qwen) on your Mac with llama.cpp. It picks a model
 ## For everyone
 
 - **Set up in a few clicks** – a step-by-step setup asks what you want to use Ancilo for and recommends one model that fits your computer's memory right now. One click loads it.
-- **A private chat** – write, ask, translate, summarize; answers in Markdown; chats are kept. Point it at a folder of your documents and it draws on them.
+- **A private chat** – write, ask, translate, summarize; answers in Markdown; chats are kept.
 - **Web search, if you want it** – off by default. Wikipedia (no account) or Google through Serper (your own key); by default Ancilo shows the search query and asks before anything goes out, and answers name their sources.
 - **Your computer stays usable** – a slider from *Eco* to *Maximum* decides how much Ancilo may take. Models load only into memory that is free, idle models are unloaded, and Ancilo backs off when memory gets short or the computer hot. A status bar shows how the computer is doing and offers one-click help when it gets tight.
+- **Your documents** – attach PDF, Word or Excel files to a chat, or make a folder a chat project: answers name the file and page, and such a chat stays on your computer.
+- **Tasks** – give Ancilo something to do with your files: a table of your invoices, photos sorted by year, a report from your contracts. It works in a copy of the folder; you see every change and keep it, drop it or undo it.
 - **Build something** – describe what you want; a coding agent works in a copy of the project, and you keep or undo its changes.
 
 ## For developers

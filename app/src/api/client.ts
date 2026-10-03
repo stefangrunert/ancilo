@@ -125,6 +125,26 @@ export class Client {
     return body as AttachmentView;
   }
 
+  /** Puts a file into a task's copy; returns the name it got there. */
+  async addTaskFile(session: string, name: string, file: Blob): Promise<{ name: string }> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.base}/api/v1/sessions/${encodeURIComponent(session)}/files?name=${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${this.token}`, "content-type": "application/octet-stream" },
+        body: file,
+      });
+    } catch {
+      throw new OfflineError("Ancilo is not reachable");
+    }
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      const err = body?.error ?? {};
+      throw new ApiError(err.code ?? "internal", err.message ?? `HTTP ${res.status}`, res.status);
+    }
+    return body as { name: string };
+  }
+
   async health(): Promise<boolean> {
     try {
       const r = await this.fetchImpl(`${this.base}/api/v1/health`);

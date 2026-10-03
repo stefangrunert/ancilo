@@ -519,6 +519,13 @@ async fn follow(
 }
 
 async fn run(cli: Cli) -> Result<()> {
+    // The document reader runs in a tight sandbox: before anything else
+    // (no data folder, no daemon).
+    if let Command::ExtractDocument { path } = &cli.command {
+        let doc = ancilo_docs::extract::extract_file(path)?;
+        println!("{}", serde_json::to_string(&doc)?);
+        return Ok(());
+    }
     let paths = Paths::resolve();
     if let Command::Daemon {
         action: DaemonAction::Run,
@@ -564,11 +571,7 @@ async fn run(cli: Cli) -> Result<()> {
     if let Command::Mcp = &cli.command {
         return mcp_bridge(&paths).await;
     }
-    if let Command::ExtractDocument { path } = &cli.command {
-        let doc = ancilo_docs::extract::extract_file(path)?;
-        println!("{}", serde_json::to_string(&doc)?);
-        return Ok(());
-    }
+
     let client = Client::connect(&paths, true).await?;
     match cli.command {
         Command::Add {

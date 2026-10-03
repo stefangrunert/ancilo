@@ -518,3 +518,9 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .not-read li { margin: 3px 0; }
 .plain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .folder-chip { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; padding: 3px 8px; }
+.task-change-list { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.task-change { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.task-change .badge { min-width: 70px; text-align: center; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); }
+.task-change.added .badge { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+.task-change.deleted .badge { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+.task-change.renamed .badge, .task-change.modified .badge { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }

@@ -20,6 +20,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::workcopy::WorkCopy;
+
 use ancilo_core::{Error, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -33,6 +35,12 @@ pub struct FileDiff {
     /// built, installed or tested – outside the sandbox, once kept.
     #[serde(default)]
     pub runs: bool,
+    /// How a document changed (tasks): added, modified, deleted, renamed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<crate::workcopy::ChangeKind>,
+    /// The old path of a renamed file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
 }
 
 /// Files whose change runs code when the project is built, installed or
@@ -256,6 +264,8 @@ fn numstat(text: &str) -> Vec<FileDiff> {
             let path = parts.next()?.to_string();
             (!path.is_empty()).then(|| FileDiff {
                 runs: runs_code(&path),
+                change: None,
+                from: None,
                 path,
                 added,
                 removed,
@@ -302,9 +312,37 @@ pub enum Changes {
         dir: PathBuf,
         base: String,
     },
+    /// A folder of documents (tasks): a copy compared by content, applied
+    /// with backup and journal (see [`WorkCopy`]).
+    Folder { copy: WorkCopy, work: PathBuf },
 }
 
+const NO_RETRY: &str = "tasks have no retry with another model";
+
 impl Changes {
+    /// A copy of a folder of documents in `dir` (tasks).
+    pub fn folder(source: &Path, dir: &Path) -> Result<Self> {
+        let copy = WorkCopy::create(source, dir)?;
+        let work = copy.work();
+        Ok(Self::Folder { copy, work })
+    }
+
+    /// The last apply of a task, which can be undone.
+    pub fn applied(&self) -> Option<crate::workcopy::Applied> {
+        match self {
+            Self::Folder { copy, .. } => copy.applied().ok().and_then(|mut a| a.pop()),
+            _ => None,
+        }
+    }
+
+    /// Takes back the last apply of a task.
+    pub fn undo(&self) -> Result<crate::workcopy::Applied> {
+        match self {
+            Self::Folder { copy, .. } => copy.undo(),
+            _ => Err(Error::invalid("only tasks can undo an apply")),
+        }
+    }
+
     /// A work area for `project` in `dir`, at the project's current state.
     /// `shadow_git`: where a project without git keeps its snapshots.
     pub fn create(project: &Path, dir: &Path, shadow_git: &Path) -> Result<Self> {
@@ -371,6 +409,7 @@ impl Changes {
     /// changes count from `base` ("retry with another model").
     fn at(&self, dir: &Path, base: &str, start: &str) -> Result<Self> {
         match self {
+            Self::Folder { .. } => Err(Error::invalid(NO_RETRY)),
             Self::Worktree { project, .. } => Self::git_worktree(project, dir, base, start),
             Self::Shadow {
                 project, git_dir, ..
@@ -405,12 +444,14 @@ impl Changes {
     pub fn work_dir(&self) -> &Path {
         match self {
             Self::Worktree { dir, .. } | Self::Shadow { dir, .. } => dir,
+            Self::Folder { work, .. } => work,
         }
     }
 
     pub fn project(&self) -> &Path {
         match self {
             Self::Worktree { project, .. } | Self::Shadow { project, .. } => project,
+            Self::Folder { copy, .. } => &copy.source,
         }
     }
 
@@ -421,13 +462,14 @@ impl Changes {
     fn base(&self) -> &str {
         match self {
             Self::Worktree { base, .. } | Self::Shadow { base, .. } => base,
+            Self::Folder { .. } => "",
         }
     }
 
     fn work_index(&self) -> Option<PathBuf> {
         match self {
             Self::Shadow { dir, .. } => Some(dir.with_extension("index")),
-            Self::Worktree { .. } => None,
+            Self::Worktree { .. } | Self::Folder { .. } => None,
         }
     }
 
@@ -441,6 +483,7 @@ impl Changes {
                 shadow: Some((git_dir, dir)),
                 index: ix.as_deref(),
             },
+            Self::Folder { .. } => return Err(Error::invalid(NO_RETRY)),
         };
         f(repo)
     }
@@ -448,7 +491,13 @@ impl Changes {
     /// The project's repository (shadow: the shadow repository over the project).
     fn project_repo(&self) -> Repo<'_> {
         match self {
-            Self::Worktree { project, .. } => Repo::at(project),
+            Self::Worktree { project, .. }
+            | Self::Folder {
+                copy: WorkCopy {
+                    source: project, ..
+                },
+                ..
+            } => Repo::at(project),
             Self::Shadow {
                 project, git_dir, ..
             } => Repo {
@@ -463,6 +512,7 @@ impl Changes {
         match self {
             Self::Worktree { project, .. } => Self::project_snapshot(project),
             Self::Shadow { base, .. } => self.project_repo().snapshot(Some(base), "project"),
+            Self::Folder { .. } => Err(Error::invalid(NO_RETRY)),
         }
     }
 
@@ -485,11 +535,33 @@ impl Changes {
     /// The work so far as a commit on top of the base (for "retry": another
     /// model starts from exactly this state).
     pub fn checkpoint(&self) -> Result<String> {
+        if let Self::Folder { .. } = self {
+            return Ok(String::new());
+        }
         self.with_work(|r| r.snapshot(Some(self.base()), "ancilo checkpoint"))
     }
 
     /// Changes against the base, optionally only some paths.
     pub fn diff(&self, paths: Option<&[String]>) -> Result<Diff> {
+        if let Self::Folder { copy, .. } = self {
+            let files = copy
+                .changes()?
+                .into_iter()
+                .filter(|c| paths.is_none_or(|p| p.contains(&c.path)))
+                .map(|c| FileDiff {
+                    runs: false,
+                    added: 0,
+                    removed: 0,
+                    change: Some(c.kind),
+                    from: c.from,
+                    path: c.path,
+                })
+                .collect();
+            return Ok(Diff {
+                files,
+                patch: String::new(),
+            });
+        }
         let base = self.base().to_string();
         let mut args = vec!["diff", "--cached", "--no-renames", "--numstat", "-z", &base];
         let mut pargs = vec!["diff", "--cached", "--no-renames", "--binary", &base];
@@ -535,6 +607,14 @@ impl Changes {
     /// are checked against the project's current state first – on a conflict
     /// nothing changes anywhere.
     pub fn apply(&mut self, paths: Option<&[String]>) -> Result<Vec<String>> {
+        if let Self::Folder { copy, .. } = self {
+            return Ok(copy
+                .apply(paths, None)?
+                .changes
+                .into_iter()
+                .map(|c| c.path)
+                .collect());
+        }
         let (selected, rest) = self.select(paths)?;
         if selected.is_empty() {
             return Ok(selected);
@@ -607,12 +687,16 @@ impl Changes {
     fn set_base(&mut self, new: &str) {
         match self {
             Self::Worktree { base, .. } | Self::Shadow { base, .. } => *base = new.to_string(),
+            Self::Folder { .. } => {}
         }
     }
 
     /// Drops changes (all, or `paths`) from the work area without traces –
     /// the project is never touched. Returns the dropped paths.
     pub fn discard(&mut self, paths: Option<&[String]>) -> Result<Vec<String>> {
+        if let Self::Folder { copy, .. } = self {
+            return Ok(copy.discard(paths)?.into_iter().map(|c| c.path).collect());
+        }
         let (selected, rest) = self.select(paths)?;
         let rest_patch = self.patch_of(&rest)?;
         let base = self.base().to_string();
@@ -626,6 +710,9 @@ impl Changes {
     /// Takes over another work area's state and base (a variant the user
     /// chose) – after its changes were applied or checked.
     pub fn adopt(&mut self, other: &Changes) -> Result<()> {
+        if matches!(self, Self::Folder { .. }) {
+            return Err(Error::invalid(NO_RETRY));
+        }
         let state = other.checkpoint()?;
         self.set_base(other.base());
         self.reset_to(&state)
@@ -634,6 +721,10 @@ impl Changes {
     /// Removes the work area (the shadow repository stays with the session data).
     pub fn remove(&self) {
         match self {
+            Self::Folder { copy, .. } => {
+                copy.remove();
+                return;
+            }
             Self::Worktree { project, dir, .. } => {
                 Repo::at(project)
                     .git(

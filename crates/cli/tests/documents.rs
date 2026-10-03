@@ -37,6 +37,10 @@ async fn documents_are_read_in_a_process_of_their_own() {
         e.message()
     );
 
+    // Elsewhere on the disk is invisible to the reader: a document from
+    // there is put into its place first (so this works), Ancilo's own data
+    // never is (next test).
+
     // Its place is cleaned up after every reading.
     assert_eq!(std::fs::read_dir(base.join("scratch")).unwrap().count(), 0);
 }

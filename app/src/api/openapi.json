@@ -238,6 +238,30 @@
           }
         ]
       },
+      "Applied": {
+        "description": "What an apply did – kept for undo.",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/Change"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "changes",
+          "at"
+        ],
+        "type": "object"
+      },
       "Approval": {
         "properties": {
           "arguments": true,
@@ -526,6 +550,46 @@
           "memory",
           "cpu",
           "heat"
+        ],
+        "type": "string"
+      },
+      "Change": {
+        "description": "A change in the copy, compared with the folder as it was copied.",
+        "properties": {
+          "from": {
+            "description": "The old path of a renamed file.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChangeKind"
+          },
+          "path": {
+            "description": "Relative path (the new one for a rename).",
+            "type": "string"
+          },
+          "size": {
+            "description": "Size in bytes now (0 for a deleted file).",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "path",
+          "size"
+        ],
+        "type": "object"
+      },
+      "ChangeKind": {
+        "enum": [
+          "added",
+          "modified",
+          "deleted",
+          "renamed"
         ],
         "type": "string"
       },
@@ -1065,6 +1129,24 @@
             "format": "uint64",
             "minimum": 0,
             "type": "integer"
+          },
+          "change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How a document changed (tasks): added, modified, deleted, renamed."
+          },
+          "from": {
+            "description": "The old path of a renamed file.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "path": {
             "type": "string"
@@ -2058,6 +2140,10 @@
       "ProjectInfo": {
         "description": "A project in the app's list: opened once, or with sessions.",
         "properties": {
+          "area": {
+            "description": "`code`, `tasks` (a folder of the Tasks area) or `task` (a free task's\nown folder).",
+            "type": "string"
+          },
           "exists": {
             "description": "The folder is still there.",
             "type": "boolean"
@@ -2082,6 +2168,7 @@
         "required": [
           "root",
           "name",
+          "area",
           "sessions",
           "last_used",
           "exists"
@@ -2801,6 +2888,14 @@
         ],
         "type": "object"
       },
+      "SessionKind": {
+        "description": "What the agent works on: code (a project, with commands in a sandbox) or\na task (a folder of documents, with document tools only).",
+        "enum": [
+          "code",
+          "task"
+        ],
+        "type": "string"
+      },
       "SessionStatus": {
         "oneOf": [
           {
@@ -2819,6 +2914,17 @@
       },
       "SessionView": {
         "properties": {
+          "applied": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Applied"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A task's last apply – it can be undone."
+          },
           "approvals": {
             "items": {
               "$ref": "#/components/schemas/Approval"
@@ -2834,6 +2940,13 @@
             },
             "type": "array"
           },
+          "changes_version": {
+            "description": "A task's changes as shown – pass it to `apply_changes` so exactly\nthese are applied.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -2844,6 +2957,9 @@
           "isolated": {
             "description": "Changes wait in a work area of their own (git projects).",
             "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SessionKind"
           },
           "messages": {
             "description": "Only for a single session (`get_session`).",
@@ -2902,6 +3018,7 @@
           "variants",
           "can_retry",
           "web_used",
+          "kind",
           "created_at"
         ],
         "type": "object"
@@ -4431,6 +4548,72 @@
         "x-ancilo-permission": "manage"
       }
     },
+    "/api/v1/ops/add_task_file": {
+      "post": {
+        "description": "Put a file into a task's copy (it reaches the folder only if kept)",
+        "operationId": "add_task_file",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "description": "Full path of a file to put into the task's copy.",
+                    "type": "string"
+                  },
+                  "session": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session",
+                  "path"
+                ],
+                "title": "TaskFileInput",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "name": {
+                      "description": "The name the file got in the copy.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "title": "Added",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Put a file into a task's copy (it reaches the folder only if kept)",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "manage"
+      }
+    },
     "/api/v1/ops/answer_web_proposal": {
       "post": {
         "description": "When web search asks first, a chat answer can be a proposal: the search query that would go to the provider. `search: true` sends it (or `query` instead) and answers from the sources found; `false` answers without the web.",
@@ -4585,6 +4768,14 @@
                   "variant": {
                     "default": null,
                     "description": "A variant from \"retry with another model\".",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "version": {
+                    "default": null,
+                    "description": "Tasks: the changes as the user saw them (`changes_version`); if they\ndiffer now, nothing is applied.",
                     "type": [
                       "string",
                       "null"
@@ -6680,6 +6871,17 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "applied": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Applied"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "A task's last apply – it can be undone."
+                    },
                     "approvals": {
                       "items": {
                         "$ref": "#/components/schemas/Approval"
@@ -6695,6 +6897,13 @@
                       },
                       "type": "array"
                     },
+                    "changes_version": {
+                      "description": "A task's changes as shown – pass it to `apply_changes` so exactly\nthese are applied.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -6705,6 +6914,9 @@
                     "isolated": {
                       "description": "Changes wait in a work area of their own (git projects).",
                       "type": "boolean"
+                    },
+                    "kind": {
+                      "$ref": "#/components/schemas/SessionKind"
                     },
                     "messages": {
                       "description": "Only for a single session (`get_session`).",
@@ -6763,6 +6975,7 @@
                     "variants",
                     "can_retry",
                     "web_used",
+                    "kind",
                     "created_at"
                   ],
                   "title": "SessionView",
@@ -6784,6 +6997,195 @@
           }
         },
         "summary": "Start a coding session in a project",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "manage"
+      }
+    },
+    "/api/v1/ops/create_task": {
+      "post": {
+        "description": "Start a task: the agent works with documents in a copy of a folder (or, without one, in a new folder of its own); the user keeps the changes or not",
+        "operationId": "create_task",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "folder": {
+                    "default": null,
+                    "description": "A folder of the Tasks area to work on. Without one: a free task in a\nfolder of its own (`<projects folder>/<free_dir>/<title>`).",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "free_dir": {
+                    "default": null,
+                    "description": "The folder free tasks go into (the app's word for \"Tasks\").",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "permission": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/Access"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null,
+                    "description": "read: ask before every change; edit/shell: changes in the copy without asking."
+                  },
+                  "title": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "title": "TaskInput",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "applied": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Applied"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "A task's last apply – it can be undone."
+                    },
+                    "approvals": {
+                      "items": {
+                        "$ref": "#/components/schemas/Approval"
+                      },
+                      "type": "array"
+                    },
+                    "can_retry": {
+                      "type": "boolean"
+                    },
+                    "changes": {
+                      "items": {
+                        "$ref": "#/components/schemas/FileDiff"
+                      },
+                      "type": "array"
+                    },
+                    "changes_version": {
+                      "description": "A task's changes as shown – pass it to `apply_changes` so exactly\nthese are applied.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "isolated": {
+                      "description": "Changes wait in a work area of their own (git projects).",
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "$ref": "#/components/schemas/SessionKind"
+                    },
+                    "messages": {
+                      "description": "Only for a single session (`get_session`).",
+                      "items": {
+                        "$ref": "#/components/schemas/ChatMessage"
+                      },
+                      "type": "array"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "permission": {
+                      "$ref": "#/components/schemas/Access"
+                    },
+                    "project": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "$ref": "#/components/schemas/SessionStatus"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "turns": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "variants": {
+                      "items": {
+                        "$ref": "#/components/schemas/VariantView"
+                      },
+                      "type": "array"
+                    },
+                    "web_used": {
+                      "description": "The agent searched the web here – what it changed may follow text\nfrom foreign pages; review it with that in mind.",
+                      "type": "boolean"
+                    },
+                    "workdir": {
+                      "description": "Where the agent works (the terminal of the session opens here).",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "project",
+                    "model",
+                    "permission",
+                    "status",
+                    "isolated",
+                    "workdir",
+                    "turns",
+                    "changes",
+                    "approvals",
+                    "variants",
+                    "can_retry",
+                    "web_used",
+                    "kind",
+                    "created_at"
+                  ],
+                  "title": "SessionView",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Start a task: the agent works with documents in a copy of a folder (or, without one, in a new folder of its own); the user keeps the changes or not",
         "x-ancilo-consequential": false,
         "x-ancilo-permission": "manage"
       }
@@ -7360,6 +7762,14 @@
                   "variant": {
                     "default": null,
                     "description": "A variant from \"retry with another model\".",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "version": {
+                    "default": null,
+                    "description": "Tasks: the changes as the user saw them (`changes_version`); if they\ndiffer now, nothing is applied.",
                     "type": [
                       "string",
                       "null"
@@ -8392,6 +8802,17 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "applied": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Applied"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "A task's last apply – it can be undone."
+                    },
                     "approvals": {
                       "items": {
                         "$ref": "#/components/schemas/Approval"
@@ -8407,6 +8828,13 @@
                       },
                       "type": "array"
                     },
+                    "changes_version": {
+                      "description": "A task's changes as shown – pass it to `apply_changes` so exactly\nthese are applied.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -8417,6 +8845,9 @@
                     "isolated": {
                       "description": "Changes wait in a work area of their own (git projects).",
                       "type": "boolean"
+                    },
+                    "kind": {
+                      "$ref": "#/components/schemas/SessionKind"
                     },
                     "messages": {
                       "description": "Only for a single session (`get_session`).",
@@ -8475,6 +8906,7 @@
                     "variants",
                     "can_retry",
                     "web_used",
+                    "kind",
                     "created_at"
                   ],
                   "title": "SessionView",
@@ -10023,6 +10455,82 @@
         "x-ancilo-permission": "read"
       }
     },
+    "/api/v1/ops/open_task_folder": {
+      "post": {
+        "description": "Add a folder to the Tasks area (Ancilo works on it only in a copy)",
+        "operationId": "open_task_folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "description": "Absolute project directory.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "title": "PathInput",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "git": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "root": {
+                      "type": "string"
+                    },
+                    "sessions": {
+                      "items": {
+                        "$ref": "#/components/schemas/SessionView"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "root",
+                    "name",
+                    "git",
+                    "sessions"
+                  ],
+                  "title": "ProjectView",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Add a folder to the Tasks area (Ancilo works on it only in a copy)",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "manage"
+      }
+    },
     "/api/v1/ops/open_terminal": {
       "post": {
         "description": "Open a terminal (lives in Ancilo, survives closing the window)",
@@ -11397,6 +11905,10 @@
                 "schema": {
                   "description": "A project in the app's list: opened once, or with sessions.",
                   "properties": {
+                    "area": {
+                      "description": "`code`, `tasks` (a folder of the Tasks area) or `task` (a free task's\nown folder).",
+                      "type": "string"
+                    },
                     "exists": {
                       "description": "The folder is still there.",
                       "type": "boolean"
@@ -11421,6 +11933,7 @@
                   "required": [
                     "root",
                     "name",
+                    "area",
                     "sessions",
                     "last_used",
                     "exists"
@@ -11987,6 +12500,17 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "applied": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Applied"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "A task's last apply – it can be undone."
+                    },
                     "approvals": {
                       "items": {
                         "$ref": "#/components/schemas/Approval"
@@ -12002,6 +12526,13 @@
                       },
                       "type": "array"
                     },
+                    "changes_version": {
+                      "description": "A task's changes as shown – pass it to `apply_changes` so exactly\nthese are applied.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -12012,6 +12543,9 @@
                     "isolated": {
                       "description": "Changes wait in a work area of their own (git projects).",
                       "type": "boolean"
+                    },
+                    "kind": {
+                      "$ref": "#/components/schemas/SessionKind"
                     },
                     "messages": {
                       "description": "Only for a single session (`get_session`).",
@@ -12070,6 +12604,7 @@
                     "variants",
                     "can_retry",
                     "web_used",
+                    "kind",
                     "created_at"
                   ],
                   "title": "SessionView",
@@ -13167,6 +13702,17 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "applied": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Applied"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "A task's last apply – it can be undone."
+                    },
                     "approvals": {
                       "items": {
                         "$ref": "#/components/schemas/Approval"
@@ -13182,6 +13728,13 @@
                       },
                       "type": "array"
                     },
+                    "changes_version": {
+                      "description": "A task's changes as shown – pass it to `apply_changes` so exactly\nthese are applied.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -13192,6 +13745,9 @@
                     "isolated": {
                       "description": "Changes wait in a work area of their own (git projects).",
                       "type": "boolean"
+                    },
+                    "kind": {
+                      "$ref": "#/components/schemas/SessionKind"
                     },
                     "messages": {
                       "description": "Only for a single session (`get_session`).",
@@ -13250,6 +13806,7 @@
                     "variants",
                     "can_retry",
                     "web_used",
+                    "kind",
                     "created_at"
                   ],
                   "title": "SessionView",
@@ -15458,6 +16015,79 @@
         "x-ancilo-permission": "manage"
       }
     },
+    "/api/v1/ops/undo_apply": {
+      "post": {
+        "description": "Take back a task's last applied changes – if the folder still holds them",
+        "operationId": "undo_apply",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "session": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session"
+                ],
+                "title": "SessionRef",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "What an apply did – kept for undo.",
+                  "properties": {
+                    "at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "changes": {
+                      "items": {
+                        "$ref": "#/components/schemas/Change"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "changes",
+                    "at"
+                  ],
+                  "title": "Applied",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Take back a task's last applied changes – if the folder still holds them",
+        "x-ancilo-consequential": true,
+        "x-ancilo-permission": "manage"
+      }
+    },
     "/api/v1/ops/unload_models": {
       "post": {
         "description": "Unload every model that is not answering right now (frees memory)",
@@ -15570,6 +16200,17 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "applied": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Applied"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "A task's last apply – it can be undone."
+                    },
                     "approvals": {
                       "items": {
                         "$ref": "#/components/schemas/Approval"
@@ -15585,6 +16226,13 @@
                       },
                       "type": "array"
                     },
+                    "changes_version": {
+                      "description": "A task's changes as shown – pass it to `apply_changes` so exactly\nthese are applied.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -15595,6 +16243,9 @@
                     "isolated": {
                       "description": "Changes wait in a work area of their own (git projects).",
                       "type": "boolean"
+                    },
+                    "kind": {
+                      "$ref": "#/components/schemas/SessionKind"
                     },
                     "messages": {
                       "description": "Only for a single session (`get_session`).",
@@ -15653,6 +16304,7 @@
                     "variants",
                     "can_retry",
                     "web_used",
+                    "kind",
                     "created_at"
                   ],
                   "title": "SessionView",

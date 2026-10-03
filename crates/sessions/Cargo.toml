@@ -9,16 +9,20 @@ rust-version.workspace = true
 [dependencies]
 ancilo-agent.workspace = true
 ancilo-core.workspace = true
+ancilo-docs.workspace = true
 ancilo-gateway.workspace = true
 ancilo-models.workspace = true
 ancilo-storage.workspace = true
 axum.workspace = true
 chrono.workspace = true
 futures.workspace = true
+hex.workspace = true
 portable-pty = "0.9"
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+rustix = { version = "1", features = ["fs"] }
 tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

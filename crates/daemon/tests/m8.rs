@@ -1170,3 +1170,167 @@ fallback: { http_error: { status: 400, message: "the model refused the request" 
     assert_eq!(s["status"], "idle");
     env.stop().await;
 }
+
+// covers: M10-AC-04, M10-AC-05
+/// A task: the agent works with documents in a copy of the folder; the folder
+/// changes only when the user keeps the changes – and that can be undone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_task_works_on_a_copy_and_the_folder_changes_only_when_kept() {
+    let script = r#"
+steps:
+  - expect: { last_user_contains: "Tabelle", offers_tool: write_spreadsheet, lacks_tool: bash }
+    respond: { tool_calls: [{ name: list_files, arguments: {} }] }
+  - expect: { any_message_contains: "strom.txt" }
+    respond: { tool_calls: [{ name: read_document, arguments: { path: "Rechnungen/strom.txt" } }] }
+  - expect: { any_message_contains: "120 Euro" }
+    respond: { tool_calls: [{ name: write_spreadsheet, arguments: { path: "Übersicht.xlsx", sheets: [{ name: "2025", rows: [["Firma", "Betrag"], ["Stadtwerke", "120"]] }] } }] }
+  - respond: { tool_calls: [{ name: move_file, arguments: { from: "Rechnungen/strom.txt", to: "2025/Strom.txt" } }] }
+  - respond: { text: "Fertig: Übersicht.xlsx, und die Stromrechnung liegt jetzt in 2025." }
+  # Asking first: the write waits for the OK.
+  - expect: { last_user_contains: "Notiz" }
+    respond: { tool_calls: [{ name: write_file, arguments: { path: "notiz.txt", content: "hallo" } }] }
+  - respond: { text: "Notiz geschrieben." }
+"#;
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
+    let folder = env.home.scratch("Belege");
+    std::fs::create_dir_all(folder.join("Rechnungen")).unwrap();
+    std::fs::write(folder.join("Rechnungen/strom.txt"), "Stadtwerke: 120 Euro").unwrap();
+    let folder = folder.canonicalize().unwrap();
+    env.op("open_task_folder", json!({"path": folder})).await;
+    let projects = env.op("list_projects", json!({})).await;
+    assert_eq!(projects[0]["area"], "tasks", "{projects}");
+    let s = env
+        .op(
+            "create_task",
+            json!({"folder": folder, "title": "Rechnungen"}),
+        )
+        .await;
+    let id = s["id"].as_str().unwrap().to_string();
+    assert_eq!(s["kind"], "task");
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Mach eine Tabelle der Rechnungen", "wait": true}),
+        )
+        .await;
+    let last = s["messages"].as_array().unwrap().last().unwrap()["text"].clone();
+    assert!(last.as_str().unwrap().starts_with("Fertig"), "{s}");
+    // The changes – nothing of it in the folder yet.
+    let changes: Vec<(String, String, Option<String>)> = s["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["change"].as_str().unwrap().to_string(),
+                c["path"].as_str().unwrap().to_string(),
+                c["from"].as_str().map(String::from),
+            )
+        })
+        .collect();
+    assert_eq!(
+        changes,
+        [
+            (
+                "renamed".into(),
+                "2025/Strom.txt".into(),
+                Some("Rechnungen/strom.txt".into())
+            ),
+            ("added".into(), "Übersicht.xlsx".into(), None),
+        ]
+    );
+    assert!(
+        folder.join("Rechnungen/strom.txt").exists() && !folder.join("Übersicht.xlsx").exists()
+    );
+    // Kept: in the folder.
+    env.op("apply_changes", json!({"session": id})).await;
+    assert!(folder.join("Übersicht.xlsx").exists());
+    assert_eq!(
+        std::fs::read_to_string(folder.join("2025/Strom.txt")).unwrap(),
+        "Stadtwerke: 120 Euro"
+    );
+    let s = env.op("get_session", json!({"session": id})).await;
+    assert!(s["changes"].as_array().unwrap().is_empty());
+    assert_eq!(s["applied"]["changes"].as_array().unwrap().len(), 2);
+    // And taken back.
+    env.op("undo_apply", json!({"session": id})).await;
+    assert!(!folder.join("Übersicht.xlsx").exists());
+    assert!(
+        folder.join("Rechnungen/strom.txt").exists() && !folder.join("2025/Strom.txt").exists()
+    );
+
+    // Asking first: the write waits for the OK.
+    env.op(
+        "update_session",
+        json!({"session": id, "permission": "read"}),
+    )
+    .await;
+    env.op(
+        "send_message",
+        json!({"session": id, "text": "Schreib eine Notiz"}),
+    )
+    .await;
+    let mut a = Value::Null;
+    for _ in 0..400 {
+        let s = env.op("get_session", json!({"session": id})).await;
+        if let Some(x) = s["approvals"].as_array().and_then(|a| a.first()) {
+            a = x.clone();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(a["tool"], "write_file", "{a}");
+    env.op("approve", json!({"approval": a["id"]})).await;
+    for _ in 0..400 {
+        if env.op("get_session", json!({"session": id})).await["status"] == "idle" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(!folder.join("notiz.txt").exists(), "still only in the copy");
+    env.stop().await;
+}
+
+// covers: M10-AC-04
+/// A free task gets a folder of its own; files given to it go into its copy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_free_task_has_a_folder_of_its_own_and_takes_files() {
+    let (env, _, _) = Env::start(&[]).await;
+    let s = env
+        .op(
+            "create_task",
+            json!({"free_dir": "Aufgaben", "title": "Rechnungen 2025"}),
+        )
+        .await;
+    let id = s["id"].as_str().unwrap().to_string();
+    let project = std::path::PathBuf::from(s["project"].as_str().unwrap());
+    assert!(
+        project.ends_with("Aufgaben/Rechnungen 2025"),
+        "{}",
+        project.display()
+    );
+    let r = reqwest::Client::new()
+        .post(format!("{}/api/v1/sessions/{id}/files", env.d().url()))
+        .query(&[("name", "strom.pdf")])
+        .bearer_auth(&env.d().token)
+        .body("%PDF")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let s = env.op("get_session", json!({"session": id})).await;
+    assert_eq!(s["changes"][0]["path"], "strom.pdf");
+    assert_eq!(s["changes"][0]["change"], "added");
+    let projects = env.op("list_projects", json!({})).await;
+    assert_eq!(projects[0]["area"], "task");
+    // Code sessions refuse files.
+    let (ok, _) = env
+        .call(
+            "add_task_file",
+            json!({"session": "s-nope", "path": "/etc/hosts"}),
+            true,
+        )
+        .await;
+    assert!(!ok);
+    env.stop().await;
+}

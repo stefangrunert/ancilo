@@ -4,6 +4,8 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **Tasks**: give Ancilo something to do with your files – it reads documents, writes Excel and Word files, sorts and renames – always in a copy of the folder. You see every change (new, changed, deleted, moved) and keep it or drop it; kept changes can be undone. Keeping checks the folder first (nothing is written if it changed meanwhile), backs up originals, writes with a journal and rolls back on failure or after a crash.
+- **Chat projects**: folders Ancilo only reads; chats in them answer from their documents with file and page, and the project page says what could not be read and why. Plain chats no longer see document folders.
 - **Documents in chats**: attach PDF, Word, Excel, CSV or text files (paperclip, drag and drop, paste). They are read on this computer in a sandboxed process; answers name the file and page or sheet. A conversation with documents stays local – no cloud model, no tools, every web search asks.
 - **Three areas: Chat, Tasks, Code** – tabs with symbols at the top of the left column. *Set up* and *System* moved into the header, which in the app is the window's title bar. The left column can be resized and remembers its width. Tasks – working with your files – is being built.
 - **Coding Tasks**: what Claude Code and Codex hand to Ancilo is now called *Coding Tasks* (in every language) and lives in the Code area, together with what such tasks may do.

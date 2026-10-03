@@ -536,6 +536,18 @@ pub async fn start(
         Some(search.clone()),
     );
     let terminals = ancilo_sessions::Terminals::new(bus.clone());
+    // Documents are read by the `ancilo` program itself, in a sandboxed
+    // process; a test daemon (another program) reads them in-process.
+    let reader = config.ancilo_bin.clone().or_else(|| {
+        std::env::current_exe()
+            .ok()
+            .filter(|p| p.file_name().is_some_and(|n| n == "ancilo"))
+    });
+    let extractor = Arc::new(ancilo_docs::Extractor::new(
+        reader,
+        paths.home().join("tmp").join("documents"),
+        vec![paths.home().to_path_buf()],
+    ));
     let web_search = web::WebSearch::new(&config, db.clone(), manager.secrets(), bus.clone());
     let sessions = ancilo_sessions::Sessions::new(
         db.clone(),
@@ -551,7 +563,8 @@ pub async fn start(
             .unwrap_or_else(|| paths.home().to_path_buf())
             .join("Ancilo")
     }))
-    .with_web(Arc::new(web::AgentWeb(web_search.clone())));
+    .with_web(Arc::new(web::AgentWeb(web_search.clone())))
+    .with_documents(extractor.clone());
     let mut task_options = options.tasks;
     task_options.search.get_or_insert(search);
     let tasks = ancilo_tasks::TaskRunner::new(
@@ -582,21 +595,7 @@ pub async fn start(
         config.clone(),
         paths.logs_dir(),
     );
-    // Documents are read by the `ancilo` program itself, in a sandboxed
-    // process; a test daemon (another program) reads them in-process.
-    let reader = config.ancilo_bin.clone().or_else(|| {
-        std::env::current_exe()
-            .ok()
-            .filter(|p| p.file_name().is_some_and(|n| n == "ancilo"))
-    });
-    let attachments = ancilo_docs::Attachments::new(
-        db.clone(),
-        ancilo_docs::Extractor::new(
-            reader,
-            paths.home().join("tmp").join("documents"),
-            vec![paths.home().to_path_buf()],
-        ),
-    );
+    let attachments = ancilo_docs::Attachments::new(db.clone(), extractor.clone());
     if let Err(e) = attachments.prune() {
         tracing::warn!(error = %e.message(), "removing unsent attachments failed");
     }
@@ -675,7 +674,8 @@ pub async fn start(
         state,
         ancilo_gateway::routes::router(gateway.clone())
             .merge(ancilo_mcp::router())
-            .merge(docs::routes(attachments)),
+            .merge(docs::routes(attachments))
+            .merge(ancilo_sessions::ops::files_route(sessions.clone())),
         pty,
     );
     let stop = shutdown.clone();

@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use ancilo_agent::Access;
-use ancilo_core::{NoInput, OpBuilder, Registry};
+use ancilo_core::{Error, NoInput, OpBuilder, Registry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -67,6 +67,37 @@ pub struct CreateInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct TaskInput {
+    /// A folder of the Tasks area to work on. Without one: a free task in a
+    /// folder of its own (`<projects folder>/<free_dir>/<title>`).
+    #[serde(default)]
+    pub folder: Option<PathBuf>,
+    /// The folder free tasks go into (the app's word for "Tasks").
+    #[serde(default)]
+    pub free_dir: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// read: ask before every change; edit/shell: changes in the copy without asking.
+    #[serde(default)]
+    pub permission: Option<Access>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskFileInput {
+    pub session: String,
+    /// Full path of a file to put into the task's copy.
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Added {
+    /// The name the file got in the copy.
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SessionRef {
     pub session: String,
 }
@@ -125,6 +156,10 @@ pub struct ChangesInput {
     /// Only these files (default: all).
     #[serde(default)]
     pub paths: Option<Vec<String>>,
+    /// Tasks: the changes as the user saw them (`changes_version`); if they
+    /// differ now, nothing is applied.
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -257,6 +292,45 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
         |s, i: CreateInput| s.create(&i.cwd, i.model, i.permission, i.title)
     );
     op!(
+        "create_task",
+        "Start a task: the agent works with documents in a copy of a folder (or, without one, in a new folder of its own); the user keeps the changes or not",
+        manage = true,
+        conseq = false,
+        |s, i: TaskInput| s.create_task(
+            i.folder.as_deref(),
+            i.free_dir.as_deref(),
+            i.title,
+            i.permission
+        )
+    );
+    op!(
+        "open_task_folder",
+        "Add a folder to the Tasks area (Ancilo works on it only in a copy)",
+        manage = true,
+        conseq = false,
+        |s, i: PathInput| s.open_task_folder(&i.path)
+    );
+    op!(
+        "undo_apply",
+        "Take back a task's last applied changes – if the folder still holds them",
+        manage = true,
+        conseq = true,
+        |s, i: SessionRef| s.undo_apply(&i.session).await
+    );
+    op!(
+        "add_task_file",
+        "Put a file into a task's copy (it reaches the folder only if kept)",
+        manage = true,
+        conseq = false,
+        |s, i: TaskFileInput| {
+            let bytes = std::fs::read(&i.path)
+                .map_err(|e| Error::invalid(format!("cannot read {}: {e}", i.path.display())))?;
+            s.add_file(&i.session, &i.path.to_string_lossy(), &bytes)
+                .await
+                .map(|name| Added { name })
+        }
+    );
+    op!(
         "send_message",
         "Tell the coding agent what to do next in a session",
         manage = true,
@@ -304,7 +378,12 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
         manage = true,
         conseq = true,
         |s, i: ChangesInput| s
-            .apply(&i.session, i.variant.as_deref(), i.paths)
+            .apply_seen(
+                &i.session,
+                i.variant.as_deref(),
+                i.paths,
+                i.version.as_deref()
+            )
             .await
             .map(|files| Files { files })
     );
@@ -401,4 +480,47 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
         conseq = false,
         |s, i: TerminalRef| s.terminals().close(&i.terminal).map(|_| Done { ok: true })
     );
+}
+
+#[derive(Debug, Deserialize)]
+struct FileQuery {
+    name: String,
+}
+
+/// `POST /api/v1/sessions/{id}/files?name=…` with a file as the body: into a
+/// task's copy (the app's drag and drop).
+pub fn files_route<S: Clone + Send + Sync + 'static>(sessions: Sessions) -> axum::Router<S> {
+    use axum::extract::{DefaultBodyLimit, Path as UrlPath, Query};
+    use axum::response::IntoResponse;
+    axum::Router::new()
+        .route(
+            "/api/v1/sessions/{id}/files",
+            axum::routing::post(
+                move |UrlPath(id): UrlPath<String>,
+                      Query(q): Query<FileQuery>,
+                      body: axum::body::Bytes| {
+                    let s = sessions.clone();
+                    async move {
+                        match s.add_file(&id, &q.name, &body).await {
+                            Ok(name) => (
+                                axum::http::StatusCode::OK,
+                                axum::Json(serde_json::json!({"name": name})),
+                            )
+                                .into_response(),
+                            Err(e) => {
+                                let status = match e {
+                                    Error::NotFound(_) => axum::http::StatusCode::NOT_FOUND,
+                                    Error::Conflict(_) => axum::http::StatusCode::CONFLICT,
+                                    _ => axum::http::StatusCode::BAD_REQUEST,
+                                };
+                                (status, axum::Json(e.body())).into_response()
+                            }
+                        }
+                    }
+                },
+            ),
+        )
+        .layer(DefaultBodyLimit::max(
+            ancilo_docs::extract::MAX_BYTES as usize + 1024 * 1024,
+        ))
 }

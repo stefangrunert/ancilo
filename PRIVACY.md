@@ -25,6 +25,8 @@ Ancilo is built to keep your work on your machine.
 
 API keys for cloud providers and the Serper key are stored in the system keychain, never in files or logs. Web search and your documents only ever go to the AI on this computer – never to cloud models.
 
+**Chat projects and tasks** work the same way: documents are read on this computer in that separate process, a chat project's text is kept in Ancilo's database (and forgotten when you take the project off the list), a task works in a copy of the folder in Ancilo's data folder. Nothing of it goes anywhere else.
+
 **Documents you attach to a chat** are read on this computer, in a separate process without network access; Ancilo keeps only their text (in its database, deleted with the conversation), never a copy of the file. A conversation with a document stays with the AI on this computer for good: no cloud model – not even for its earlier messages – and every web search asks first.
 
 ## Claude Code and Codex

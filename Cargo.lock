@@ -228,6 +228,7 @@ dependencies = [
  "pdf-extract",
  "quick-xml 0.42.0",
  "rusqlite",
+ "rust_xlsxwriter",
  "schemars",
  "serde",
  "serde_json",
@@ -395,6 +396,7 @@ version = "0.1.0"
 dependencies = [
  "ancilo-agent",
  "ancilo-core",
+ "ancilo-docs",
  "ancilo-gateway",
  "ancilo-models",
  "ancilo-storage",
@@ -402,10 +404,13 @@ dependencies = [
  "axum",
  "chrono",
  "futures",
+ "hex",
  "portable-pty",
+ "rustix",
  "schemars",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -3073,6 +3078,15 @@ dependencies = [
  "mime_guess",
  "sha2 0.11.0",
  "walkdir",
+]
+
+[[package]]
+name = "rust_xlsxwriter"
+version = "0.99.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34f2d2cda7223168a14fb86bc7411dbc3379bd7d49749ecc53b91ed98585b6b0"
+dependencies = [
+ "zip",
 ]
 
 [[package]]

@@ -119,8 +119,9 @@ export function FolderPage({ path }: { path: string }) {
   );
 }
 
-/** Adds a folder as a chat project: chosen in the system dialog, or typed. */
-export function AddFolderPage() {
+/** Adds a folder – as a chat project (read only) or for tasks (worked on in
+ * a copy): chosen in the system dialog, or typed. */
+export function AddFolderPage({ area = "chat" }: { area?: "chat" | "tasks" }) {
   const { t } = useI18n();
   const client = useClient();
   const refresh = useRefresh();
@@ -129,6 +130,16 @@ export function AddFolderPage() {
   const [error, setError] = useState<unknown>(null);
   const add = async (dir: string) => {
     setError(null);
+    if (area === "tasks") {
+      try {
+        const p = await client.op("open_task_folder", { path: dir });
+        await refresh("list_projects");
+        navigate({ view: "task-folder", path: p.root }, true);
+      } catch (e) {
+        setError(e);
+      }
+      return;
+    }
     try {
       const before = new Set(prefs.data?.documents ?? []);
       const p = await client.op("set_preferences", { add_documents: dir });
@@ -145,9 +156,9 @@ export function AddFolderPage() {
     <div className="page" data-testid="add-folder">
       <div className="build stack">
         <h1 className="page-title">
-          <Icon name="folder" size={24} /> {t("addFolder.title")}
+          <Icon name="folder" size={24} /> {t(area === "tasks" ? "addFolder.tasksTitle" : "addFolder.title")}
         </h1>
-        <p>{t("addFolder.intro")}</p>
+        <p>{t(area === "tasks" ? "addFolder.tasksIntro" : "addFolder.intro")}</p>
         <div className="row">
           <button
             type="button"

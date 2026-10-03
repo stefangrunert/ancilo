@@ -120,6 +120,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ops/add_task_file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put a file into a task's copy (it reaches the folder only if kept)
+         * @description Put a file into a task's copy (it reaches the folder only if kept)
+         */
+        post: operations["add_task_file"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ops/answer_web_proposal": {
         parameters: {
             query?: never;
@@ -534,6 +554,26 @@ export interface paths {
          * @description Start a coding session in a project
          */
         post: operations["create_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ops/create_task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a task: the agent works with documents in a copy of a folder (or, without one, in a new folder of its own); the user keeps the changes or not
+         * @description Start a task: the agent works with documents in a copy of a folder (or, without one, in a new folder of its own); the user keeps the changes or not
+         */
+        post: operations["create_task"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1357,6 +1397,26 @@ export interface paths {
          * @description Open a project for coding (starts its search index)
          */
         post: operations["open_project"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ops/open_task_folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a folder to the Tasks area (Ancilo works on it only in a copy)
+         * @description Add a folder to the Tasks area (Ancilo works on it only in a copy)
+         */
+        post: operations["open_task_folder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2423,6 +2483,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ops/undo_apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take back a task's last applied changes – if the folder still holds them
+         * @description Take back a task's last applied changes – if the folder still holds them
+         */
+        post: operations["undo_apply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ops/unload_models": {
         parameters: {
             query?: never;
@@ -2549,6 +2629,13 @@ export interface components {
             kind: "server_url";
             url: string;
         };
+        /** @description What an apply did – kept for undo. */
+        Applied: {
+            /** Format: date-time */
+            at: string;
+            changes: components["schemas"]["Change"][];
+            id: string;
+        };
         Approval: {
             arguments: unknown;
             /** Format: date-time */
@@ -2643,6 +2730,21 @@ export interface components {
         };
         /** @enum {string} */
         Cause: "memory" | "cpu" | "heat";
+        /** @description A change in the copy, compared with the folder as it was copied. */
+        Change: {
+            /** @description The old path of a renamed file. */
+            from?: string | null;
+            kind: components["schemas"]["ChangeKind"];
+            /** @description Relative path (the new one for a rename). */
+            path: string;
+            /**
+             * Format: uint64
+             * @description Size in bytes now (0 for a deleted file).
+             */
+            size: number;
+        };
+        /** @enum {string} */
+        ChangeKind: "added" | "modified" | "deleted" | "renamed";
         /**
          * @description What a conversation was started for. Only Ancilo's own conversations
          *     ("setup") – and requests that are about Ancilo – get Ancilo's tools;
@@ -2805,6 +2907,10 @@ export interface components {
         FileDiff: {
             /** Format: uint64 */
             added: number;
+            /** @description How a document changed (tasks): added, modified, deleted, renamed. */
+            change?: components["schemas"]["ChangeKind"] | null;
+            /** @description The old path of a renamed file. */
+            from?: string | null;
             path: string;
             /** Format: uint64 */
             removed: number;
@@ -3093,6 +3199,11 @@ export interface components {
         };
         /** @description A project in the app's list: opened once, or with sessions. */
         ProjectInfo: {
+            /**
+             * @description `code`, `tasks` (a folder of the Tasks area) or `task` (a free task's
+             *     own folder).
+             */
+            area: string;
             /** @description The folder is still there. */
             exists: boolean;
             /**
@@ -3309,16 +3420,30 @@ export interface components {
             /** @description `YYYY-MM-DD` */
             updated?: string | null;
         };
+        /**
+         * @description What the agent works on: code (a project, with commands in a sandbox) or
+         *     a task (a folder of documents, with document tools only).
+         * @enum {string}
+         */
+        SessionKind: "code" | "task";
         SessionStatus: ("idle" | "running") | "interrupted";
         SessionView: {
+            /** @description A task's last apply – it can be undone. */
+            applied?: components["schemas"]["Applied"] | null;
             approvals: components["schemas"]["Approval"][];
             can_retry: boolean;
             changes: components["schemas"]["FileDiff"][];
+            /**
+             * @description A task's changes as shown – pass it to `apply_changes` so exactly
+             *     these are applied.
+             */
+            changes_version?: string | null;
             /** Format: date-time */
             created_at: string;
             id: string;
             /** @description Changes wait in a work area of their own (git projects). */
             isolated: boolean;
+            kind: components["schemas"]["SessionKind"];
             /** @description Only for a single session (`get_session`). */
             messages?: components["schemas"]["ChatMessage"][];
             model: string;
@@ -3921,6 +4046,46 @@ export interface operations {
             };
         };
     };
+    add_task_file: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Full path of a file to put into the task's copy. */
+                    path: string;
+                    session: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The name the file got in the copy. */
+                        name: string;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     answer_web_proposal: {
         parameters: {
             query?: never;
@@ -4006,6 +4171,12 @@ export interface operations {
                      * @default null
                      */
                     variant?: string | null;
+                    /**
+                     * @description Tasks: the changes as the user saw them (`changes_version`); if they
+                     *     differ now, nothing is applied.
+                     * @default null
+                     */
+                    version?: string | null;
                 };
             };
         };
@@ -5053,14 +5224,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @description A task's last apply – it can be undone. */
+                        applied?: components["schemas"]["Applied"] | null;
                         approvals: components["schemas"]["Approval"][];
                         can_retry: boolean;
                         changes: components["schemas"]["FileDiff"][];
+                        /**
+                         * @description A task's changes as shown – pass it to `apply_changes` so exactly
+                         *     these are applied.
+                         */
+                        changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
+                        kind: components["schemas"]["SessionKind"];
+                        /** @description Only for a single session (`get_session`). */
+                        messages?: components["schemas"]["ChatMessage"][];
+                        model: string;
+                        permission: components["schemas"]["Access"];
+                        project: string;
+                        status: components["schemas"]["SessionStatus"];
+                        title: string;
+                        /** Format: uint32 */
+                        turns: number;
+                        variants: components["schemas"]["VariantView"][];
+                        /**
+                         * @description The agent searched the web here – what it changed may follow text
+                         *     from foreign pages; review it with that in mind.
+                         */
+                        web_used: boolean;
+                        /** @description Where the agent works (the terminal of the session opens here). */
+                        workdir: string;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    create_task: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description A folder of the Tasks area to work on. Without one: a free task in a
+                     *     folder of its own (`<projects folder>/<free_dir>/<title>`).
+                     * @default null
+                     */
+                    folder?: string | null;
+                    /**
+                     * @description The folder free tasks go into (the app's word for "Tasks").
+                     * @default null
+                     */
+                    free_dir?: string | null;
+                    /**
+                     * @description read: ask before every change; edit/shell: changes in the copy without asking.
+                     * @default null
+                     */
+                    permission?: components["schemas"]["Access"] | null;
+                    /** @default null */
+                    title?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description A task's last apply – it can be undone. */
+                        applied?: components["schemas"]["Applied"] | null;
+                        approvals: components["schemas"]["Approval"][];
+                        can_retry: boolean;
+                        changes: components["schemas"]["FileDiff"][];
+                        /**
+                         * @description A task's changes as shown – pass it to `apply_changes` so exactly
+                         *     these are applied.
+                         */
+                        changes_version?: string | null;
+                        /** Format: date-time */
+                        created_at: string;
+                        id: string;
+                        /** @description Changes wait in a work area of their own (git projects). */
+                        isolated: boolean;
+                        kind: components["schemas"]["SessionKind"];
                         /** @description Only for a single session (`get_session`). */
                         messages?: components["schemas"]["ChatMessage"][];
                         model: string;
@@ -5408,6 +5673,12 @@ export interface operations {
                      * @default null
                      */
                     variant?: string | null;
+                    /**
+                     * @description Tasks: the changes as the user saw them (`changes_version`); if they
+                     *     differ now, nothing is applied.
+                     * @default null
+                     */
+                    version?: string | null;
                 };
             };
         };
@@ -5994,14 +6265,22 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @description A task's last apply – it can be undone. */
+                        applied?: components["schemas"]["Applied"] | null;
                         approvals: components["schemas"]["Approval"][];
                         can_retry: boolean;
                         changes: components["schemas"]["FileDiff"][];
+                        /**
+                         * @description A task's changes as shown – pass it to `apply_changes` so exactly
+                         *     these are applied.
+                         */
+                        changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
+                        kind: components["schemas"]["SessionKind"];
                         /** @description Only for a single session (`get_session`). */
                         messages?: components["schemas"]["ChatMessage"][];
                         model: string;
@@ -6931,6 +7210,47 @@ export interface operations {
             };
         };
     };
+    open_task_folder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Absolute project directory. */
+                    path: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        git: boolean;
+                        name: string;
+                        root: string;
+                        sessions: components["schemas"]["SessionView"][];
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     open_terminal: {
         parameters: {
             query?: never;
@@ -7698,6 +8018,11 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /**
+                         * @description `code`, `tasks` (a folder of the Tasks area) or `task` (a free task's
+                         *     own folder).
+                         */
+                        area: string;
                         /** @description The folder is still there. */
                         exists: boolean;
                         /**
@@ -7991,14 +8316,22 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @description A task's last apply – it can be undone. */
+                        applied?: components["schemas"]["Applied"] | null;
                         approvals: components["schemas"]["Approval"][];
                         can_retry: boolean;
                         changes: components["schemas"]["FileDiff"][];
+                        /**
+                         * @description A task's changes as shown – pass it to `apply_changes` so exactly
+                         *     these are applied.
+                         */
+                        changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
+                        kind: components["schemas"]["SessionKind"];
                         /** @description Only for a single session (`get_session`). */
                         messages?: components["schemas"]["ChatMessage"][];
                         model: string;
@@ -8613,14 +8946,22 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @description A task's last apply – it can be undone. */
+                        applied?: components["schemas"]["Applied"] | null;
                         approvals: components["schemas"]["Approval"][];
                         can_retry: boolean;
                         changes: components["schemas"]["FileDiff"][];
+                        /**
+                         * @description A task's changes as shown – pass it to `apply_changes` so exactly
+                         *     these are applied.
+                         */
+                        changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
+                        kind: components["schemas"]["SessionKind"];
                         /** @description Only for a single session (`get_session`). */
                         messages?: components["schemas"]["ChatMessage"][];
                         model: string;
@@ -9757,6 +10098,46 @@ export interface operations {
             };
         };
     };
+    undo_apply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    session: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: date-time */
+                        at: string;
+                        changes: components["schemas"]["Change"][];
+                        id: string;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     unload_models: {
         parameters: {
             query?: never;
@@ -9823,14 +10204,22 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @description A task's last apply – it can be undone. */
+                        applied?: components["schemas"]["Applied"] | null;
                         approvals: components["schemas"]["Approval"][];
                         can_retry: boolean;
                         changes: components["schemas"]["FileDiff"][];
+                        /**
+                         * @description A task's changes as shown – pass it to `apply_changes` so exactly
+                         *     these are applied.
+                         */
+                        changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
+                        kind: components["schemas"]["SessionKind"];
                         /** @description Only for a single session (`get_session`). */
                         messages?: components["schemas"]["ChatMessage"][];
                         model: string;

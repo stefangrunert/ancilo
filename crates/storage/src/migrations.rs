@@ -212,6 +212,10 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     );
     ALTER TABLE conversations ADD COLUMN folder TEXT;
     "#,
+    // 12: projects of the Tasks area (and free tasks' own folders) apart from code
+    r#"
+    ALTER TABLE projects ADD COLUMN area TEXT;
+    "#,
 ];
 
 #[cfg(test)]

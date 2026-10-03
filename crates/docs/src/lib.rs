@@ -8,6 +8,7 @@
 
 pub mod extract;
 pub mod library;
+pub mod write;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -79,25 +80,29 @@ impl Extractor {
     }
 
     async fn read_apart(&self, bin: &Path, file: &Path, workdir: &Path) -> Result<Extracted> {
-        let script = format!(
-            "exec {} extract-document {}",
-            quote(&bin.display().to_string()),
-            quote(&file.display().to_string())
-        );
-        let bounds = ancilo_agent::sandbox::Bounds {
-            root: workdir,
-            hidden: &self.hidden,
-            network: false,
-        };
-        let mut cmd = match ancilo_agent::sandbox::command(&bounds, &script) {
-            Ok(c) => c,
-            // No sandbox on this system: still a process of its own.
-            Err(_) => {
-                let mut c = tokio::process::Command::new(bin);
-                c.arg("extract-document").arg(file);
-                c
-            }
-        };
+        // The reader sees only its own place: a document from elsewhere is
+        // put there first (a clone on APFS).
+        let file =
+            if file.starts_with(workdir) {
+                file.to_path_buf()
+            } else {
+                // Ancilo's own data is never handed to the reader.
+                let real = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+                if self.hidden.iter().any(|h| {
+                    real.starts_with(std::fs::canonicalize(h).unwrap_or_else(|_| h.clone()))
+                }) {
+                    return Err(Error::PermissionDenied(
+                        "Ancilo's own data is not read as a document".into(),
+                    ));
+                }
+                let name = file.file_name().unwrap_or_default();
+                let inside = workdir.join(name);
+                std::fs::copy(file, &inside).map_err(|e| {
+                    Error::invalid(format!("cannot read {}: {e}", name.to_string_lossy()))
+                })?;
+                inside
+            };
+        let mut cmd = reader_command(bin, &file, workdir, &self.hidden)?;
         cmd.current_dir(workdir)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -131,6 +136,71 @@ impl Extractor {
     }
 }
 
+/// The reading process: on macOS in a sandbox that allows nothing but
+/// running the reader, the system's libraries and its own place – no
+/// network, no other file of the user. Without a sandbox nothing is read.
+#[cfg(target_os = "macos")]
+fn reader_command(
+    bin: &Path,
+    file: &Path,
+    workdir: &Path,
+    _hidden: &[PathBuf],
+) -> Result<tokio::process::Command> {
+    let q = |p: &Path| p.display().to_string().replace(['"', '\\'], "");
+    let bin_real = std::fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
+    let profile = format!(
+        r#"(version 1)
+(deny default)
+(allow process-exec (literal "{bin}") (literal "{bin_real}"))
+(allow file-read* (literal "/") (literal "{bin}") (literal "{bin_real}") (subpath "{work}")
+  (subpath "/usr/lib") (subpath "/usr/share") (subpath "/System") (subpath "/private/var/db/dyld")
+  (subpath "/Library/Apple") (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/random")
+  (literal "/private/etc/localtime"))
+(allow file-read-metadata)
+(allow file-write* (subpath "{work}") (literal "/dev/null"))
+(allow sysctl-read)
+(allow mach-lookup (global-name "com.apple.system.logger"))
+"#,
+        bin = q(bin),
+        bin_real = q(&bin_real),
+        work = q(workdir),
+    );
+    let mut c = tokio::process::Command::new("/usr/bin/sandbox-exec");
+    c.arg("-p")
+        .arg(profile)
+        .arg(bin)
+        .arg("extract-document")
+        .arg(file)
+        .env_clear()
+        .env("LANG", "C.UTF-8");
+    Ok(c)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reader_command(
+    bin: &Path,
+    file: &Path,
+    workdir: &Path,
+    hidden: &[PathBuf],
+) -> Result<tokio::process::Command> {
+    let script = format!(
+        "exec {} extract-document {}",
+        quote(&bin.display().to_string()),
+        quote(&file.display().to_string())
+    );
+    let bounds = ancilo_agent::sandbox::Bounds {
+        root: workdir,
+        hidden,
+        network: false,
+    };
+    ancilo_agent::sandbox::command(&bounds, &script).map_err(|_| {
+        Error::unavailable(
+            "documents cannot be read safely on this system – install bubblewrap (bwrap)",
+        )
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
 fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
@@ -175,11 +245,8 @@ pub fn file_name(name: &str) -> String {
 }
 
 impl Attachments {
-    pub fn new(db: Db, extractor: Extractor) -> Self {
-        Self {
-            db,
-            extractor: Arc::new(extractor),
-        }
+    pub fn new(db: Db, extractor: Arc<Extractor>) -> Self {
+        Self { db, extractor }
     }
 
     /// Reads a document the app sent (dragged in or chosen).
@@ -361,7 +428,7 @@ impl Attachments {
 /// Text of documents (name, parts) for a question: all of it when it fits
 /// `budget`, else the passages that fit `query` best, in document order –
 /// each headed by its source.
-pub(crate) fn choose(docs: &[(String, Vec<Part>)], query: &str, budget: usize) -> Vec<String> {
+pub fn choose(docs: &[(String, Vec<Part>)], query: &str, budget: usize) -> Vec<String> {
     let mut chunks: Vec<(String, String)> = Vec::new();
     let mut whole: Vec<(String, String)> = Vec::new();
     for (name, parts) in docs {
@@ -434,7 +501,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = Db::in_memory().unwrap();
         let ex = Extractor::new(None, dir.path().join("scratch"), Vec::new());
-        (dir, Attachments::new(db, ex))
+        (dir, Attachments::new(db, Arc::new(ex)))
     }
 
     // covers: M10-AC-02

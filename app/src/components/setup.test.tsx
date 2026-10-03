@@ -84,7 +84,7 @@ function daemon() {
     ],
     list_projects: () => projects,
     create_project: (i) => {
-      const p = { root: `/Users/me/Ancilo/${String(i.name)}`, name: String(i.name), sessions: 0, last_used: "", exists: true };
+      const p = { root: `/Users/me/Ancilo/${String(i.name)}`, name: String(i.name), sessions: 0, last_used: "", exists: true, area: "code" };
       projects.push(p);
       return { ...p, git: true, sessions: [] };
     },

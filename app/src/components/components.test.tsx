@@ -241,7 +241,7 @@ describe("Sidebar", () => {
     const session = { id: "s-1", title: "Rename things", project: "/p/wcs", model: "chat", permission: "edit", status: "idle", isolated: true, workdir: "/w", turns: 1, changes: [], approvals: [], variants: [], can_retry: false, created_at: "" };
     const { calls } = renderWithDaemon(<App />, {
       ...base,
-      list_projects: () => [{ root: "/p/wcs", name: "wcs", sessions: 1, last_used: "", exists: true }],
+      list_projects: () => [{ root: "/p/wcs", name: "wcs", sessions: 1, last_used: "", exists: true, area: "code" }],
       list_sessions: () => [session],
       get_session: () => ({ ...session, messages: [] }),
       list_terminals: () => [],
@@ -273,8 +273,8 @@ describe("Sidebar", () => {
     const { calls } = renderWithDaemon(<App />, {
       ...base,
       list_projects: () => [
-        { root: "/p/a", name: "a", sessions: 2, last_used: "", exists: true },
-        { root: "/p/b", name: "b", sessions: 0, last_used: "", exists: true },
+        { root: "/p/a", name: "a", sessions: 2, last_used: "", exists: true, area: "code" },
+        { root: "/p/b", name: "b", sessions: 0, last_used: "", exists: true, area: "code" },
       ],
       list_sessions: () => [session("s-1", "One"), session("s-2", "Two")],
       get_session: () => ({ ...session("s-1", "One"), messages: [] }),

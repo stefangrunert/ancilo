@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use ancilo_agent::{Access, ToolOutput, Toolbox, Workspace};
+use ancilo_agent::{Access, ToolOutput, Toolbox};
 use ancilo_core::{BoxFuture, EventBus};
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
@@ -128,7 +128,8 @@ impl Approvals {
 /// The permission a tool call needs.
 pub fn needs(tool: &str) -> Access {
     match tool {
-        "write_file" | "edit_file" => Access::Edit,
+        "write_file" | "edit_file" | "write_spreadsheet" | "write_document" | "move_file"
+        | "make_folder" | "delete_file" => Access::Edit,
         "bash" | WEB_SEARCH => Access::Shell,
         _ => Access::Read,
     }
@@ -140,7 +141,10 @@ pub const CONTEXT_MARK: &str = "(Project root: ";
 pub type Transcript = Arc<dyn Fn(&str) + Send + Sync>;
 
 pub struct SessionTools {
-    pub ws: Workspace,
+    /// The session's tools: a code workspace, or a task's document tools.
+    pub ws: Box<dyn Toolbox>,
+    /// The folder as the agent is told it (the project, not the copy).
+    pub shown: std::path::PathBuf,
     pub session: String,
     pub permission: Arc<Mutex<Access>>,
     pub approvals: Approvals,
@@ -150,6 +154,8 @@ pub struct SessionTools {
     pub transcript: Option<Transcript>,
     /// Web search, if the user turned it on.
     pub web: Option<Arc<dyn WebLookup>>,
+    /// Every search asks, whatever the switch says (tasks: documents).
+    pub always_ask_web: bool,
 }
 
 impl SessionTools {
@@ -251,7 +257,7 @@ impl SessionTools {
         }
         // Exactly what is asked is what is sent: only the query.
         let sent = json!({"query": query});
-        if !web.automatic()
+        if (self.always_ask_web || !web.automatic())
             && let Err(e) = self
                 .ask(WEB_SEARCH, &sent, Access::Shell, Some(provider))
                 .await
@@ -316,7 +322,7 @@ impl Toolbox for SessionTools {
     fn context(&self) -> Option<String> {
         Some(format!(
             "{CONTEXT_MARK}{} · allowed without asking: {:?})",
-            self.ws.shown_root().display(),
+            self.shown.display(),
             *self.permission.lock().unwrap()
         ))
     }

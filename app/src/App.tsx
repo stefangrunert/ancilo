@@ -7,7 +7,7 @@ import { useArea } from "./state/area";
 import { hrefOf, navigate, useRoute, type Route } from "./state/route";
 import { CodingTasksPage } from "./components/Tasks";
 import { AddFolderPage, FolderPage } from "./components/ChatProjects";
-import { TasksAreaPage } from "./components/TasksArea";
+import { TaskFolderPage, TasksAreaPage, TaskView } from "./components/TasksArea";
 import { ConversationView } from "./components/Conversation";
 import { BuildPage } from "./components/Build";
 import { SystemPage } from "./components/Home";
@@ -175,6 +175,15 @@ export function App() {
       break;
     case "add-folder":
       content = <AddFolderPage />;
+      break;
+    case "add-task-folder":
+      content = <AddFolderPage area="tasks" />;
+      break;
+    case "task":
+      content = <TaskView key={route.id} id={route.id} />;
+      break;
+    case "task-folder":
+      content = <TaskFolderPage key={route.path} path={route.path} />;
       break;
     case "chat":
       content = <ConversationView key={route.id ?? `new-${route.kind ?? "chat"}`} id={route.id} kind={route.kind} />;

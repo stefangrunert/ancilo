@@ -14,6 +14,9 @@ export type Route =
   | { view: "tasks" }
   | { view: "folder"; path: string }
   | { view: "add-folder" }
+  | { view: "task"; id: string }
+  | { view: "task-folder"; path: string }
+  | { view: "add-task-folder" }
   | { view: "coding-tasks" }
   | { view: "chat"; id: string | null; kind?: ChatKind }
   | { view: "project"; root: string }
@@ -38,6 +41,12 @@ export function parseRoute(hash: string): Route {
       return arg ? { view: "folder", path: arg } : { view: "add-folder" };
     case "add-folder":
       return { view: "add-folder" };
+    case "task":
+      return arg ? { view: "task", id: arg } : { view: "tasks" };
+    case "task-folder":
+      return arg ? { view: "task-folder", path: arg } : { view: "add-task-folder" };
+    case "add-task-folder":
+      return { view: "add-task-folder" };
     case "coding-tasks":
       return { view: "coding-tasks" };
     case "chat": {
@@ -74,6 +83,12 @@ export function hrefOf(r: Route): string {
       return `#/folder/${encodeURIComponent(r.path)}`;
     case "add-folder":
       return "#/add-folder";
+    case "task":
+      return `#/task/${encodeURIComponent(r.id)}`;
+    case "task-folder":
+      return `#/task-folder/${encodeURIComponent(r.path)}`;
+    case "add-task-folder":
+      return "#/add-task-folder";
     case "coding-tasks":
       return "#/coding-tasks";
     case "chat":

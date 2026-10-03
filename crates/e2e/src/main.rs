@@ -2,7 +2,7 @@
 //! models and fake Claude Code/Codex, for the app's Playwright tests.
 //!
 //! ```text
-//! ancilo-e2e [--ram-gib N] [--claude-fails] [--with-models] [--coding] [--web] [--openapi]
+//! ancilo-e2e [--ram-gib N] [--claude-fails] [--with-models] [--coding] [--web] [--tasks] [--openapi]
 //! ```
 //!
 //! Prints one JSON line `{"url", "token", "home", "hf", "probe"}` (probe: the
@@ -92,6 +92,17 @@ steps:
   - respond: { text: "Wrote NOTES.md.", delay_ms: 100 }
 "#;
 
+/// The chat model as a task's agent (`--tasks`): looks at the folder, writes
+/// a spreadsheet, moves a file, reports.
+const CHAT_TASK: &str = r##"
+steps:
+  - respond: { tool_calls: [{ name: list_files, arguments: {} }] }
+  - respond: { tool_calls: [{ name: write_spreadsheet, arguments: { path: "Overview.xlsx", sheets: [{ name: "2025", rows: [["Company", "Amount"], ["Power", "120"]] }] } }] }
+  - respond: { tool_calls: [{ name: move_file, arguments: { from: "power.txt", to: "2025/power.txt" } }] }
+  - respond: { text: "Done: Overview.xlsx, and power.txt is in 2025 now." }
+fallback: { text: "Nothing else to do." }
+"##;
+
 /// The coding agent (`--coding`): changes the README in place, then asks to
 /// run a command (needs "shell"), then reports.
 const DEV: &str = r##"
@@ -170,7 +181,16 @@ async fn main() {
         std::fs::create_dir_all(d).unwrap();
     }
     for (stem, s) in [
-        ("Chat-Q8_0", if flag("--web") { CHAT_WEB } else { CHAT }),
+        (
+            "Chat-Q8_0",
+            if flag("--web") {
+                CHAT_WEB
+            } else if flag("--tasks") {
+                CHAT_TASK
+            } else {
+                CHAT
+            },
+        ),
         ("Coder-Q8_0", CODER),
         ("Writer-Q8_0", WRITER),
         ("Dev-Q8_0", DEV),

@@ -17,6 +17,9 @@ export function areaOf(r: Route): Area | null {
     case "add-folder":
       return "chat";
     case "tasks":
+    case "task":
+    case "task-folder":
+    case "add-task-folder":
       return "tasks";
     case "project":
     case "session":

@@ -255,7 +255,8 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
       await refresh("list_projects", "list_sessions");
     }
   };
-  const projectList = projects.data ?? [];
+  // Code projects only – the Tasks area has its own folders.
+  const projectList = (projects.data ?? []).filter((p) => p.area === "code");
   const projectsByRoot = new Map(projectList.map((p) => [p.root, p]));
   const sortProjects = useReorder(
     projectList.map((p) => p.root),
@@ -310,6 +311,41 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
       </Item>
   );
   const folders = prefs.data?.documents ?? [];
+  // Tasks: free ones (in a folder of their own) and the Tasks area's folders.
+  const freeRoots = new Set((projects.data ?? []).filter((p) => p.area === "task").map((p) => p.root));
+  const taskFolders = (projects.data ?? []).filter((p) => p.area === "tasks");
+  const freeTasks = all.filter((x) => x.kind === "task" && freeRoots.has(x.project));
+  const currentTaskFolder = route.view === "task-folder" ? route.path : route.view === "task" ? all.find((x) => x.id === route.id)?.project : undefined;
+  const renderTask = (x: SessionInfo) => (
+    <Item
+      key={x.id}
+      active={route.view === "task" && route.id === x.id}
+      actions={
+        <button
+          type="button"
+          className="icon"
+          aria-label={t("code.delete", { title: x.title })}
+          title={t("code.delete", { title: x.title })}
+          onClick={() =>
+            setConfirm({
+              text: t("code.deleteConfirm"),
+              run: async () => {
+                await client.op("delete_session", { session: x.id }, true);
+                if (route.view === "task" && route.id === x.id) navigate({ view: "tasks" }, true);
+              },
+            })
+          }
+        >
+          <Icon name="close" size={14} />
+        </button>
+      }
+    >
+      <button type="button" className="nav-item" aria-current={route.view === "task" && route.id === x.id ? "page" : undefined} onClick={() => navigate({ view: "task", id: x.id })}>
+        <StatusDot status={sessionDot(x)} />
+        <span className="text">{x.title}</span>
+      </button>
+    </Item>
+  );
   const chatList = conversations.data ?? [];
   const plainChats = chatList.filter((c) => !c.folder || !folders.includes(c.folder));
   const currentFolder = route.view === "folder" ? route.path : route.view === "chat" && route.id ? chatList.find((c) => c.id === route.id)?.folder : undefined;
@@ -338,7 +374,7 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
             {sortProjects.order.map((root) => {
               const p = projectsByRoot.get(root);
               if (!p) return null;
-              const mine = all.filter((s) => s.project === p.root);
+              const mine = all.filter((s) => s.project === p.root && s.kind !== "task");
               const expanded = (open[p.root] ?? p.root === currentProject) && sortProjects.dragging !== p.root;
               return (
                 <Item
@@ -433,7 +469,80 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
         </div>
         )}
 
-        {area === "tasks" && <p className="nav-empty">{t("tasksArea.navEmpty")}</p>}
+        {area === "tasks" && (
+          <>
+            <div className="nav-group">
+              <div className="nav-heading">
+                <span>{t("tasks.free")}</span>
+              </div>
+              <ul className="nav-list" aria-label={t("tasks.free")}>
+                {freeTasks.map(renderTask)}
+              </ul>
+              {freeTasks.length === 0 && <p className="nav-empty">{t("tasks.noTasks")}</p>}
+            </div>
+            <div className="nav-group">
+              <div className="nav-heading">
+                <span>{t("tasks.projects")}</span>
+                <span className="spacer" />
+                <button type="button" className="icon" aria-label={t("tasks.addFolder")} title={t("tasks.addFolder")} onClick={() => navigate({ view: "add-task-folder" })}>
+                  <Icon name="plus" />
+                </button>
+              </div>
+              <ul className="nav-list" aria-label={t("tasks.projects")}>
+                {taskFolders.map((f) => {
+                  const mine = all.filter((x) => x.project === f.root && x.kind === "task");
+                  const expanded = (open[f.root] ?? f.root === currentTaskFolder) && mine.length > 0;
+                  return (
+                    <Item
+                      key={f.root}
+                      active={route.view === "task-folder" && route.path === f.root}
+                      actions={
+                        <>
+                          <button type="button" className="icon" aria-label={t("nav.newTaskIn", { name: f.name })} title={t("nav.newTaskIn", { name: f.name })} onClick={() => navigate({ view: "task-folder", path: f.root })}>
+                            <Icon name="plus" size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon"
+                            aria-label={t("nav.removeProject", { name: f.name })}
+                            title={t("nav.removeProject", { name: f.name })}
+                            onClick={() => setConfirm({ text: t("nav.removeProjectConfirm", { name: f.name }), run: () => client.op("remove_project", { path: f.root }, true) })}
+                          >
+                            <Icon name="close" size={14} />
+                          </button>
+                        </>
+                      }
+                      below={
+                        expanded && (
+                          <ul className="nav-list nested" aria-label={t("nav.tasksIn", { name: f.name })}>
+                            {mine.map(renderTask)}
+                          </ul>
+                        )
+                      }
+                    >
+                      <button
+                        type="button"
+                        className="nav-item"
+                        title={f.root}
+                        aria-expanded={mine.length > 0 ? expanded : undefined}
+                        onClick={() => {
+                          setOpen((o) => ({ ...o, [f.root]: route.view === "task-folder" && route.path === f.root ? !expanded : true }));
+                          navigate({ view: "task-folder", path: f.root });
+                        }}
+                      >
+                        <span className="glyph">
+                          <Icon name="folder" />
+                        </span>
+                        <span className="text">{f.name}</span>
+                      </button>
+                    </Item>
+                  );
+                })}
+              </ul>
+              {taskFolders.length === 0 && <p className="nav-empty">{t("tasks.noFolders")}</p>}
+            </div>
+          </>
+        )}
 
         {area === "chat" && (
           <div className="nav-group">
