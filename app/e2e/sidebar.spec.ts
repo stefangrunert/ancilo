@@ -45,23 +45,26 @@ test("the left column is resized by dragging its edge and keeps its width", asyn
   await daemon.open(page);
   const nav = page.getByRole("navigation", { name: "Navigation" });
   const handle = page.getByRole("separator", { name: "Width of the left column" });
-  const before = (await nav.boundingBox())!.width;
-  const h = (await handle.boundingBox())!;
-  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(h.x + h.width / 2 + 100, h.y + h.height / 2, { steps: 5 });
-  await page.mouse.up();
-  await expect.poll(async () => Math.round((await nav.boundingBox())!.width)).toBe(Math.round(before + 100));
-  // Narrow: the areas show only their symbols.
-  await page.mouse.move(h.x + 100 + h.width / 2, h.y + h.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(h.x - 200, h.y + h.height / 2, { steps: 5 });
-  await page.mouse.up();
+  const width = async () => Math.round((await nav.boundingBox())!.width);
+  // Drags the handle by `dx`, starting where it is now.
+  const drag = async (dx: number) => {
+    const h = (await handle.boundingBox())!;
+    const [x, y] = [h.x + h.width / 2, h.y + h.height / 2];
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx / 2, y, { steps: 4 });
+    await page.mouse.move(x + dx, y, { steps: 4 });
+    await page.mouse.up();
+  };
+  const before = await width();
+  await drag(100);
+  await expect.poll(width).toBe(before + 100);
+  // Narrow (it stops at 200): the areas show only their symbols.
+  await drag(-300);
+  await expect.poll(width).toBe(200);
   await expect(nav.getByRole("tab", { name: "Chat" }).locator(".text")).toBeHidden();
-  const narrow = Math.round((await nav.boundingBox())!.width);
-  expect(narrow).toBe(200);
   await page.reload();
-  await expect.poll(async () => Math.round((await nav.boundingBox())!.width)).toBe(narrow);
+  await expect.poll(width).toBe(200);
 });
 
 test("icons sit in the middle of their labels", async ({ page, daemon }) => {
