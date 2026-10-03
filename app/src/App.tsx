@@ -176,9 +176,6 @@ export function App() {
     case "add-folder":
       content = <AddFolderPage />;
       break;
-    case "add-task-folder":
-      content = <AddFolderPage area="tasks" />;
-      break;
     case "task":
       content = <TaskView key={route.id} id={route.id} />;
       break;

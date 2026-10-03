@@ -403,6 +403,7 @@ dependencies = [
  "ancilo-testkit",
  "axum",
  "chrono",
+ "dirs",
  "futures",
  "hex",
  "portable-pty",

@@ -1086,9 +1086,75 @@ impl WorkCopy {
         Ok(plan)
     }
 
+    /// Material for a free task (a file the user gave it): into the task's
+    /// own folder and its copy, as part of the baseline – not a change, not a
+    /// result. Returns the name it got.
+    pub fn add_input(&self, name: &str, bytes: &[u8]) -> Result<String> {
+        let name = unique_in(&[&self.source, &self.work()], name);
+        let into = self.source.join(&name);
+        std::fs::write(&into, bytes).map_err(Error::internal)?;
+        copy_file(&into, &self.work().join(&name)).map_err(Error::internal)?;
+        let mut base = self.baseline()?;
+        base.insert(
+            name.clone(),
+            Entry {
+                size: bytes.len() as u64,
+                hash: hash_file(&into).map_err(Error::internal)?,
+            },
+        );
+        self.save_baseline(&base)?;
+        Ok(name)
+    }
+
     /// The copy and its backups are removed (the folder stays as it is).
     pub fn remove(&self) {
         std::fs::remove_dir_all(&self.dir).ok();
+    }
+}
+
+/// `name`, or `name 2`, `name 3` … – the first that is free in all `dirs`.
+pub fn unique_in(dirs: &[&Path], name: &str) -> String {
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (name.to_string(), String::new()),
+    };
+    let mut candidate = name.to_string();
+    let mut n = 2;
+    while dirs
+        .iter()
+        .any(|d| std::fs::symlink_metadata(d.join(&candidate)).is_ok())
+    {
+        candidate = format!("{stem} {n}{ext}");
+        n += 1;
+    }
+    candidate
+}
+
+/// Copies a result to `dir` under its name (or `name 2` …) – never over an
+/// existing file. Returns where it went.
+pub fn save_copy(from: &Path, dir: &Path) -> Result<PathBuf> {
+    let name = from
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| Error::invalid("a result without a name"))?;
+    loop {
+        let target = dir.join(unique_in(&[dir], &name));
+        let tmp = tmp_next_to(&target);
+        std::fs::copy(from, &tmp).map_err(Error::internal)?;
+        std::fs::File::open(&tmp)
+            .and_then(|f| f.sync_all())
+            .map_err(Error::internal)?;
+        match rename_new(&tmp, &target) {
+            Ok(()) => return Ok(target),
+            // Taken in the meantime: the next free name.
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                std::fs::remove_file(&tmp).ok();
+            }
+            Err(e) => {
+                std::fs::remove_file(&tmp).ok();
+                return Err(Error::internal(e));
+            }
+        }
     }
 }
 

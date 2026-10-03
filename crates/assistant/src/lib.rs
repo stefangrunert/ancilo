@@ -183,6 +183,9 @@ pub const NOT_FOR_ASSISTANT: &[&str] = &[
     "add_attachment",
     "get_attachment",
     "remove_attachment",
+    "show_in_finder",
+    "open_document",
+    "save_results",
 ];
 
 /// Always offered (besides the relevant ones).

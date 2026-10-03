@@ -18,6 +18,7 @@ export function Composer({
   initial = "",
   above,
   onFiles,
+  onFolder,
 }: {
   label: string;
   placeholder?: string;
@@ -33,6 +34,8 @@ export function Composer({
   above?: ReactNode;
   /** Documents chosen, dropped or pasted – offers the paperclip when set. */
   onFiles?: (files: File[]) => void;
+  /** Offers choosing a folder to work in (tasks). */
+  onFolder?: () => void;
 }) {
   const { t } = useI18n();
   const [text, setText] = useState(initial);
@@ -128,6 +131,11 @@ export function Composer({
               }}
             />
           </>
+        )}
+        {onFolder && (
+          <button type="button" className="icon attach" aria-label={t("tasks.chooseFolder")} title={t("tasks.chooseFolderHint")} onClick={onFolder}>
+            <Icon name="folder" />
+          </button>
         )}
         {extra}
         <span className="hint">{t("chat.hint")}</span>

@@ -4,10 +4,14 @@ The **Tasks** area (the computer symbol) is for things to get done with your fil
 
 ## Starting a task
 
-- **New task**: say what to do. Drag files onto the input (or use the paperclip) to give them to the task. Without a folder, the task gets a folder of its own (`~/Ancilo/Tasks/<title>`).
-- **In a folder**: add a folder under *Folders* (**+**), then start a task in it. Ancilo works on that folder – and only on it.
+Say what to do – and give Ancilo what it needs. That decides how the task works; there is nothing to choose up front:
 
-## Always in a copy
+- **Files** (drag them onto the input, or the paperclip): they are the material. Ancilo makes something new from them – a table, a summary, a letter. Your files stay as they are. At the end, **Save to Documents** – or **Somewhere else…** – puts the result where you want it (never over a file that is there: *Overview 2.xlsx*). Then **Open** it or **Show in Finder**.
+- **A folder** (the folder button next to the paperclip): Ancilo works *in* it – sorts, renames, adds files. It always works in a copy: you see every change and **keep** it or not (below).
+
+Folders Ancilo worked in show up in the Tasks area; a click starts a new task there.
+
+## A folder: always in a copy
 
 Ancilo never works in your folder directly. A task starts with a **copy** of the folder (on APFS a clone that takes no extra space; Ancilo checks the space first and refuses folders with more than 20,000 files or 50 GB). Hidden files, links and files that are only in iCloud are left out – and never touched.
 
@@ -16,8 +20,8 @@ The agent can:
 | | |
 |---|---|
 | look | list the files, read documents (PDF by page, Word, Excel by sheet, CSV, text), find passages in all of them |
-| write | new text or CSV files, Excel files (`write_spreadsheet`: numbers stay numbers, nothing ever becomes a formula), Word documents (`write_document`) |
-| sort | move and rename files, make folders, delete files |
+| write | new text files (`.txt`, `.md`, `.csv` and other plain text – nothing that runs when opened), Excel files (`write_spreadsheet`: numbers stay numbers, nothing ever becomes a formula), Word documents (`write_document`) |
+| sort | move and rename files (a file keeps its ending), make folders, delete files |
 
 It cannot run commands or reach the network, and no path leads out of the copy (no `..`, no absolute paths, no links). Text in documents is treated as content, never as instructions.
 
@@ -34,7 +38,6 @@ When the agent is done, a card lists what changed: **new**, **changed**, **delet
 ## From the command line or other tools
 
 ```bash
-ancilo op open_task_folder '{"path": "/path/to/folder"}'
 ancilo op create_task '{"folder": "/path/to/folder", "title": "Invoices"}'
 ancilo op send_message '{"session": "s-…", "text": "Make a table of the invoices", "wait": true}'
 ancilo op session_diff '{"session": "s-…"}'
@@ -42,4 +45,4 @@ ancilo op apply_changes '{"session": "s-…"}' --confirm
 ancilo op undo_apply '{"session": "s-…"}' --confirm
 ```
 
-`add_task_file` puts a file into a task's copy; `discard_changes` drops changes.
+Without `folder`, `create_task` starts a task with files: `add_task_file` gives it a file, `save_results` (`dir`, default Documents) saves its results. `discard_changes` drops a folder task's changes.

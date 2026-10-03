@@ -130,8 +130,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Put a file into a task's copy (it reaches the folder only if kept)
-         * @description Put a file into a task's copy (it reaches the folder only if kept)
+         * Give a task a file: material for a free task, a new file in the copy for a folder task
+         * @description Give a task a file: material for a free task, a new file in the copy for a folder task
          */
         post: operations["add_task_file"];
         delete?: never;
@@ -570,8 +570,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start a task: the agent works with documents in a copy of a folder (or, without one, in a new folder of its own); the user keeps the changes or not
-         * @description Start a task: the agent works with documents in a copy of a folder (or, without one, in a new folder of its own); the user keeps the changes or not
+         * Start a task: with a folder, the agent works in a copy of it and the user keeps the changes or not; without one, files given to it are material and its results are saved where the user wants
+         * @description Start a task: with a folder, the agent works in a copy of it and the user keeps the changes or not; without one, files given to it are material and its results are saved where the user wants
          */
         post: operations["create_task"];
         delete?: never;
@@ -1383,6 +1383,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ops/open_document": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open a document (PDF, Word, Excel, CSV, text) with its usual program – never anything that runs
+         * @description Open a document (PDF, Word, Excel, CSV, text) with its usual program – never anything that runs
+         */
+        post: operations["open_document"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ops/open_project": {
         parameters: {
             query?: never;
@@ -2003,6 +2023,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ops/save_results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save a free task's results (new and changed files) into a folder – default: Documents; never over an existing file
+         * @description Save a free task's results (new and changed files) into a folder – default: Documents; never over an existing file
+         */
+        post: operations["save_results"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ops/save_suite": {
         parameters: {
             query?: never;
@@ -2317,6 +2357,26 @@ export interface paths {
          * @description Chooses the best recommended chat model that fits comfortably and the embedding model for search, shows the download size (dry_run), and adds them. Models that already exist are kept.
          */
         post: operations["setup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ops/show_in_finder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Show a file or folder in the Finder (macOS) or the file manager
+         * @description Show a file or folder in the Finder (macOS) or the file manager
+         */
+        post: operations["show_in_finder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3406,6 +3466,13 @@ export interface components {
             /** Format: uint32 */
             tool_calls: number;
         };
+        /** @description Where a free task's results were saved. */
+        Saved: {
+            /** Format: date-time */
+            at: string;
+            dir: string;
+            files: string[];
+        };
         Scope: "project" | "knowledge";
         /** @description A repository found by a search. */
         SearchHit: {
@@ -3440,6 +3507,11 @@ export interface components {
             changes_version?: string | null;
             /** Format: date-time */
             created_at: string;
+            /**
+             * @description A free task (results to save, no folder of the user's).
+             * @default false
+             */
+            free: boolean;
             id: string;
             /** @description Changes wait in a work area of their own (git projects). */
             isolated: boolean;
@@ -3449,6 +3521,8 @@ export interface components {
             model: string;
             permission: components["schemas"]["Access"];
             project: string;
+            /** @description Where its results were saved last. */
+            saved?: components["schemas"]["Saved"] | null;
             status: components["schemas"]["SessionStatus"];
             title: string;
             /** Format: uint32 */
@@ -5236,6 +5310,11 @@ export interface operations {
                         changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
+                        /**
+                         * @description A free task (results to save, no folder of the user's).
+                         * @default false
+                         */
+                        free: boolean;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
@@ -5245,6 +5324,8 @@ export interface operations {
                         model: string;
                         permission: components["schemas"]["Access"];
                         project: string;
+                        /** @description Where its results were saved last. */
+                        saved?: components["schemas"]["Saved"] | null;
                         status: components["schemas"]["SessionStatus"];
                         title: string;
                         /** Format: uint32 */
@@ -5282,16 +5363,12 @@ export interface operations {
             content: {
                 "application/json": {
                     /**
-                     * @description A folder of the Tasks area to work on. Without one: a free task in a
-                     *     folder of its own (`<projects folder>/<free_dir>/<title>`).
+                     * @description A folder of the user's to work on (changes in a copy, kept or not).
+                     *     Without one: a free task – files given to it are material, its results
+                     *     are saved where the user wants (`save_results`).
                      * @default null
                      */
                     folder?: string | null;
-                    /**
-                     * @description The folder free tasks go into (the app's word for "Tasks").
-                     * @default null
-                     */
-                    free_dir?: string | null;
                     /**
                      * @description read: ask before every change; edit/shell: changes in the copy without asking.
                      * @default null
@@ -5322,6 +5399,11 @@ export interface operations {
                         changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
+                        /**
+                         * @description A free task (results to save, no folder of the user's).
+                         * @default false
+                         */
+                        free: boolean;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
@@ -5331,6 +5413,8 @@ export interface operations {
                         model: string;
                         permission: components["schemas"]["Access"];
                         project: string;
+                        /** @description Where its results were saved last. */
+                        saved?: components["schemas"]["Saved"] | null;
                         status: components["schemas"]["SessionStatus"];
                         title: string;
                         /** Format: uint32 */
@@ -6277,6 +6361,11 @@ export interface operations {
                         changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
+                        /**
+                         * @description A free task (results to save, no folder of the user's).
+                         * @default false
+                         */
+                        free: boolean;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
@@ -6286,6 +6375,8 @@ export interface operations {
                         model: string;
                         permission: components["schemas"]["Access"];
                         project: string;
+                        /** @description Where its results were saved last. */
+                        saved?: components["schemas"]["Saved"] | null;
                         status: components["schemas"]["SessionStatus"];
                         title: string;
                         /** Format: uint32 */
@@ -7154,6 +7245,43 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @description Whether it was opened (false in tests). */
+                        opened: boolean;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    open_document: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    path: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
                         opened: boolean;
                     };
                 };
@@ -8328,6 +8456,11 @@ export interface operations {
                         changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
+                        /**
+                         * @description A free task (results to save, no folder of the user's).
+                         * @default false
+                         */
+                        free: boolean;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
@@ -8337,6 +8470,8 @@ export interface operations {
                         model: string;
                         permission: components["schemas"]["Access"];
                         project: string;
+                        /** @description Where its results were saved last. */
+                        saved?: components["schemas"]["Saved"] | null;
                         status: components["schemas"]["SessionStatus"];
                         title: string;
                         /** Format: uint32 */
@@ -8781,6 +8916,51 @@ export interface operations {
             };
         };
     };
+    save_results: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Where to save (default: the user's Documents).
+                     * @default null
+                     */
+                    dir?: string | null;
+                    session: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: date-time */
+                        at: string;
+                        dir: string;
+                        files: string[];
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     save_suite: {
         parameters: {
             query?: never;
@@ -8958,6 +9138,11 @@ export interface operations {
                         changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
+                        /**
+                         * @description A free task (results to save, no folder of the user's).
+                         * @default false
+                         */
+                        free: boolean;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
@@ -8967,6 +9152,8 @@ export interface operations {
                         model: string;
                         permission: components["schemas"]["Access"];
                         project: string;
+                        /** @description Where its results were saved last. */
+                        saved?: components["schemas"]["Saved"] | null;
                         status: components["schemas"]["SessionStatus"];
                         title: string;
                         /** Format: uint32 */
@@ -9625,6 +9812,43 @@ export interface operations {
             };
         };
     };
+    show_in_finder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    path: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        opened: boolean;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     start_model: {
         parameters: {
             query?: never;
@@ -10216,6 +10440,11 @@ export interface operations {
                         changes_version?: string | null;
                         /** Format: date-time */
                         created_at: string;
+                        /**
+                         * @description A free task (results to save, no folder of the user's).
+                         * @default false
+                         */
+                        free: boolean;
                         id: string;
                         /** @description Changes wait in a work area of their own (git projects). */
                         isolated: boolean;
@@ -10225,6 +10454,8 @@ export interface operations {
                         model: string;
                         permission: components["schemas"]["Access"];
                         project: string;
+                        /** @description Where its results were saved last. */
+                        saved?: components["schemas"]["Saved"] | null;
                         status: components["schemas"]["SessionStatus"];
                         title: string;
                         /** Format: uint32 */

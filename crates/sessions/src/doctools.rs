@@ -13,6 +13,20 @@ use ancilo_core::BoxFuture;
 use ancilo_docs::{Extractor, Part};
 use serde_json::{Value, json};
 
+/// What `write_file` may write: text that never runs when opened.
+const TEXT_KINDS: &[&str] = &[
+    ".txt",
+    ".md",
+    ".markdown",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".log",
+];
+
 /// Text of one document a single read returns at most.
 const READ_CHARS: usize = 24_000;
 /// Entries `list_files` shows at most.
@@ -299,6 +313,14 @@ impl DocTools {
         {
             return ToolOutput::err("for Word or Excel use write_document or write_spreadsheet");
         }
+        // Only kinds of text that never run when opened (no scripts, no
+        // .command, no web pages).
+        if !TEXT_KINDS.iter().any(|e| lower.ends_with(e)) {
+            return ToolOutput::err(format!(
+                "write_file writes text files only: {}",
+                TEXT_KINDS.join(" ")
+            ));
+        }
         let content = args["content"].as_str().unwrap_or_default();
         // A table never carries formulas that run when it is opened.
         let content = if lower.ends_with(".csv") || lower.ends_with(".tsv") {
@@ -352,6 +374,19 @@ impl DocTools {
         };
         if !src.exists() {
             return ToolOutput::err(format!("{from} does not exist"));
+        }
+        // A file keeps its kind: renaming never turns a document into
+        // something that runs.
+        let ext = |p: &str| {
+            Path::new(p)
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        };
+        if src.is_file() && ext(from) != ext(to) {
+            return ToolOutput::err(format!(
+                "{to} would change the kind of {from} – keep its ending (.{})",
+                ext(from).unwrap_or_default()
+            ));
         }
         if dst.exists() {
             return ToolOutput::err(format!("{to} exists already"));
@@ -631,6 +666,36 @@ mod tests {
         assert!(again.is_error);
         let (touched, _) = d.changes();
         assert_eq!(touched.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn nothing_that_runs_is_written_or_made_by_renaming() {
+        let (_t, d) = tools();
+        for path in ["run.command", "x.sh", "page.html", "a.app"] {
+            let out = run(
+                &d,
+                "write_file",
+                json!({"path": path, "content": "echo hi"}),
+            )
+            .await;
+            assert!(out.is_error, "{path}");
+        }
+        let out = run(
+            &d,
+            "move_file",
+            json!({"from": "Rechnungen/strom.txt", "to": "strom.command"}),
+        )
+        .await;
+        assert!(out.is_error, "{}", out.content);
+        assert!(
+            !run(
+                &d,
+                "move_file",
+                json!({"from": "Rechnungen/strom.txt", "to": "Strom 2025.TXT"})
+            )
+            .await
+            .is_error
+        );
     }
 
     #[test]

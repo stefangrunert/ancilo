@@ -2832,6 +2832,30 @@
         ],
         "type": "object"
       },
+      "Saved": {
+        "description": "Where a free task's results were saved.",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "dir": {
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "dir",
+          "files",
+          "at"
+        ],
+        "type": "object"
+      },
       "Scope": {
         "oneOf": [
           {
@@ -2951,6 +2975,11 @@
             "format": "date-time",
             "type": "string"
           },
+          "free": {
+            "default": false,
+            "description": "A free task (results to save, no folder of the user's).",
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -2976,6 +3005,17 @@
           },
           "project": {
             "type": "string"
+          },
+          "saved": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Saved"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where its results were saved last."
           },
           "status": {
             "$ref": "#/components/schemas/SessionStatus"
@@ -4550,7 +4590,7 @@
     },
     "/api/v1/ops/add_task_file": {
       "post": {
-        "description": "Put a file into a task's copy (it reaches the folder only if kept)",
+        "description": "Give a task a file: material for a free task, a new file in the copy for a folder task",
         "operationId": "add_task_file",
         "requestBody": {
           "content": {
@@ -4609,7 +4649,7 @@
             "description": "Error"
           }
         },
-        "summary": "Put a file into a task's copy (it reaches the folder only if kept)",
+        "summary": "Give a task a file: material for a free task, a new file in the copy for a folder task",
         "x-ancilo-consequential": false,
         "x-ancilo-permission": "manage"
       }
@@ -6908,6 +6948,11 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "free": {
+                      "default": false,
+                      "description": "A free task (results to save, no folder of the user's).",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -6933,6 +6978,17 @@
                     },
                     "project": {
                       "type": "string"
+                    },
+                    "saved": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Saved"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Where its results were saved last."
                     },
                     "status": {
                       "$ref": "#/components/schemas/SessionStatus"
@@ -7003,7 +7059,7 @@
     },
     "/api/v1/ops/create_task": {
       "post": {
-        "description": "Start a task: the agent works with documents in a copy of a folder (or, without one, in a new folder of its own); the user keeps the changes or not",
+        "description": "Start a task: with a folder, the agent works in a copy of it and the user keeps the changes or not; without one, files given to it are material and its results are saved where the user wants",
         "operationId": "create_task",
         "requestBody": {
           "content": {
@@ -7013,15 +7069,7 @@
                 "properties": {
                   "folder": {
                     "default": null,
-                    "description": "A folder of the Tasks area to work on. Without one: a free task in a\nfolder of its own (`<projects folder>/<free_dir>/<title>`).",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "free_dir": {
-                    "default": null,
-                    "description": "The folder free tasks go into (the app's word for \"Tasks\").",
+                    "description": "A folder of the user's to work on (changes in a copy, kept or not).\nWithout one: a free task – files given to it are material, its results\nare saved where the user wants (`save_results`).",
                     "type": [
                       "string",
                       "null"
@@ -7097,6 +7145,11 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "free": {
+                      "default": false,
+                      "description": "A free task (results to save, no folder of the user's).",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -7122,6 +7175,17 @@
                     },
                     "project": {
                       "type": "string"
+                    },
+                    "saved": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Saved"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Where its results were saved last."
                     },
                     "status": {
                       "$ref": "#/components/schemas/SessionStatus"
@@ -7185,7 +7249,7 @@
             "description": "Error"
           }
         },
-        "summary": "Start a task: the agent works with documents in a copy of a folder (or, without one, in a new folder of its own); the user keeps the changes or not",
+        "summary": "Start a task: with a folder, the agent works in a copy of it and the user keeps the changes or not; without one, files given to it are material and its results are saved where the user wants",
         "x-ancilo-consequential": false,
         "x-ancilo-permission": "manage"
       }
@@ -8839,6 +8903,11 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "free": {
+                      "default": false,
+                      "description": "A free task (results to save, no folder of the user's).",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -8864,6 +8933,17 @@
                     },
                     "project": {
                       "type": "string"
+                    },
+                    "saved": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Saved"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Where its results were saved last."
                     },
                     "status": {
                       "$ref": "#/components/schemas/SessionStatus"
@@ -10377,6 +10457,66 @@
         "summary": "Open the Activity Monitor, where other programs can be closed",
         "x-ancilo-consequential": false,
         "x-ancilo-permission": "manage"
+      }
+    },
+    "/api/v1/ops/open_document": {
+      "post": {
+        "description": "Open a document (PDF, Word, Excel, CSV, text) with its usual program – never anything that runs",
+        "operationId": "open_document",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "title": "PathRef",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "opened": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "opened"
+                  ],
+                  "title": "Opened",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Open a document (PDF, Word, Excel, CSV, text) with its usual program – never anything that runs",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
       }
     },
     "/api/v1/ops/open_project": {
@@ -12537,6 +12677,11 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "free": {
+                      "default": false,
+                      "description": "A free task (results to save, no folder of the user's).",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -12562,6 +12707,17 @@
                     },
                     "project": {
                       "type": "string"
+                    },
+                    "saved": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Saved"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Where its results were saved last."
                     },
                     "status": {
                       "$ref": "#/components/schemas/SessionStatus"
@@ -13426,6 +13582,87 @@
         "x-ancilo-permission": "manage"
       }
     },
+    "/api/v1/ops/save_results": {
+      "post": {
+        "description": "Save a free task's results (new and changed files) into a folder – default: Documents; never over an existing file",
+        "operationId": "save_results",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "dir": {
+                    "default": null,
+                    "description": "Where to save (default: the user's Documents).",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "session": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session"
+                ],
+                "title": "SaveInput",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Where a free task's results were saved.",
+                  "properties": {
+                    "at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "dir": {
+                      "type": "string"
+                    },
+                    "files": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "dir",
+                    "files",
+                    "at"
+                  ],
+                  "title": "Saved",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Save a free task's results (new and changed files) into a folder – default: Documents; never over an existing file",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "manage"
+      }
+    },
     "/api/v1/ops/save_suite": {
       "post": {
         "description": "Save a task collection (eval format) as a personal benchmark",
@@ -13739,6 +13976,11 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "free": {
+                      "default": false,
+                      "description": "A free task (results to save, no folder of the user's).",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -13764,6 +14006,17 @@
                     },
                     "project": {
                       "type": "string"
+                    },
+                    "saved": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Saved"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Where its results were saved last."
                     },
                     "status": {
                       "$ref": "#/components/schemas/SessionStatus"
@@ -14990,6 +15243,66 @@
         "summary": "First start: add a chat model that fits this machine and an embedding model",
         "x-ancilo-consequential": true,
         "x-ancilo-permission": "manage"
+      }
+    },
+    "/api/v1/ops/show_in_finder": {
+      "post": {
+        "description": "Show a file or folder in the Finder (macOS) or the file manager",
+        "operationId": "show_in_finder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "title": "PathRef",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "opened": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "opened"
+                  ],
+                  "title": "Opened",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Show a file or folder in the Finder (macOS) or the file manager",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
       }
     },
     "/api/v1/ops/start_model": {
@@ -16237,6 +16550,11 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "free": {
+                      "default": false,
+                      "description": "A free task (results to save, no folder of the user's).",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -16262,6 +16580,17 @@
                     },
                     "project": {
                       "type": "string"
+                    },
+                    "saved": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Saved"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Where its results were saved last."
                     },
                     "status": {
                       "$ref": "#/components/schemas/SessionStatus"

@@ -314,7 +314,7 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
   // Tasks: free ones (in a folder of their own) and the Tasks area's folders.
   const freeRoots = new Set((projects.data ?? []).filter((p) => p.area === "task").map((p) => p.root));
   const taskFolders = (projects.data ?? []).filter((p) => p.area === "tasks");
-  const freeTasks = all.filter((x) => x.kind === "task" && freeRoots.has(x.project));
+  const freeTasks = all.filter((x) => x.kind === "task" && (x.free || freeRoots.has(x.project)));
   const currentTaskFolder = route.view === "task-folder" ? route.path : route.view === "task" ? all.find((x) => x.id === route.id)?.project : undefined;
   const renderTask = (x: SessionInfo) => (
     <Item
@@ -483,14 +483,10 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
             <div className="nav-group">
               <div className="nav-heading">
                 <span>{t("tasks.projects")}</span>
-                <span className="spacer" />
-                <button type="button" className="icon" aria-label={t("tasks.addFolder")} title={t("tasks.addFolder")} onClick={() => navigate({ view: "add-task-folder" })}>
-                  <Icon name="plus" />
-                </button>
               </div>
               <ul className="nav-list" aria-label={t("tasks.projects")}>
                 {taskFolders.map((f) => {
-                  const mine = all.filter((x) => x.project === f.root && x.kind === "task");
+                  const mine = all.filter((x) => x.project === f.root && x.kind === "task" && !x.free);
                   const expanded = (open[f.root] ?? f.root === currentTaskFolder) && mine.length > 0;
                   return (
                     <Item

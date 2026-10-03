@@ -1292,44 +1292,72 @@ steps:
 }
 
 // covers: M10-AC-04
-/// A free task gets a folder of its own; files given to it go into its copy.
+/// A free task: files given to it are material; its results are saved where
+/// the user wants – never over a file that is there; no folder of its own
+/// appears anywhere for the user.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_free_task_has_a_folder_of_its_own_and_takes_files() {
-    let (env, _, _) = Env::start(&[]).await;
+async fn a_free_task_takes_material_and_saves_its_results() {
+    let script = r#"
+steps:
+  - expect: { any_message_contains: "Tabelle" }
+    respond: { tool_calls: [{ name: read_document, arguments: { path: "strom.txt" } }] }
+  - expect: { any_message_contains: "120 Euro" }
+    respond: { tool_calls: [{ name: write_spreadsheet, arguments: { path: "Übersicht.xlsx", sheets: [{ name: "2025", rows: [["Firma", "Betrag"], ["Stadtwerke", "120"]] }] } }] }
+  - respond: { text: "Fertig: Übersicht.xlsx." }
+"#;
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
     let s = env
-        .op(
-            "create_task",
-            json!({"free_dir": "Aufgaben", "title": "Rechnungen 2025"}),
-        )
+        .op("create_task", json!({"title": "Rechnungen 2025"}))
         .await;
     let id = s["id"].as_str().unwrap().to_string();
-    let project = std::path::PathBuf::from(s["project"].as_str().unwrap());
-    assert!(
-        project.ends_with("Aufgaben/Rechnungen 2025"),
-        "{}",
-        project.display()
-    );
+    assert_eq!(s["free"], true);
+    // Material: not a change, not a result.
     let r = reqwest::Client::new()
         .post(format!("{}/api/v1/sessions/{id}/files", env.d().url()))
-        .query(&[("name", "strom.pdf")])
+        .query(&[("name", "strom.txt")])
         .bearer_auth(&env.d().token)
-        .body("%PDF")
+        .body("Stadtwerke: 120 Euro")
         .send()
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
     let s = env.op("get_session", json!({"session": id})).await;
-    assert_eq!(s["changes"][0]["path"], "strom.pdf");
-    assert_eq!(s["changes"][0]["change"], "added");
-    let projects = env.op("list_projects", json!({})).await;
-    assert_eq!(projects[0]["area"], "task");
-    // Code sessions refuse files.
-    let (ok, _) = env
-        .call(
-            "add_task_file",
-            json!({"session": "s-nope", "path": "/etc/hosts"}),
-            true,
+    assert!(s["changes"].as_array().unwrap().is_empty(), "{s}");
+    let (ok, e) = env.call("save_results", json!({"session": id}), true).await;
+    assert!(!ok && e.to_string().contains("nothing to save yet"), "{e}");
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Mach eine Tabelle", "wait": true}),
         )
+        .await;
+    assert_eq!(s["changes"][0]["path"], "Übersicht.xlsx", "{s}");
+    // Saved where the user wants – next to a file of the same name, not over it.
+    let docs = env.home.scratch("Dokumente");
+    std::fs::write(docs.join("Übersicht.xlsx"), "schon da").unwrap();
+    let saved = env
+        .op("save_results", json!({"session": id, "dir": docs}))
+        .await;
+    assert!(
+        saved["files"][0]
+            .as_str()
+            .unwrap()
+            .ends_with("Übersicht 2.xlsx"),
+        "{saved}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(docs.join("Übersicht.xlsx")).unwrap(),
+        "schon da"
+    );
+    let s = env.op("get_session", json!({"session": id})).await;
+    assert!(s["changes"].as_array().unwrap().is_empty());
+    assert!(s["saved"]["files"].as_array().unwrap().len() == 1);
+    // No folder of the task anywhere the user looks.
+    let projects = env.op("list_projects", json!({})).await;
+    assert!(projects.as_array().unwrap().is_empty(), "{projects}");
+    // Opening is for documents only.
+    let (ok, _) = env
+        .call("open_document", json!({"path": "/bin/ls"}), true)
         .await;
     assert!(!ok);
     env.stop().await;

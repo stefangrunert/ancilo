@@ -74,4 +74,33 @@ describe("A task", () => {
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Undo" }));
     await waitFor(() => expect(calls.find((c) => c.op === "undo_apply")).toMatchObject({ input: { session: "s-1" }, confirmed: true }));
   });
+
+  it("with files only: shows the result, saves it to Documents in one click, then opens or shows it", async () => {
+    const where = { dir: "/Users/me/Documents", files: ["/Users/me/Documents/Übersicht.xlsx"], at: "" };
+    let s: Record<string, unknown> = task({ free: true, project: "/home/.ancilo/tasks/x", changes: [{ path: "Übersicht.xlsx", added: 0, removed: 0, runs: false, change: "added" }] });
+    const { calls } = renderWithDaemon(<TaskView id="s-1" />, {
+      get_session: () => s,
+      get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }),
+      save_results: () => {
+        s = task({ free: true, changes: [], saved: where });
+        return where;
+      },
+      open_document: () => ({ opened: true }),
+      show_in_finder: () => ({ opened: true }),
+      list_sessions: () => [],
+    });
+    const card = await screen.findByTestId("task-results");
+    expect(card).toHaveTextContent("Result: 1 file(s)Übersicht.xlsx");
+    // No folder of the task anywhere, nothing to keep.
+    expect(screen.queryByTitle("/home/.ancilo/tasks/x")).toBeNull();
+    expect(within(card).queryByRole("button", { name: "Keep" })).toBeNull();
+    await userEvent.click(within(card).getByRole("button", { name: "Save to Documents" }));
+    await waitFor(() => expect(calls.find((c) => c.op === "save_results")?.input).toEqual({ session: "s-1" }));
+    const saved = await screen.findByTestId("task-saved");
+    expect(saved).toHaveTextContent("Saved 1 file(s) in “Documents”.");
+    await userEvent.click(within(saved).getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(calls.find((c) => c.op === "open_document")?.input).toEqual({ path: "/Users/me/Documents/Übersicht.xlsx" }));
+    await userEvent.click(within(saved).getByRole("button", { name: "Show in Finder" }));
+    await waitFor(() => expect(calls.find((c) => c.op === "show_in_finder")?.input).toEqual({ path: "/Users/me/Documents/Übersicht.xlsx" }));
+  });
 });

@@ -283,6 +283,16 @@ pub fn register(
             .summary("Let the user pick a folder in the system's dialog (macOS)")
             .handler(move |_ctx, i: ChooseInput| async move { choose_folder(i).await }),
     );
+    registry.register(
+        OpBuilder::new("show_in_finder")
+            .summary("Show a file or folder in the Finder (macOS) or the file manager")
+            .handler(move |_ctx, i: PathRef| async move { reveal(&i.path, true) }),
+    );
+    registry.register(
+        OpBuilder::new("open_document")
+            .summary("Open a document (PDF, Word, Excel, CSV, text) with its usual program – never anything that runs")
+            .handler(move |_ctx, i: PathRef| async move { reveal(&i.path, false) }),
+    );
     let m = manager;
     registry.register(
         OpBuilder::new("model_logs")
@@ -305,6 +315,68 @@ pub fn register(
                 }
             }),
     );
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PathRef {
+    pub path: std::path::PathBuf,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Opened {
+    pub opened: bool,
+}
+
+/// Documents Ancilo opens with their usual program: none of them runs.
+const OPENABLE: &[&str] = &[
+    "pdf", "docx", "doc", "xlsx", "xls", "ods", "odt", "csv", "tsv", "txt", "md", "markdown",
+    "json", "xml", "yaml", "yml", "log", "png", "jpg", "jpeg", "gif", "heic", "webp",
+];
+
+/// Shows `path` in the Finder (`show`) or opens a document with its program.
+fn reveal(path: &std::path::Path, show: bool) -> Result<Opened> {
+    if !path.is_absolute() || !path.exists() {
+        return Err(ancilo_core::Error::invalid(format!(
+            "{} does not exist",
+            path.display()
+        )));
+    }
+    if !show {
+        let ok = path.is_file()
+            && path
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase())
+                .is_some_and(|e| OPENABLE.contains(&e.as_str()));
+        if !ok {
+            return Err(ancilo_core::Error::PermissionDenied(
+                "Ancilo opens documents only – this one is shown in the Finder instead".into(),
+            ));
+        }
+    }
+    let status = if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("/usr/bin/open");
+        if show {
+            c.arg("-R");
+        }
+        c.arg(path).status()
+    } else {
+        let target = if show {
+            path.parent().unwrap_or(path).to_path_buf()
+        } else {
+            path.to_path_buf()
+        };
+        std::process::Command::new("xdg-open").arg(target).status()
+    };
+    match status {
+        Ok(s) if s.success() => Ok(Opened { opened: true }),
+        Ok(s) => Err(ancilo_core::Error::unavailable(format!(
+            "could not open it ({s})"
+        ))),
+        Err(e) => Err(ancilo_core::Error::unavailable(format!(
+            "could not open it: {e}"
+        ))),
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

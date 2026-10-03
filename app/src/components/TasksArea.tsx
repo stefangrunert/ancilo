@@ -33,15 +33,14 @@ function PendingFiles({ files, onRemove }: { files: File[]; onRemove: (i: number
   );
 }
 
-/** Starts a task: in a folder of the Tasks area, or – by default – in a new
- * folder of its own. Files given here go into its copy. */
+/** Starts a task: with a folder, the agent works in a copy of it; without
+ * one, the files given are its material and its results are saved at the end. */
 function useStartTask() {
-  const { t } = useI18n();
   const client = useClient();
   const refresh = useRefresh();
   return async (text: string, folder: string | null, files: File[]) => {
     const title = (text.trim().split("\n")[0] ?? "").slice(0, 60);
-    const s = await client.op("create_task", folder ? { folder, title } : { title, free_dir: t("tasks.freeDir") });
+    const s = await client.op("create_task", folder ? { folder, title } : { title });
     for (const f of files) await client.addTaskFile(s.id, f.name, f);
     await client.op("send_message", { session: s.id, text });
     await refresh("list_sessions", "list_projects");
@@ -49,13 +48,43 @@ function useStartTask() {
   };
 }
 
-/** The Tasks area's start: what to do, and where. */
-export function TasksAreaPage() {
+/** Asks for a folder: the system's dialog – or, where there is none, its path. */
+function useChooseFolder() {
+  const { t } = useI18n();
+  const client = useClient();
+  return async (): Promise<string | null> => {
+    try {
+      const r = await client.op("choose_folder", { prompt: t("tasks.chooseFolderPrompt") });
+      return r.path ?? null;
+    } catch {
+      const typed = window.prompt(t("tasks.typeFolder"));
+      return typed?.trim() || null;
+    }
+  };
+}
+
+/** Where a task works, shown above the input – one click takes it away. */
+function FolderChip({ path, onRemove }: { path: string; onRemove: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="doc-row">
+      <span className="doc-chip" data-testid="task-folder-chip">
+        <Icon name="folder" size={15} />
+        <span className="doc-name">{t("tasks.worksIn", { name: nameOf(path) })}</span>
+        <button type="button" className="icon" aria-label={t("tasks.removeFolder")} title={t("tasks.removeFolder")} onClick={onRemove}>
+          <Icon name="close" size={12} />
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/** The Tasks area's start: say what to do; give files or a folder. */
+export function TasksAreaPage({ folder: preset = null }: { folder?: string | null }) {
   const { t } = useI18n();
   const start = useStartTask();
-  const projects = useOp("list_projects");
-  const folders = (projects.data ?? []).filter((p) => p.area === "tasks");
-  const [folder, setFolder] = useState<string>("");
+  const choose = useChooseFolder();
+  const [folder, setFolder] = useState<string | null>(preset);
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -63,7 +92,7 @@ export function TasksAreaPage() {
     <div className="page" data-testid="tasks-area">
       <div className="build stack">
         <h1 className="page-title">
-          <Icon name="computer" size={24} /> {t("tasks.new")}
+          <Icon name="computer" size={24} /> {folder ? nameOf(folder) : t("tasks.new")}
         </h1>
         <p>{t("tasksArea.intro")}</p>
         <ul className="examples">
@@ -71,32 +100,27 @@ export function TasksAreaPage() {
           <li>{t("tasksArea.example2")}</li>
           <li>{t("tasksArea.example3")}</li>
         </ul>
-        <label className="row">
-          <span>{t("tasks.where")}</span>
-          <select value={folder} onChange={(e) => setFolder(e.target.value)} aria-label={t("tasks.where")}>
-            <option value="">{t("tasks.whereNew")}</option>
-            {folders.map((f) => (
-              <option key={f.root} value={f.root}>
-                {f.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="link" onClick={() => navigate({ view: "add-task-folder" })}>
-            {t("tasks.addFolder")}
-          </button>
-        </label>
         <Composer
           label={t("tasks.ask")}
-          placeholder={t("tasks.askHint")}
+          placeholder={t(folder ? "tasks.askFolderHint" : "tasks.askHint")}
           busy={busy}
           autoFocus
           onFiles={(f) => setFiles((x) => [...x, ...f])}
-          above={<PendingFiles files={files} onRemove={(i) => setFiles((x) => x.filter((_, j) => j !== i))} />}
+          onFolder={async () => {
+            const p = await choose();
+            if (p) setFolder(p);
+          }}
+          above={
+            <>
+              {folder && <FolderChip path={folder} onRemove={() => setFolder(null)} />}
+              <PendingFiles files={files} onRemove={(i) => setFiles((x) => x.filter((_, j) => j !== i))} />
+            </>
+          }
           onSend={async (text) => {
             setError(null);
             setBusy(true);
             try {
-              await start(text, folder || null, files);
+              await start(text, folder, files);
             } catch (e) {
               setError(e);
               throw e;
@@ -107,7 +131,7 @@ export function TasksAreaPage() {
         />
         <p className="local-note">
           <Icon name="lock" size={13} />
-          {t("tasksArea.safe")}
+          {t(folder ? "tasksArea.safe" : "tasksArea.safeFree")}
         </p>
         <ErrorNote error={error} onDismiss={() => setError(null)} />
       </div>
@@ -115,64 +139,28 @@ export function TasksAreaPage() {
   );
 }
 
-/** A folder of the Tasks area: start a task in it; its tasks. */
+/** A folder Ancilo worked in: a new task there, and its tasks. */
 export function TaskFolderPage({ path }: { path: string }) {
   const { t } = useI18n();
-  const start = useStartTask();
   const sessions = useOp("list_sessions", {});
-  const mine = (sessions.data ?? []).filter((s) => s.project === path && s.kind === "task");
-  const [files, setFiles] = useState<File[]>([]);
-  const [error, setError] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
+  const mine = (sessions.data ?? []).filter((s) => s.project === path && s.kind === "task" && !s.free);
   return (
-    <div className="page" data-testid="task-folder">
-      <div className="build stack">
-        <h1 className="page-title">
-          <Icon name="folder" size={24} /> {nameOf(path)}
-        </h1>
-        <p className="muted small">
-          <code>{path}</code>
-        </p>
-        <p className="local-note">
-          <Icon name="lock" size={13} />
-          {t("tasksArea.safe")}
-        </p>
-        <Composer
-          label={t("tasks.ask")}
-          placeholder={t("tasks.askHint")}
-          busy={busy}
-          autoFocus
-          onFiles={(f) => setFiles((x) => [...x, ...f])}
-          above={<PendingFiles files={files} onRemove={(i) => setFiles((x) => x.filter((_, j) => j !== i))} />}
-          onSend={async (text) => {
-            setError(null);
-            setBusy(true);
-            try {
-              await start(text, path, files);
-            } catch (e) {
-              setError(e);
-              throw e;
-            } finally {
-              setBusy(false);
-            }
-          }}
-        />
-        <ErrorNote error={error} onDismiss={() => setError(null)} />
-        {mine.length > 0 && (
-          <section className="stack">
-            <h2>{t("tasks.inFolder")}</h2>
-            <ul className="plain-list">
-              {mine.map((s) => (
-                <li key={s.id}>
-                  <button type="button" className="link" onClick={() => navigate({ view: "task", id: s.id })}>
-                    {s.title}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-      </div>
+    <div className="stack" data-testid="task-folder">
+      <TasksAreaPage folder={path} />
+      {mine.length > 0 && (
+        <section className="build stack">
+          <h2>{t("tasks.inFolder")}</h2>
+          <ul className="plain-list">
+            {mine.map((s) => (
+              <li key={s.id}>
+                <button type="button" className="link" onClick={() => navigate({ view: "task", id: s.id })}>
+                  {s.title}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }
@@ -282,6 +270,76 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
   );
 }
 
+/** A free task's results: new files to save – into Documents with one
+ * click, or elsewhere; then open them or show them in the Finder. */
+function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void }) {
+  const { t } = useI18n();
+  const client = useClient();
+  const refresh = useRefresh();
+  const choose = useChooseFolder();
+  const act = async (f: () => Promise<unknown>) => {
+    try {
+      await f();
+      await refresh("get_session", "list_sessions");
+    } catch (e) {
+      onError(e);
+    }
+  };
+  if (s.status === "running") return null;
+  if (s.changes.length === 0) {
+    if (!s.saved) return null;
+    const dir = nameOf(s.saved.dir);
+    return (
+      <div className="card changes-card" data-testid="task-saved">
+        <p>{t("results.saved", { n: s.saved.files.length, dir })}</p>
+        <ul className="task-change-list">
+          {s.saved.files.map((f) => (
+            <li key={f} className="task-change">
+              <code>{nameOf(f)}</code>
+              <button type="button" className="link" onClick={() => void act(() => client.op("open_document", { path: f }))}>
+                {t("results.open")}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="row">
+          <button type="button" className="secondary" onClick={() => void act(() => client.op("show_in_finder", { path: s.saved!.files[0] ?? s.saved!.dir }))}>
+            {t("results.show")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="card changes-card" data-testid="task-results">
+      <strong>{t("results.title", { n: s.changes.length })}</strong>
+      <ul className="task-change-list">
+        {s.changes.map((c) => (
+          <li key={c.path} className="task-change added">
+            <Icon name="doc" size={14} />
+            <code>{c.path}</code>
+          </li>
+        ))}
+      </ul>
+      <div className="row">
+        <button type="button" onClick={() => void act(() => client.op("save_results", { session: s.id }))}>
+          {t("results.save")}
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          onClick={async () => {
+            const dir = await choose();
+            if (dir) await act(() => client.op("save_results", { session: s.id, dir }));
+          }}
+        >
+          {t("results.elsewhere")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** A task: the conversation with the agent, what it changed, keep or drop. */
 export function TaskView({ id }: { id: string }) {
   const { t } = useI18n();
@@ -322,14 +380,11 @@ export function TaskView({ id }: { id: string }) {
       <section className="session-chat" aria-label={s.title}>
         <header className="session-head">
           <h2>{s.title}</h2>
-          <button
-            type="button"
-            className="ghost project-path"
-            title={s.project}
-            onClick={() => navigate(s.project.includes(`/${t("tasks.freeDir")}/`) ? { view: "tasks" } : { view: "task-folder", path: s.project })}
-          >
-            <Icon name="folder" size={14} /> {nameOf(s.project)}
-          </button>
+          {!s.free && (
+            <button type="button" className="ghost project-path" title={s.project} onClick={() => navigate({ view: "task-folder", path: s.project })}>
+              <Icon name="folder" size={14} /> {nameOf(s.project)}
+            </button>
+          )}
           <span className="spacer" />
         </header>
         <ChatLayout
@@ -349,7 +404,7 @@ export function TaskView({ id }: { id: string }) {
         >
           <p className="local-note">
             <Icon name="lock" size={13} />
-            {t("tasksArea.safe")}
+            {t(s.free ? "tasksArea.safeFree" : "tasksArea.safe")}
           </p>
           <div className="stack" data-testid="messages" aria-live="polite">
             {parts.map((p, i) =>
@@ -369,7 +424,7 @@ export function TaskView({ id }: { id: string }) {
             {s.status === "interrupted" && <p className="muted">{t("code.interrupted")}</p>}
           </div>
           <Approvals s={s} onError={setError} />
-          <TaskChanges s={s} onError={setError} />
+          {s.free ? <TaskResults s={s} onError={setError} /> : <TaskChanges s={s} onError={setError} />}
           <ErrorNote error={error} onDismiss={() => setError(null)} />
         </ChatLayout>
       </section>

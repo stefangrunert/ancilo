@@ -68,13 +68,11 @@ pub struct CreateInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskInput {
-    /// A folder of the Tasks area to work on. Without one: a free task in a
-    /// folder of its own (`<projects folder>/<free_dir>/<title>`).
+    /// A folder of the user's to work on (changes in a copy, kept or not).
+    /// Without one: a free task – files given to it are material, its results
+    /// are saved where the user wants (`save_results`).
     #[serde(default)]
     pub folder: Option<PathBuf>,
-    /// The folder free tasks go into (the app's word for "Tasks").
-    #[serde(default)]
-    pub free_dir: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     /// read: ask before every change; edit/shell: changes in the copy without asking.
@@ -88,6 +86,15 @@ pub struct TaskFileInput {
     pub session: String,
     /// Full path of a file to put into the task's copy.
     pub path: PathBuf,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SaveInput {
+    pub session: String,
+    /// Where to save (default: the user's Documents).
+    #[serde(default)]
+    pub dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -293,15 +300,10 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
     );
     op!(
         "create_task",
-        "Start a task: the agent works with documents in a copy of a folder (or, without one, in a new folder of its own); the user keeps the changes or not",
+        "Start a task: with a folder, the agent works in a copy of it and the user keeps the changes or not; without one, files given to it are material and its results are saved where the user wants",
         manage = true,
         conseq = false,
-        |s, i: TaskInput| s.create_task(
-            i.folder.as_deref(),
-            i.free_dir.as_deref(),
-            i.title,
-            i.permission
-        )
+        |s, i: TaskInput| s.create_task(i.folder.as_deref(), i.title, i.permission)
     );
     op!(
         "open_task_folder",
@@ -309,6 +311,13 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
         manage = true,
         conseq = false,
         |s, i: PathInput| s.open_task_folder(&i.path)
+    );
+    op!(
+        "save_results",
+        "Save a free task's results (new and changed files) into a folder – default: Documents; never over an existing file",
+        manage = true,
+        conseq = false,
+        |s, i: SaveInput| s.save_results(&i.session, i.dir).await
     );
     op!(
         "undo_apply",
@@ -319,7 +328,7 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
     );
     op!(
         "add_task_file",
-        "Put a file into a task's copy (it reaches the folder only if kept)",
+        "Give a task a file: material for a free task, a new file in the copy for a folder task",
         manage = true,
         conseq = false,
         |s, i: TaskFileInput| {

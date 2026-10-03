@@ -92,7 +92,21 @@ struct Meta {
     web_used: bool,
     #[serde(default)]
     kind: SessionKind,
+    /// A free task: it works in a place of its own the user never sees;
+    /// its results are saved where the user wants.
+    #[serde(default)]
+    free: bool,
+    #[serde(default)]
+    saved: Option<Saved>,
     created_at: DateTime<Utc>,
+}
+
+/// Where a free task's results were saved.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Saved {
+    pub dir: PathBuf,
+    pub files: Vec<PathBuf>,
+    pub at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -126,6 +140,12 @@ pub struct SessionView {
     /// from foreign pages; review it with that in mind.
     pub web_used: bool,
     pub kind: SessionKind,
+    /// A free task (results to save, no folder of the user's).
+    #[serde(default)]
+    pub free: bool,
+    /// Where its results were saved last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved: Option<Saved>,
     /// A task's changes as shown – pass it to `apply_changes` so exactly
     /// these are applied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -479,6 +499,8 @@ impl Sessions {
             can_retry: meta.last_turn_base.is_some() && meta.status != SessionStatus::Running,
             web_used: meta.web_used,
             kind: meta.kind,
+            free: meta.free,
+            saved: meta.saved.clone(),
             changes_version: match &meta.changes {
                 Changes::Folder { copy, .. } => copy.version().ok(),
                 _ => None,
@@ -645,8 +667,12 @@ impl Sessions {
             })?
             .collect()
         })?;
+        // Free tasks' own places are not projects – the user never sees them.
+        let hidden = self.inner.dir.with_file_name("tasks");
+        let hidden = std::fs::canonicalize(&hidden).unwrap_or(hidden);
         Ok(rows
             .into_iter()
+            .filter(|(root, ..)| !Path::new(root).starts_with(&hidden))
             .map(|(root, n, at, name, area)| {
                 let root = PathBuf::from(root);
                 ProjectInfo {
@@ -761,50 +787,44 @@ impl Sessions {
         permission: Option<Access>,
         title: Option<String>,
     ) -> Result<SessionView> {
-        self.create_kind(cwd, model, permission, title, SessionKind::Code)
+        self.create_kind(cwd, model, permission, title, SessionKind::Code, false)
     }
 
     /// A task in a folder of the Tasks area (`folder`), or – without one – a
     /// free task in a folder of its own (`<projects>/<free_dir>/<title>`).
+    /// A task in a folder of the user's (`folder`: changes to keep), or a
+    /// free one (results to save) in a place of its own.
     pub fn create_task(
         &self,
         folder: Option<&Path>,
-        free_dir: Option<&str>,
         title: Option<String>,
         permission: Option<Access>,
     ) -> Result<SessionView> {
-        let (root, area) = match folder {
+        match folder {
             Some(f) => {
                 if !f.is_absolute() || !f.is_dir() {
                     return Err(Error::invalid(format!("not a folder: {}", f.display())));
                 }
-                (std::fs::canonicalize(f)?, "tasks")
+                let root = std::fs::canonicalize(f)?;
+                let s =
+                    self.create_kind(&root, None, permission, title, SessionKind::Task, false)?;
+                // The folder shows in the Tasks area from now on.
+                self.remember_in(&root, "tasks")?;
+                Ok(s)
             }
             None => {
-                let base = self.inner.projects_dir.lock().unwrap().join(
-                    free_dir
-                        .filter(|d| !d.trim().is_empty() && !d.contains('/'))
-                        .unwrap_or("Tasks"),
-                );
-                let name = title
-                    .as_deref()
-                    .map(crate::session::clean_name)
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or_else(|| Utc::now().format("%Y-%m-%d %H.%M").to_string());
-                std::fs::create_dir_all(&base)?;
-                let mut root = base.join(&name);
-                let mut n = 2;
-                while root.exists() {
-                    root = base.join(format!("{name} {n}"));
-                    n += 1;
-                }
-                std::fs::create_dir_all(&root)?;
-                (std::fs::canonicalize(&root)?, "task")
+                let place = self
+                    .inner
+                    .dir
+                    .with_file_name("tasks")
+                    .join(uuid::Uuid::new_v4().simple().to_string());
+                std::fs::create_dir_all(&place)?;
+                self.create_kind(&place, None, permission, title, SessionKind::Task, true)
+                    .inspect_err(|_| {
+                        std::fs::remove_dir_all(&place).ok();
+                    })
             }
-        };
-        let s = self.create_kind(&root, None, permission, title, SessionKind::Task)?;
-        self.remember_in(&root, area)?;
-        Ok(s)
+        }
     }
 
     fn create_kind(
@@ -814,6 +834,7 @@ impl Sessions {
         permission: Option<Access>,
         title: Option<String>,
         kind: SessionKind,
+        free: bool,
     ) -> Result<SessionView> {
         let root = match kind {
             SessionKind::Code => Self::project_root(cwd)?,
@@ -852,6 +873,8 @@ impl Sessions {
             turns: 0,
             web_used: false,
             kind,
+            free,
+            saved: None,
             created_at: Utc::now(),
         };
         if let Err(e) = self.save(&meta, &[]) {
@@ -1187,6 +1210,16 @@ impl Sessions {
         }
         let clean = ancilo_docs::file_name(name);
         let clean = clean.trim_start_matches('.').to_string();
+        // A free task: material, not a result.
+        if meta.free
+            && let Changes::Folder { copy, .. } = &meta.changes
+        {
+            let got = copy.add_input(&clean, bytes)?;
+            self.inner
+                .bus
+                .emit("session.file_added", Some(id), json!({"name": got}));
+            return Ok(got);
+        }
         let work = meta.changes.work_dir();
         let (stem, ext) = match clean.rsplit_once('.') {
             Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
@@ -1207,6 +1240,56 @@ impl Sessions {
             .bus
             .emit("session.file_added", Some(id), json!({"name": got}));
         Ok(got)
+    }
+
+    /// Saves a free task's results – the new and changed files – into `dir`
+    /// (default: the user's Documents), never over a file that is there.
+    pub async fn save_results(&self, id: &str, dir: Option<PathBuf>) -> Result<Saved> {
+        let _g = self.acquire(id).await?;
+        let (mut meta, history) = self.load(id)?;
+        if !meta.free {
+            return Err(Error::invalid(
+                "this task works in a folder – keep its changes instead",
+            ));
+        }
+        let dir = dir
+            .or_else(dirs::document_dir)
+            .ok_or_else(|| Error::invalid("say where to save the results"))?;
+        if !dir.is_absolute() || !dir.is_dir() {
+            return Err(Error::invalid(format!("not a folder: {}", dir.display())));
+        }
+        let Changes::Folder { copy, .. } = &meta.changes else {
+            return Err(Error::invalid("this task has no results"));
+        };
+        let results: Vec<String> = copy
+            .changes()?
+            .into_iter()
+            .filter(|c| c.kind != crate::workcopy::ChangeKind::Deleted)
+            .map(|c| c.path)
+            .collect();
+        if results.is_empty() {
+            return Err(Error::invalid("there is nothing to save yet"));
+        }
+        let work = copy.work();
+        let mut files = Vec::new();
+        for rel in &results {
+            files.push(crate::workcopy::save_copy(&work.join(rel), &dir)?);
+        }
+        // Saved: they are part of the task's own place now.
+        copy.apply(Some(&results), None)?;
+        let saved = Saved {
+            dir,
+            files,
+            at: Utc::now(),
+        };
+        meta.saved = Some(saved.clone());
+        self.save(&meta, &history)?;
+        self.inner.bus.emit(
+            "session.saved",
+            Some(id),
+            json!({"files": saved.files.len()}),
+        );
+        Ok(saved)
     }
 
     pub fn decide(&self, approval: &str, allow: bool, remember: bool) -> Result<Approval> {
