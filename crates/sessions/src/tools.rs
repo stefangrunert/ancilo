@@ -154,8 +154,6 @@ pub struct SessionTools {
     pub transcript: Option<Transcript>,
     /// Web search, if the user turned it on.
     pub web: Option<Arc<dyn WebLookup>>,
-    /// Every search asks, whatever the switch says (tasks: documents).
-    pub always_ask_web: bool,
 }
 
 impl SessionTools {
@@ -257,7 +255,7 @@ impl SessionTools {
         }
         // Exactly what is asked is what is sent: only the query.
         let sent = json!({"query": query});
-        if (self.always_ask_web || !web.automatic())
+        if !web.automatic()
             && let Err(e) = self
                 .ask(WEB_SEARCH, &sent, Access::Shell, Some(provider))
                 .await

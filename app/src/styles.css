@@ -111,6 +111,10 @@ th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line
 .header-link { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 7px; background: none; border: none; color: var(--muted); font-size: 13px; cursor: pointer; }
 .header-link:hover { color: var(--fg); background: var(--hover); }
 .header-link[aria-current="page"] { color: var(--fg); background: var(--surface-2); }
+.app-settings { display: inline-flex; align-items: center; gap: 12px; font-size: 13px; }
+.app-settings .view-switch { cursor: pointer; }
+.app-settings .view-switch input { margin: 0; }
+.app-settings .lang select { padding: 3px 6px; font-size: 13px; min-height: 0; }
 
 /* The handle between the left column and the page. */
 .resizer { cursor: col-resize; background: var(--sidebar); border-right: 1px solid var(--line); touch-action: none; }
@@ -486,10 +490,6 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .monitor-card p { margin: 0 0 6px; }
 .monitor-card .row { flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .statusbar .status-sep { width: 1px; height: 14px; background: var(--line); margin: 0 4px; flex: none; }
-.statusbar .status-settings { display: inline-flex; align-items: center; gap: 10px; padding-left: 8px; }
-.statusbar .view-switch { font-size: 12px; cursor: pointer; }
-.statusbar .view-switch input { margin: 0; }
-.statusbar .lang select { padding: 1px 4px; font-size: 12px; min-height: 0; }
 @media (max-width: 640px) { .statusbar .status-item:not(.verdict):not(.hot), .statusbar .status-sep, .statusbar .meter-button { display: none; } }
 
 /* ---- web search ------------------------------------------------------------ */

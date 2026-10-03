@@ -55,9 +55,8 @@ describe("A task", () => {
     await waitFor(() => expect(calls.find((c) => c.op === "discard_changes")?.input).toEqual({ session: "s-1", paths: null }));
     await userEvent.click(within(card).getByRole("button", { name: "Keep" }));
     await waitFor(() => expect(calls.find((c) => c.op === "apply_changes")).toMatchObject({ input: { session: "s-1", paths: null, version: "v-1" }, confirmed: true }));
-    // The task's own access modes – no commands here.
-    const mode = screen.getByRole("combobox", { name: "Access" });
-    expect(mode.closest("label")?.getAttribute("title")).toContain("your folder gets only what you keep");
+    // No access mode: a task works on its own – the folder changes only when kept.
+    expect(screen.queryByRole("combobox", { name: "Access" })).toBeNull();
   });
 
   it("offers to undo what was kept – after asking", async () => {

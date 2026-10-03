@@ -63,9 +63,17 @@ export interface Live {
   downloads: Record<string, number>;
   /** Recent activity lines per subject (task id, comparison id). */
   activity: Record<string, string[]>;
+  /** The current turn per subject: what the agent said on the way, and how
+   * many steps it took so far – shown while it works. */
+  turns: Record<string, LiveTurn>;
 }
 
-const LiveCtx = createContext<Live>({ online: true, downloads: {}, activity: {} });
+export interface LiveTurn {
+  notes: string[];
+  steps: number;
+}
+
+const LiveCtx = createContext<Live>({ online: true, downloads: {}, activity: {}, turns: {} });
 export const useLive = () => useContext(LiveCtx);
 
 function activityLine(e: AncEvent): string | null {
@@ -91,6 +99,19 @@ function activityLine(e: AncEvent): string | null {
 /** Events that start a new turn: what was shown of the previous one goes. */
 const TURN_STARTS = ["assistant.thinking", "session.turn_started"];
 
+/** The current turn per subject after an event (`null`: the event is not about it). */
+export function nextTurn(turns: Record<string, LiveTurn>, e: AncEvent): Record<string, LiveTurn> | null {
+  if (!e.subject) return null;
+  if (TURN_STARTS.includes(e.kind)) return { ...turns, [e.subject]: { notes: [], steps: 0 } };
+  const t = turns[e.subject] ?? { notes: [], steps: 0 };
+  if (e.kind === "agent.note") {
+    const text = String((e.data as { text?: unknown }).text ?? "").trim();
+    return text ? { ...turns, [e.subject]: { ...t, notes: [...t.notes, text].slice(-30) } } : null;
+  }
+  if (e.kind === "agent.tool_called") return { ...turns, [e.subject]: { ...t, steps: t.steps + 1 } };
+  return null;
+}
+
 /** The activity lines per subject after an event (only the current turn's, the last 50). */
 export function nextActivity(activity: Record<string, string[]>, e: AncEvent): Record<string, string[]> {
   if (!e.subject) return activity;
@@ -101,7 +122,7 @@ export function nextActivity(activity: Record<string, string[]>, e: AncEvent): R
 }
 
 export function ClientProvider({ client, queryClient, children }: { client: Client; queryClient: QueryClient; children: ReactNode }) {
-  const [live, setLive] = useState<Live>({ online: true, downloads: {}, activity: {} });
+  const [live, setLive] = useState<Live>({ online: true, downloads: {}, activity: {}, turns: {} });
   const qc = queryClient;
   const pending = useRef(new Set<string>());
   const timer = useRef<number | undefined>(undefined);
@@ -129,6 +150,12 @@ export function ClientProvider({ client, queryClient, children }: { client: Clie
         }
         if (e.subject && (TURN_STARTS.includes(e.kind) || activityLine(e))) {
           setLive((l) => ({ ...l, activity: nextActivity(l.activity, e) }));
+        }
+        if (e.subject && (TURN_STARTS.includes(e.kind) || e.kind === "agent.note" || e.kind === "agent.tool_called")) {
+          setLive((l) => {
+            const turns = nextTurn(l.turns, e);
+            return turns ? { ...l, turns } : l;
+          });
         }
       },
       (up) => {

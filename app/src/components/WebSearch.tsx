@@ -12,7 +12,8 @@ type Provider = View["provider"];
 const PROVIDERS: Provider[] = ["off", "wikipedia", "serper"];
 const SERPER = "https://serper.dev/";
 
-/** The web search switch beside the input (chats and coding): on – Ancilo
+/** The web search switch beside the input (chats, tasks and coding) – one
+ * setting for everything: on – Ancilo
  * searches without asking when it needs to; off – it asks before every search.
  * Only there once web search is set up. */
 export function WebSwitch({ onError }: { onError?: (e: unknown) => void }) {

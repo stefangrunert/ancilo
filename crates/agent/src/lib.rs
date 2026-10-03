@@ -324,6 +324,16 @@ pub async fn run(
             messages.push(json!({"role": "assistant", "content": summary}));
             return finish(status, summary, steps, calls, ptok, ctok, &messages);
         }
+        // What the agent says on the way ("Let me look at the PDFs …"):
+        // shown at once, not only with the answer.
+        if let Some(note) = message["content"]
+            .as_str()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+        {
+            let note: String = note.chars().take(4000).collect();
+            emit(&events, "agent.note", json!({"text": note}));
+        }
         messages.push(
             json!({"role": "assistant", "content": message["content"], "tool_calls": tool_calls}),
         );

@@ -62,18 +62,19 @@ function LanguageChoice() {
   );
 }
 
-/** The app's own settings, at the right end of the status bar. */
-function Settings({ online }: { online: boolean }) {
+/** The app's own settings, at the right end of the header. */
+export function AppSettings() {
   const { t } = useI18n();
+  const live = useLive();
   return (
-    <span className="status-settings" role="group" aria-label={t("monitor.settings")}>
-      {online && <ViewSwitch />}
+    <span className="app-settings" role="group" aria-label={t("monitor.settings")}>
+      {live.online && <ViewSwitch />}
       <LanguageChoice />
     </span>
   );
 }
 
-/** One line at the bottom of the window: how the computer is doing (left), the app's settings (right). */
+/** One line at the bottom of the window: how the computer is doing. */
 export function StatusBar() {
   const { t } = useI18n();
   const live = useLive();
@@ -89,8 +90,6 @@ export function StatusBar() {
           <span className="dot dot-crashed" aria-hidden="true" />
           {t("status.offline")}
         </span>
-        <span className="spacer" />
-        <Settings online={false} />
       </footer>
     );
   }
@@ -115,8 +114,6 @@ export function StatusBar() {
           {t(`cockpit.level.${st.settings.level}` as Key)}
         </button>
       )}
-      <span className="spacer" />
-      <Settings online />
     </footer>
   );
 }

@@ -23,8 +23,8 @@ Each session has one of two modes, chosen under the input:
 
 | Mode | Without asking | Asks before |
 |---|---|---|
-| **Ask first** | read and search the project | every change, every command |
-| **Approve for me** (default) | change files in its copy, run commands in the sandbox | – |
+| **Confirm each step** | read and search the project | every change, every command |
+| **Work on its own** (default) | change files in its copy, run commands in the sandbox | – |
 
 Either way the agent works in its copy and **only you keep changes**. There is no mode that runs commands outside the sandbox.
 

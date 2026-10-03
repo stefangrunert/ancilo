@@ -72,7 +72,7 @@ pub fn register(registry: &mut Registry, attachments: Attachments, library: Libr
     registry.register(
         OpBuilder::new("add_attachment")
             .summary("Read a document (PDF, Word, Excel, CSV, text) to ask about it in a chat")
-            .description("Reads the file in a sandboxed process (no network, time limit) and keeps only its text. Pass the returned id in `attachments` of `ask`. A conversation with a document stays with the AI on this computer: no cloud model, no tools, and every web search asks first.")
+            .description("Reads the file in a sandboxed process (no network, time limit) and keeps only its text. Pass the returned id in `attachments` of `ask`. A conversation with a document stays with the AI on this computer: no cloud model, no tools; web searches follow the web search switch (off: each asks first).")
             .handler(move |_ctx, i: AttachPath| {
                 let a = a.clone();
                 async move { a.add_path(&i.path).await }

@@ -27,10 +27,10 @@ async function start(page: Page, daemon: Daemon): Promise<string> {
   return dir;
 }
 
-/** "Ask first": the agent asks before every change and command. */
+/** "Confirm each step": the agent asks before every change and command. */
 async function askFirst(page: Page, daemon: Daemon) {
   const mode = page.getByRole("combobox", { name: "Access" });
-  // New sessions start with "Approve for me".
+  // New sessions start with "Work on its own".
   await expect(mode).toHaveValue("shell");
   await mode.selectOption("read");
   await expect.poll(async () => (await daemon.op("list_sessions", {}))[0].permission).toBe("read");
@@ -47,7 +47,7 @@ test("a task is done entirely in the chat: ask, approve, review the diff, apply"
   const dir = await start(page, daemon);
   await askFirst(page, daemon);
   await send(page, "Greet in the README and build");
-  // "Ask first": the change and the command each wait for an OK.
+  // "Confirm each step": the change and the command each wait for an OK.
   const approval = page.getByTestId("approval");
   await expect(approval).toContainText("edit_file README.md", { timeout: 20_000 });
   await approval.getByRole("button", { name: "Allow", exact: true }).click();
@@ -95,7 +95,7 @@ test("rejected and discarded changes leave no trace", async ({ page, daemon }) =
 // covers: M8-AC-05
 test("retry with another model: same start, side by side, one is taken", async ({ page, daemon }) => {
   const dir = await start(page, daemon);
-  // "Approve for me" (the default): no questions.
+  // "Work on its own" (the default): no questions.
   await expect(page.getByRole("combobox", { name: "Access" })).toHaveValue("shell");
   await send(page, "Greet in the README and build");
   await expect(page.getByTestId("messages")).toContainText("Updated README.md and ran the build.", { timeout: 20_000 });

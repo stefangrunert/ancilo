@@ -70,10 +70,8 @@ describe("System monitor", () => {
     expect(within(bar).getByRole("button", { name: /Ancilo is idle/ })).toBeInTheDocument();
     expect(within(bar).getByRole("button", { name: "Balanced" })).toBeInTheDocument();
     expect(screen.queryByTestId("monitor-warning")).toBeNull();
-    // The app's settings sit at the right end of the bar.
-    const settings = within(bar).getByRole("group", { name: "Settings" });
-    expect(within(settings).getByRole("switch", { name: "Expert view" })).not.toBeChecked();
-    expect(within(settings).getByRole("combobox", { name: "Language" })).toHaveValue("en");
+    // The app's settings are in the header now – not in the bar.
+    expect(within(bar).queryByRole("switch", { name: "Expert view" })).toBeNull();
   });
 
   it("warns when it gets tight, names other programs and helps with one click", async () => {
@@ -149,5 +147,15 @@ describe("System monitor", () => {
     await waitFor(() => expect(screen.queryByTestId("monitor-acted")).toBeNull());
     // Not shown again.
     expect(Number(localStorage.getItem("ancilo.guardSeen"))).toBe(Date.parse(at));
+  });
+});
+
+describe("The app's settings", () => {
+  it("are in the header: expert view and language", async () => {
+    const { AppSettings } = await import("./SystemMonitor");
+    renderWithDaemon(<AppSettings />, { get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }) });
+    const settings = await screen.findByRole("group", { name: "Settings" });
+    expect(within(settings).getByRole("switch", { name: "Expert view" })).not.toBeChecked();
+    expect(within(settings).getByRole("combobox", { name: "Language" })).toHaveValue("en");
   });
 });

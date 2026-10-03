@@ -1179,14 +1179,14 @@ async fn a_task_works_on_a_copy_and_the_folder_changes_only_when_kept() {
     let script = r#"
 steps:
   - expect: { last_user_contains: "Tabelle", offers_tool: write_spreadsheet, lacks_tool: bash }
-    respond: { tool_calls: [{ name: list_files, arguments: {} }] }
+    respond: { text: "Ich sehe mir zuerst den Ordner an.", tool_calls: [{ name: list_files, arguments: {} }] }
   - expect: { any_message_contains: "strom.txt" }
     respond: { tool_calls: [{ name: read_document, arguments: { path: "Rechnungen/strom.txt" } }] }
   - expect: { any_message_contains: "120 Euro" }
     respond: { tool_calls: [{ name: write_spreadsheet, arguments: { path: "Übersicht.xlsx", sheets: [{ name: "2025", rows: [["Firma", "Betrag"], ["Stadtwerke", "120"]] }] } }] }
   - respond: { tool_calls: [{ name: move_file, arguments: { from: "Rechnungen/strom.txt", to: "2025/Strom.txt" } }] }
   - respond: { text: "Fertig: Übersicht.xlsx, und die Stromrechnung liegt jetzt in 2025." }
-  # Asking first: the write waits for the OK.
+  # On its own: the write needs no OK.
   - expect: { last_user_contains: "Notiz" }
     respond: { tool_calls: [{ name: write_file, arguments: { path: "notiz.txt", content: "hallo" } }] }
   - respond: { text: "Notiz geschrieben." }
@@ -1207,12 +1207,21 @@ steps:
         .await;
     let id = s["id"].as_str().unwrap().to_string();
     assert_eq!(s["kind"], "task");
+    let mut events = env.d().bus.subscribe();
     let s = env
         .op(
             "send_message",
             json!({"session": id, "text": "Mach eine Tabelle der Rechnungen", "wait": true}),
         )
         .await;
+    // What the agent says on the way goes out at once – not only with the answer.
+    let mut notes = Vec::new();
+    while let Ok(e) = events.try_recv() {
+        if e.kind == "agent.note" && e.subject.as_deref() == Some(id.as_str()) {
+            notes.push(e.data["text"].clone());
+        }
+    }
+    assert_eq!(notes, [json!("Ich sehe mir zuerst den Ordner an.")]);
     let last = s["messages"].as_array().unwrap().last().unwrap()["text"].clone();
     assert!(last.as_str().unwrap().starts_with("Fertig"), "{s}");
     // The changes – nothing of it in the folder yet.
@@ -1259,34 +1268,31 @@ steps:
         folder.join("Rechnungen/strom.txt").exists() && !folder.join("2025/Strom.txt").exists()
     );
 
-    // Asking first: the write waits for the OK.
-    env.op(
-        "update_session",
-        json!({"session": id, "permission": "read"}),
-    )
-    .await;
-    env.op(
-        "send_message",
-        json!({"session": id, "text": "Schreib eine Notiz"}),
-    )
-    .await;
-    let mut a = Value::Null;
-    for _ in 0..400 {
-        let s = env.op("get_session", json!({"session": id})).await;
-        if let Some(x) = s["approvals"].as_array().and_then(|a| a.first()) {
-            a = x.clone();
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    assert_eq!(a["tool"], "write_file", "{a}");
-    env.op("approve", json!({"approval": a["id"]})).await;
-    for _ in 0..400 {
-        if env.op("get_session", json!({"session": id})).await["status"] == "idle" {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    // A task works on its own: no mode that asks before each step – the
+    // write goes into the copy at once.
+    let (ok, e) = env
+        .call(
+            "update_session",
+            json!({"session": id, "permission": "read"}),
+            true,
+        )
+        .await;
+    assert!(!ok && e.to_string().contains("works on its own"), "{e}");
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Schreib eine Notiz", "wait": true}),
+        )
+        .await;
+    assert!(s["approvals"].as_array().unwrap().is_empty(), "{s}");
+    assert!(
+        s["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["path"] == "notiz.txt"),
+        "{s}"
+    );
     assert!(!folder.join("notiz.txt").exists(), "still only in the copy");
     env.stop().await;
 }

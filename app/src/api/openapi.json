@@ -4296,7 +4296,7 @@
     },
     "/api/v1/ops/add_attachment": {
       "post": {
-        "description": "Reads the file in a sandboxed process (no network, time limit) and keeps only its text. Pass the returned id in `attachments` of `ask`. A conversation with a document stays with the AI on this computer: no cloud model, no tools, and every web search asks first.",
+        "description": "Reads the file in a sandboxed process (no network, time limit) and keeps only its text. Pass the returned id in `attachments` of `ask`. A conversation with a document stays with the AI on this computer: no cloud model, no tools; web searches follow the web search switch (off: each asks first).",
         "operationId": "add_attachment",
         "requestBody": {
           "content": {
@@ -7082,18 +7082,6 @@
                       "string",
                       "null"
                     ]
-                  },
-                  "permission": {
-                    "anyOf": [
-                      {
-                        "$ref": "#/components/schemas/Access"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "default": null,
-                    "description": "read: ask before every change; edit/shell: changes in the copy without asking."
                   },
                   "title": {
                     "default": null,

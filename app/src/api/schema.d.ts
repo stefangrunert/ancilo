@@ -91,7 +91,7 @@ export interface paths {
         put?: never;
         /**
          * Read a document (PDF, Word, Excel, CSV, text) to ask about it in a chat
-         * @description Reads the file in a sandboxed process (no network, time limit) and keeps only its text. Pass the returned id in `attachments` of `ask`. A conversation with a document stays with the AI on this computer: no cloud model, no tools, and every web search asks first.
+         * @description Reads the file in a sandboxed process (no network, time limit) and keeps only its text. Pass the returned id in `attachments` of `ask`. A conversation with a document stays with the AI on this computer: no cloud model, no tools; web searches follow the web search switch (off: each asks first).
          */
         post: operations["add_attachment"];
         delete?: never;
@@ -5377,11 +5377,6 @@ export interface operations {
                      * @default null
                      */
                     folder?: string | null;
-                    /**
-                     * @description read: ask before every change; edit/shell: changes in the copy without asking.
-                     * @default null
-                     */
-                    permission?: components["schemas"]["Access"] | null;
                     /** @default null */
                     title?: string | null;
                 };

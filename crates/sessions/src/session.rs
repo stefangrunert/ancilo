@@ -444,7 +444,13 @@ impl Sessions {
             .lock()
             .unwrap()
             .entry(meta.id.clone())
-            .or_insert_with(|| Arc::new(Mutex::new(meta.permission)))
+            // Tasks from before always work on their own too.
+            .or_insert_with(|| {
+                Arc::new(Mutex::new(match meta.kind {
+                    SessionKind::Task => Access::Shell,
+                    SessionKind::Code => meta.permission,
+                }))
+            })
             .clone()
     }
 
@@ -803,12 +809,10 @@ impl Sessions {
     /// free task in a folder of its own (`<projects>/<free_dir>/<title>`).
     /// A task in a folder of the user's (`folder`: changes to keep), or a
     /// free one (results to save) in a place of its own.
-    pub fn create_task(
-        &self,
-        folder: Option<&Path>,
-        title: Option<String>,
-        permission: Option<Access>,
-    ) -> Result<SessionView> {
+    pub fn create_task(&self, folder: Option<&Path>, title: Option<String>) -> Result<SessionView> {
+        // A task works on its own: nothing reaches the folder before the
+        // user keeps it (web searches still ask, every time).
+        let permission = Some(Access::Shell);
         match folder {
             Some(f) => {
                 if !f.is_absolute() || !f.is_dir() {
@@ -984,6 +988,11 @@ impl Sessions {
             self.model_of(&meta)?;
         }
         if let Some(p) = permission {
+            if meta.kind == SessionKind::Task && p != Access::Shell {
+                return Err(Error::invalid(
+                    "a task always works on its own in its copy – the folder changes only when the user keeps the changes",
+                ));
+            }
             meta.permission = p;
             *self.permission(&meta).lock().unwrap() = p;
         }
@@ -1210,8 +1219,6 @@ impl Sessions {
             cancel: cancel.clone(),
             transcript: Some(Arc::new(move |t: &str| terms.show(&sid, t))),
             web: self.inner.web.lock().unwrap().clone(),
-            // A task holds the user's documents: every search asks.
-            always_ask_web: meta.kind == SessionKind::Task,
         };
         let spec = AgentSpec {
             model: model.to_string(),

@@ -1,6 +1,9 @@
 import type { OpOutput } from "../api/client";
 import { useI18n } from "../i18n";
-import { useClient, useRefresh } from "../state/store";
+import { usePro } from "../state/prefs";
+import { useClient, useLive, useRefresh } from "../state/store";
+import { Thinking } from "./Chat";
+import { Markdown } from "./Markdown";
 
 /** What coding sessions and tasks share: the access mode, the agent's
  * questions, its steps. */
@@ -10,12 +13,14 @@ type Approval = Session["approvals"][number];
 export type Access = Session["permission"];
 type SessionMessage = NonNullable<Session["messages"]>[number];
 
-/** The access modes (decision `2026-10-03-coding-zugriff-websuche`): "ask" =
- * read freely, ask before changes, commands and searches; "auto" = changes in
- * the copy and sandboxed commands without asking. Searches always ask. */
-export function AccessChoice({ s, disabled, onChange, task = false }: { s: Session; disabled: boolean; onChange: (p: Access) => void; task?: boolean }) {
+/** The access modes of coding sessions (decision
+ * `2026-10-03-coding-zugriff-websuche`): "ask" = read freely, ask before
+ * changes, commands and searches; "auto" = changes in the copy and sandboxed
+ * commands without asking. Searches always ask. (Tasks have no choice: they
+ * work on their own – nothing reaches the folder before it is kept.) */
+export function AccessChoice({ s, disabled, onChange }: { s: Session; disabled: boolean; onChange: (p: Access) => void }) {
   const { t } = useI18n();
-  const hint = task ? (s.permission === "read" ? "task.mode.askHint" : "task.mode.autoHint") : s.permission === "shell" ? "code.mode.autoHint" : "code.mode.askHint";
+  const hint = s.permission === "shell" ? "code.mode.autoHint" : "code.mode.askHint";
   return (
     <label className="row access-choice" title={t(hint)}>
       <span className="sr-only">{t("code.mode")}</span>
@@ -145,3 +150,25 @@ export function Steps({ steps, open }: { steps: { call: string; result?: string 
   );
 }
 
+
+/** While the agent works: what it says on the way – at once, for everyone –
+ * and how many steps it took so far (in the expert view also its last
+ * actions). */
+export function LiveWork({ id, label }: { id: string; label: string }) {
+  const { t } = useI18n();
+  const live = useLive();
+  const pro = usePro();
+  const turn = live.turns[id];
+  const activity = (live.activity[id] ?? []).slice(-3);
+  const steps = turn?.steps ?? 0;
+  return (
+    <>
+      {(turn?.notes ?? []).map((n, i) => (
+        <div key={i} className="live-note" data-testid="live-note">
+          <Markdown text={n} />
+        </div>
+      ))}
+      <Thinking label={steps > 0 ? `${label} · ${t("code.steps", { n: steps })}` : label} lines={pro ? activity : []} />
+    </>
+  );
+}

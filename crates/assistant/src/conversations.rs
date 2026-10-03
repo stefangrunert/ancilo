@@ -220,7 +220,7 @@ impl Conversation {
     /// Whether text from the web went into this conversation – it then never
     /// gets Ancilo's tools (a page could try to give orders).
     /// The conversation saw the user's documents: it stays with the AI on
-    /// this computer – no cloud model, no tools, every web search asks.
+    /// this computer – no cloud model, no tools.
     pub fn has_documents(&self) -> bool {
         self.messages
             .iter()

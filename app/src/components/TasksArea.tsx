@@ -4,11 +4,12 @@ import { useI18n, type Key } from "../i18n";
 import { usePro } from "../state/prefs";
 import { navigate } from "../state/route";
 import { useClient, useLive, useOp, useRefresh } from "../state/store";
-import { AccessChoice, Approvals, blocks, Steps } from "./AgentParts";
-import { ChatLayout, Composer, Thinking, UserBubble } from "./Chat";
+import { Approvals, blocks, LiveWork, Steps } from "./AgentParts";
+import { ChatLayout, Composer, UserBubble } from "./Chat";
 import { nameOf } from "./ChatProjects";
 import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
+import { WebSwitch } from "./WebSearch";
 import { Dialog, ErrorNote } from "./ui";
 
 type Session = OpOutput<"get_session">;
@@ -162,6 +163,7 @@ export function TasksAreaPage({ folder: preset = null }: { folder?: string | nul
           disabled={!folder}
           autoFocus={!!folder}
           onFiles={folder ? (f) => setFiles((x) => [...x, ...f]) : undefined}
+          extra={<WebSwitch onError={setError} />}
           above={<PendingFiles files={files} onRemove={(i) => setFiles((x) => x.filter((_, j) => j !== i))} />}
           onSend={async (text) => {
             if (!folder) return;
@@ -415,7 +417,6 @@ export function TaskView({ id }: { id: string }) {
   if (session.error) return <ErrorNote error={session.error} />;
   if (!s) return <p className="muted" style={{ padding: 20 }}>…</p>;
   const running = s.status === "running";
-  const activity = (live.activity[s.id] ?? []).slice(-3);
   const lastSteps = parts.map((p) => p.kind).lastIndexOf("steps");
   const send = async (text: string) => {
     setError(null);
@@ -449,7 +450,7 @@ export function TaskView({ id }: { id: string }) {
           <span className="spacer" />
         </header>
         <ChatLayout
-          follow={`${parts.length}:${s.status}:${activity.length}:${s.approvals.length}:${s.changes.length}`}
+          follow={`${parts.length}:${s.status}:${live.turns[s.id]?.notes.length ?? 0}:${live.activity[s.id]?.length ?? 0}:${s.approvals.length}:${s.changes.length}`}
           composer={
             <Composer
               label={t("tasks.next")}
@@ -458,7 +459,7 @@ export function TaskView({ id }: { id: string }) {
               busy={running}
               onStop={() => void client.op("cancel_turn", { session: s.id }).catch(setError)}
               onFiles={(f) => void addFiles(f)}
-              extra={<AccessChoice s={s} task disabled={running} onChange={(permission) => void client.op("update_session", { session: s.id, permission }).then(() => refresh("get_session")).catch(setError)} />}
+              extra={<WebSwitch onError={setError} />}
               autoFocus
             />
           }
@@ -484,7 +485,7 @@ export function TaskView({ id }: { id: string }) {
                 </p>
               ),
             )}
-            {running && <Thinking label={t("tasks.working")} lines={pro ? activity : []} />}
+            {running && <LiveWork id={s.id} label={t("tasks.working")} />}
             {s.status === "interrupted" && <p className="muted">{t("code.interrupted")}</p>}
           </div>
           <Approvals s={s} onError={setError} />

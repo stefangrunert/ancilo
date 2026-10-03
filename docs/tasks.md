@@ -29,7 +29,7 @@ The agent can:
 
 It cannot run commands or reach the network, and no path leads out of the copy (no `..`, no absolute paths, no links). Text in documents is treated as content, never as instructions.
 
-**Ask first** (under the input) makes the agent ask before every change; **Approve for me** lets it change the copy without asking. Either way your folder changes only when you keep the changes.
+There is nothing to set: the agent works on its own in the copy – your folder changes only when you keep the changes. You see its steps as it works and can stop it any time. Web searches follow the web search switch next to the input, as everywhere: off – each search shows its words and asks first; on – Ancilo searches by itself. Only the search words go out.
 
 ## Keep, drop, undo
 

@@ -889,7 +889,7 @@ impl Assistant {
                     earlier,
                     conversation,
                     &subject,
-                    (&documents, folder.as_deref(), has_documents),
+                    (&documents, folder.as_deref()),
                 )
                 .await;
         }
@@ -997,7 +997,7 @@ impl Assistant {
         earlier: Option<&Conversation>,
         conversation: Option<String>,
         subject: &str,
-        (documents, folder, has_documents): (&[String], Option<&std::path::Path>, bool),
+        (documents, folder): (&[String], Option<&std::path::Path>),
     ) -> Result<AskOutput> {
         let history = earlier
             .map(|c| {
@@ -1040,9 +1040,9 @@ impl Assistant {
                 proposed.topic = (!topic.is_empty()).then_some(topic);
                 proposed.lang = lang;
                 proposed.provider = Some(provider);
-                // With the user's documents in the conversation every search
-                // asks: a query could carry their content.
-                if has_documents || (mode == ancilo_web::Mode::Ask && web != WebUse::Always) {
+                // One switch for everything (with documents too): off asks
+                // first, on searches – only the query goes out.
+                if mode == ancilo_web::Mode::Ask && web != WebUse::Always {
                     // Nothing goes out before the user agrees to this query.
                     self.inner.bus.emit(
                         "assistant.answer",

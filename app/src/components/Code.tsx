@@ -4,12 +4,12 @@ import { useI18n } from "../i18n";
 import { usePro } from "../state/prefs";
 import { navigate } from "../state/route";
 import { useClient, useLive, useOp, useRefresh } from "../state/store";
-import { ChatLayout, Composer, Thinking, UserBubble } from "./Chat";
+import { ChatLayout, Composer, UserBubble } from "./Chat";
 import { Markdown } from "./Markdown";
 import { TerminalView } from "./Terminal";
 import { Dialog, ErrorNote, StatusDot } from "./ui";
 import { WebSwitch } from "./WebSearch";
-import { AccessChoice, Approvals, blocks, Steps, type Access } from "./AgentParts";
+import { AccessChoice, Approvals, blocks, LiveWork, Steps, type Access } from "./AgentParts";
 
 export { blocks };
 
@@ -361,7 +361,6 @@ export function SessionView({ id, models }: { id: string; models: Model[] }) {
     }
   };
   const known = local.some((m) => m.id === s.model);
-  const activity = (live.activity[s.id] ?? []).slice(-3);
   const lastSteps = parts.map((p) => p.kind).lastIndexOf("steps");
   const project = s.project.split("/").pop() ?? s.project;
   const modelChoice = (
@@ -393,7 +392,7 @@ export function SessionView({ id, models }: { id: string; models: Model[] }) {
           )}
         </header>
         <ChatLayout
-          follow={`${parts.length}:${s.status}:${activity.length}:${s.approvals.length}:${s.changes.length}`}
+          follow={`${parts.length}:${s.status}:${live.turns[s.id]?.notes.length ?? 0}:${live.activity[s.id]?.length ?? 0}:${s.approvals.length}:${s.changes.length}`}
           composer={
             <Composer
               label={t("code.placeholder")}
@@ -435,7 +434,7 @@ export function SessionView({ id, models }: { id: string; models: Model[] }) {
                 )
               ),
             )}
-            {running && <Thinking label={t("code.working")} lines={pro ? activity : []} />}
+            {running && <LiveWork id={s.id} label={t("code.working")} />}
             {s.status === "interrupted" && <p className="muted">{t("code.interrupted")}</p>}
           </div>
           <Approvals s={s} onError={setError} />

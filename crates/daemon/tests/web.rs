@@ -507,9 +507,11 @@ steps:
   # The document's text goes along, with its source.
   - expect: { last_user_contains: "Was kostet", any_message_contains: "[Mietvertrag.txt]", has_tools: false }
     respond: { text: "Die Miete beträgt 950 Euro [Mietvertrag.txt]." }
-  # Web search set to search by itself – with a document it still asks.
+  # Web search set to search by itself: with a document too (one switch
+  # for everything) – only the query goes out.
   - expect: { any_message_contains: "Classify the user's last message" }
     respond: { text: '{"type": "facts", "query": "Miete Oslo", "topic": "Oslo", "lang": "de"}' }
+  - respond: { text: "Mieten in Oslo sind hoch." }
   # About Ancilo – yet no tools in a conversation with documents.
   - expect: { any_message_contains: "Classify the user's last message" }
     respond: { text: '{"type": "chat", "query": "", "topic": "", "lang": "de"}' }
@@ -586,10 +588,12 @@ steps:
             json!({"prompt": "Wie hoch sind Mieten in Oslo?", "conversation": c}),
         )
         .await;
-    assert_eq!(r["web"]["state"], "proposed", "{r}");
+    assert_eq!(r["web"]["state"], "searched", "{r}");
+    let sent = env.web.requests();
+    assert!(!sent.is_empty(), "the search went out");
     assert!(
-        env.web.requests().is_empty(),
-        "nothing went out without the OK"
+        sent.iter().all(|q| !q.params.to_string().contains("950")),
+        "only the query went out, never the document"
     );
     let r = env
         .op(

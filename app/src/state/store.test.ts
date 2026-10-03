@@ -1,4 +1,4 @@
-import { nextActivity, queriesFor } from "./store";
+import { nextActivity, nextTurn, queriesFor, type LiveTurn } from "./store";
 
 describe("events refresh the right views", () => {
   it.each([
@@ -41,5 +41,24 @@ describe("activity shown while Ancilo works", () => {
     expect(nextActivity(a, ev("session.turn_started"))["c-1"]).toEqual([]);
     // Other subjects are untouched.
     expect(nextActivity({ x: ["keep"] }, ev("assistant.thinking"))["x"]).toEqual(["keep"]);
+  });
+});
+
+describe("what the agent says on the way", () => {
+  const ev = (kind: string, data: Record<string, unknown> = {}) => ({ seq: 1, ts: "", kind, subject: "s-1", data });
+  it("is shown at once, with the steps so far – and starts over with the next turn", () => {
+    let t: Record<string, LiveTurn> = {};
+    const step = (kind: string, data: Record<string, unknown> = {}) => {
+      t = nextTurn(t, ev(kind, data)) ?? t;
+    };
+    step("session.turn_started");
+    step("agent.note", { text: "Ich prüfe die PDFs." });
+    step("agent.tool_called", { name: "read_document" });
+    step("agent.tool_called", { name: "read_document" });
+    step("agent.note", { text: "  " });
+    expect(t["s-1"]).toEqual({ notes: ["Ich prüfe die PDFs."], steps: 2 });
+    expect(nextTurn(t, ev("agent.step"))).toBeNull();
+    step("session.turn_started");
+    expect(t["s-1"]).toEqual({ notes: [], steps: 0 });
   });
 });

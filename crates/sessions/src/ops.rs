@@ -75,9 +75,6 @@ pub struct TaskInput {
     pub folder: Option<PathBuf>,
     #[serde(default)]
     pub title: Option<String>,
-    /// read: ask before every change; edit/shell: changes in the copy without asking.
-    #[serde(default)]
-    pub permission: Option<Access>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -303,7 +300,7 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
         "Start a task: with a folder, the agent works in a copy of it and the user keeps the changes or not; without one, files given to it are material and its results are saved where the user wants",
         manage = true,
         conseq = false,
-        |s, i: TaskInput| s.create_task(i.folder.as_deref(), i.title, i.permission)
+        |s, i: TaskInput| s.create_task(i.folder.as_deref(), i.title)
     );
     op!(
         "open_task_folder",

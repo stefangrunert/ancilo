@@ -27,7 +27,7 @@ API keys for cloud providers and the Serper key are stored in the system keychai
 
 **Chat projects and tasks** work the same way: documents are read on this computer in that separate process, a chat project's text is kept in Ancilo's database (and forgotten when you take the project off the list), a task works in a copy of the folder in Ancilo's data folder. Nothing of it goes anywhere else.
 
-**Documents you attach to a chat** are read on this computer, in a separate process without network access; Ancilo keeps only their text (in its database, deleted with the conversation), never a copy of the file. A conversation with a document stays with the AI on this computer for good: no cloud model – not even for its earlier messages – and every web search asks first.
+**Documents you attach to a chat** are read on this computer, in a separate process without network access; Ancilo keeps only their text (in its database, deleted with the conversation), never a copy of the file. A conversation with a document stays with the AI on this computer for good: no cloud model – not even for its earlier messages. Web searches follow the web search switch, as everywhere: off (the default) – each search shows its words and asks first; on – only the search words go out, never the documents themselves (the search words may contain words from them).
 
 ## Claude Code and Codex
 

@@ -211,9 +211,9 @@ describe("SessionView, simple", () => {
     });
     const card = await screen.findByTestId("changes-card");
     expect(screen.getByText("Ancilo worked on it (1 steps).")).toBeInTheDocument();
-    // The access modes are for everyone: "Ask first" or "Approve for me".
+    // The access modes are for everyone: "Confirm each step" or "Work on its own".
     const mode = screen.getByRole("combobox", { name: "Access" });
-    expect(within(mode).getAllByRole("option").map((o) => o.textContent)).toEqual(["Ask first", "Approve for me"]);
+    expect(within(mode).getAllByRole("option").map((o) => o.textContent)).toEqual(["Confirm each step", "Work on its own"]);
     await userEvent.selectOptions(mode, "read");
     await waitFor(() => expect(calls.find((c) => c.op === "update_session")?.input).toEqual({ session: "s-1", permission: "read" }));
     expect(screen.queryByRole("tab", { name: "Terminal" })).toBeNull();

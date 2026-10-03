@@ -16,7 +16,7 @@ import { ModelsPage } from "./components/ModelChoice";
 import { Icon } from "./components/Icon";
 import { Sidebar } from "./components/Sidebar";
 import { WebSearchPage } from "./components/WebSearch";
-import { MonitorAlerts, StatusBar } from "./components/SystemMonitor";
+import { AppSettings, MonitorAlerts, StatusBar } from "./components/SystemMonitor";
 
 // The coding views (with the terminal) load only when opened.
 const SessionView = lazy(() => import("./components/Code").then((m) => ({ default: m.SessionView })));
@@ -118,6 +118,7 @@ function AppHeader({ route, collapsed, onToggle }: { route: Route; collapsed: bo
         <span>{t("nav.system")}</span>
       </button>
       <span className="spacer" data-tauri-drag-region />
+      <AppSettings />
     </header>
   );
 }
