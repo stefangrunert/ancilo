@@ -15,6 +15,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use ancilo_core::{Error, NoInput, OpBuilder, Registry, Result};
+
+pub mod locate;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -58,8 +60,13 @@ pub struct ConnectReport {
 
 impl Clients {
     fn run(&self, bin: &Path, args: &[&str]) -> Result<String> {
-        let out = Command::new(bin)
+        // Found where the user's terminal finds it – the app's own PATH is
+        // bare – and started with that PATH (npm CLIs need `node`).
+        let (program, path) =
+            locate::locate(bin).ok_or_else(|| Error::unavailable(locate::not_installed(bin)))?;
+        let out = Command::new(&program)
             .args(args)
+            .env("PATH", path)
             .envs(self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .stdin(Stdio::null())
             .output()

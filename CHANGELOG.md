@@ -4,6 +4,8 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **Fixed: connecting Claude Code or Codex from the app** failed with "cannot run claude: No such file or directory" – an app starts with a bare search path. Ancilo now finds them where your terminal does (Homebrew, npm, `~/.local/bin`, nvm …), with the `node` npm tools need; if one is not installed, it says so and where to get it.
+
 ## 0.2.0 – 2026-10-03
 
 - **Tasks**: first choose a folder (the dialog opens in Documents), then say what to do – or start from an example. Ancilo works in a copy that holds only what the task changes – a task starts at once, whatever the folder’s size (Documents too); it reads the folder as it is and never writes there. Files dragged onto the input go into the copy – or, if the folder already holds the same file, that one is used; the agent is told which files you gave. You see every change (new, changed, deleted, moved) and keep it, drop it or undo it. Keeping checks the folder first (nothing is written if it changed meanwhile), backs up originals, writes with a journal and rolls back on failure or after a crash. Nothing to set: a task works on its own in its copy; web searches follow the one web search switch, as in chats and coding.
