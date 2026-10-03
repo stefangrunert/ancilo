@@ -7,8 +7,7 @@ import { AddModel } from "./AddModel";
 import { Cockpit } from "./Cockpit";
 import { CompareSection } from "./Compare";
 import { ModelsSection, PrimaryModels } from "./Models";
-import { Connect, Permissions, Updates } from "./Settings";
-import { TasksSection } from "./Tasks";
+import { Connect, Updates } from "./Settings";
 import { StatusDot } from "./ui";
 
 type Model = OpOutput<"list_models">[number];
@@ -86,7 +85,6 @@ export function SystemPage({ models, loaded = true }: { models: Model[]; loaded?
           </header>
           <p className="hint">{t("home.connectHint")}</p>
           <Connect />
-          {pro && <Permissions />}
           <Updates />
         </section>
         <WebSearchPanel />
@@ -94,11 +92,6 @@ export function SystemPage({ models, loaded = true }: { models: Model[]; loaded?
         {pro && chat.length > 1 && (
           <div className="wide">
             <ModelsSection models={models} />
-          </div>
-        )}
-        {pro && (
-          <div className="wide">
-            <TasksSection />
           </div>
         )}
         {pro && chat.length > 1 && (

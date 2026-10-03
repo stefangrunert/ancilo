@@ -15,6 +15,7 @@ async function start(page: Page, daemon: Daemon): Promise<string> {
   // Diffs, terminal and variants are the expert view.
   await daemon.op("set_preferences", { view: "pro" });
   await daemon.open(page);
+  await page.getByRole("tab", { name: "Code" }).click();
   await page.getByRole("button", { name: "Add project" }).click();
   await page.getByText("For experts: type a folder path").click();
   await page.getByRole("textbox", { name: "Project folder" }).fill(dir);

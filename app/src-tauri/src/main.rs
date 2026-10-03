@@ -30,7 +30,7 @@ fn show_window(app: &AppHandle, d: &daemon::Daemon) -> tauri::Result<()> {
     let token = serde_json::to_string(&d.token).unwrap_or_default();
     let origin = d.url.clone();
     let origin2 = d.url.clone();
-    WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(url))
+    let builder = WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(url))
         // Links to the web (sources, serper.dev) open in the user's browser;
         // the window itself never leaves Ancilo.
         .on_new_window(move |url, _| {
@@ -52,8 +52,15 @@ fn show_window(app: &AppHandle, d: &daemon::Daemon) -> tauri::Result<()> {
         .min_inner_size(720.0, 520.0)
         .initialization_script(format!(
             "window.__ANCILO__ = {{ token: {token}, app: true }};"
-        ))
-        .build()?;
+        ));
+    // The page's header is the title bar: the window buttons sit on its left
+    // (centred in its 40 px), setup and system next to them.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(14.0, 20.0));
+    builder.build()?;
     Ok(())
 }
 

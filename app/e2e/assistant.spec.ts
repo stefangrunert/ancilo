@@ -17,7 +17,7 @@ test("the assistant proposes, the user confirms, the effect is visible", async (
   await expect(proposal).toContainText("assign_role");
   // Nothing happened yet.
   expect((await daemon.op("explain_route", { role: "delegation" })).model).not.toBe("coder-q8_0");
-  await expect(proposal).toContainText("From now on coder-q8_0 takes care of the tasks Claude Code or Codex hand over.");
+  await expect(proposal).toContainText("From now on coder-q8_0 takes care of the Coding Tasks Claude Code or Codex hand over.");
   await proposal.getByRole("button", { name: "Yes, do it" }).click();
   await expect(proposal).toContainText("Done.");
   await page.getByRole("button", { name: "System", exact: true }).click();

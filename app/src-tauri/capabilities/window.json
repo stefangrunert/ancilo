@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "title-bar",
+  "description": "The page's header is the window's title bar: dragging it moves the window, a double click zooms it – nothing else of the window API reaches the page (decision 2026-10-03-drei-bereiche).",
+  "windows": ["main"],
+  "remote": { "urls": ["http://127.0.0.1:*/*"] },
+  "permissions": ["core:window:allow-start-dragging", "core:window:allow-internal-toggle-maximize"]
+}

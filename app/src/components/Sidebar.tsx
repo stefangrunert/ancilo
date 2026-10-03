@@ -1,7 +1,9 @@
 import { forwardRef, useState, type HTMLAttributes, type ReactNode } from "react";
 import type { OpOutput } from "../api/client";
 import { useI18n } from "../i18n";
+import { AREAS, type Area } from "../state/area";
 import { navigate, type Route } from "../state/route";
+import { usePro } from "../state/prefs";
 import { useClient, useOp, useRefresh } from "../state/store";
 import { Icon, type IconName } from "./Icon";
 import { useReorder } from "./reorder";
@@ -176,11 +178,49 @@ function sessionDot(s: SessionInfo) {
   return s.status === "running" ? "starting" : s.approvals?.length ? "queued" : s.changes.length ? "running" : "idle";
 }
 
-/** Navigation like in a chat app: new chat, overview, projects with their sessions, conversations. */
-export function Sidebar({ route, onHide }: { route: Route; onHide: () => void }) {
+const AREA_ICON: Record<Area, IconName> = { chat: "message", tasks: "computer", code: "code" };
+
+/** The three areas on top of the left column – symbol and name; only the
+ * symbol when the column is narrow. */
+function AreaTabs({ area, onArea, showCode }: { area: Area; onArea: (a: Area) => void; showCode: boolean }) {
+  const { t } = useI18n();
+  const shown = AREAS.filter((a) => a !== "code" || showCode);
+  const move = (e: React.KeyboardEvent, a: Area) => {
+    const i = shown.indexOf(a);
+    const next = e.key === "ArrowRight" ? shown[(i + 1) % shown.length] : e.key === "ArrowLeft" ? shown[(i + shown.length - 1) % shown.length] : null;
+    if (!next) return;
+    e.preventDefault();
+    onArea(next);
+    document.getElementById(`area-${next}`)?.focus();
+  };
+  return (
+    <div className="area-tabs" role="tablist" aria-label={t("area.label")}>
+      {shown.map((a) => (
+        <button
+          key={a}
+          id={`area-${a}`}
+          type="button"
+          role="tab"
+          aria-selected={a === area}
+          tabIndex={a === area ? 0 : -1}
+          title={t(`area.${a}.hint`)}
+          onClick={() => onArea(a)}
+          onKeyDown={(e) => move(e, a)}
+        >
+          <Icon name={AREA_ICON[a]} size={17} />
+          <span className="text">{t(`area.${a}`)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The left column: the three areas on top, below what belongs to the open one. */
+export function Sidebar({ route, area, onArea, showCode }: { route: Route; area: Area; onArea: (a: Area) => void; showCode: boolean }) {
   const { t } = useI18n();
   const client = useClient();
   const refresh = useRefresh();
+  const pro = usePro();
   const projects = useOp("list_projects");
   const sessions = useOp("list_sessions", {});
   const conversations = useOp("list_conversations");
@@ -222,17 +262,17 @@ export function Sidebar({ route, onHide }: { route: Route; onHide: () => void })
 
   return (
     <nav className="sidebar" aria-label={t("nav.label")}>
-      <div className="sidebar-head">
-        <span className="spacer" style={{ flex: 1 }} />
-        <button type="button" className="icon" aria-label={t("nav.hide")} title={t("nav.hide")} onClick={onHide}>
-          <Icon name="sidebar" />
-        </button>
-      </div>
-      <div className="sidebar-scroll">
-        <NavButton icon="home" label={t("setup.title")} current={route.view === "home"} onClick={() => navigate({ view: "home" })} />
-        <NavButton icon="gear" label={t("nav.system")} current={route.view === "system"} onClick={() => navigate({ view: "system" })} />
-        <NavButton icon="edit" label={t("nav.newChat")} current={route.view === "chat" && route.id === null} onClick={() => navigate({ view: "chat", id: null })} />
+      <AreaTabs area={area} onArea={onArea} showCode={showCode} />
+      <div className="sidebar-scroll" role="tabpanel" aria-labelledby={`area-${area}`}>
+        {area === "chat" && (
+          <NavButton icon="edit" label={t("nav.newChat")} current={route.view === "chat" && route.id === null} onClick={() => navigate({ view: "chat", id: null })} />
+        )}
+        {area === "tasks" && <NavButton icon="plus" label={t("nav.newTask")} current={route.view === "tasks"} onClick={() => navigate({ view: "tasks" })} />}
+        {area === "code" && pro && (
+          <NavButton icon="tool" label="Coding Tasks" current={route.view === "coding-tasks"} onClick={() => navigate({ view: "coding-tasks" })} />
+        )}
 
+        {area === "code" && (
         <div className="nav-group">
           <div className="nav-heading">
             <span>{t("nav.projects")}</span>
@@ -338,7 +378,11 @@ export function Sidebar({ route, onHide }: { route: Route; onHide: () => void })
           </ul>
           {(projects.data ?? []).length === 0 && <p className="nav-empty">{t("nav.noProjects")}</p>}
         </div>
+        )}
 
+        {area === "tasks" && <p className="nav-empty">{t("tasksArea.navEmpty")}</p>}
+
+        {area === "chat" && (
         <div className="nav-group">
           <div className="nav-heading">
             <span>{t("nav.chats")}</span>
@@ -394,6 +438,7 @@ export function Sidebar({ route, onHide }: { route: Route; onHide: () => void })
           </ul>
           {(conversations.data ?? []).length === 0 && <p className="nav-empty">{t("nav.noChats")}</p>}
         </div>
+        )}
         <ErrorNote error={error} onDismiss={() => setError(null)} />
       </div>
       <Confirm text={confirm?.text ?? null} onClose={() => setConfirm(null)} onYes={() => confirm && void act(confirm.run)} />

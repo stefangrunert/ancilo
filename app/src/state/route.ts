@@ -11,6 +11,8 @@ export type Route =
   | { view: "models" }
   | { view: "build" }
   | { view: "web" }
+  | { view: "tasks" }
+  | { view: "coding-tasks" }
   | { view: "chat"; id: string | null; kind?: ChatKind }
   | { view: "project"; root: string }
   | { view: "session"; id: string };
@@ -28,6 +30,10 @@ export function parseRoute(hash: string): Route {
       return { view: "build" };
     case "web":
       return { view: "web" };
+    case "tasks":
+      return { view: "tasks" };
+    case "coding-tasks":
+      return { view: "coding-tasks" };
     case "chat": {
       if (rest[0] === "new" || !arg) {
         const kind = KINDS.find((k) => k === rest[1]);
@@ -56,6 +62,10 @@ export function hrefOf(r: Route): string {
       return "#/build";
     case "web":
       return "#/web";
+    case "tasks":
+      return "#/tasks";
+    case "coding-tasks":
+      return "#/coding-tasks";
     case "chat":
       return r.id ? `#/chat/${encodeURIComponent(r.id)}` : r.kind && r.kind !== "chat" ? `#/chat/new/${r.kind}` : "#/chat/new";
     case "project":

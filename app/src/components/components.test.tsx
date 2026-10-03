@@ -78,7 +78,7 @@ describe("Conversations with the assistant", () => {
     // The proposal, in plain words: runs only after the click, exactly as proposed.
     const proposal = screen.getByRole("group", { name: "Ancilo proposes" });
     expect(proposal).toHaveTextContent("Shall I do this?");
-    expect(proposal).toHaveTextContent("From now on coder takes care of the tasks Claude Code or Codex hand over.");
+    expect(proposal).toHaveTextContent("From now on coder takes care of the Coding Tasks Claude Code or Codex hand over.");
     // The technical form only folded away.
     expect(within(proposal).getByText("assign_role role=delegation model=coder")).not.toBeVisible();
     await userEvent.click(within(proposal).getByRole("button", { name: "Yes, do it" }));
@@ -168,16 +168,57 @@ describe("Quick actions", () => {
   });
 });
 
-describe("Sidebar order", () => {
-  it("puts set up and system first and new chat next to the projects – without a label above", async () => {
-    renderWithDaemon(<App />, base);
+describe("Layout", () => {
+  afterEach(() => at("#/"));
+
+  // covers: M10-AC-01
+  it("has set up and system in the header and the areas on top of the left column", async () => {
+    const simple = { view: "simple", purposes: ["chat"], setup: {}, documents: [] };
+    const { calls } = renderWithDaemon(<App />, { ...base, get_preferences: () => simple });
+    await waitFor(() => expect(calls.some((c) => c.op === "get_preferences")).toBe(true));
+    const header = screen.getByRole("banner");
+    expect(within(header).getAllByRole("button").map((b) => b.textContent)).toEqual(["", "Set up", "System"]);
     const nav = screen.getByRole("navigation", { name: "Navigation" });
-    const buttons = within(nav).getAllByRole("button").map((b) => b.textContent);
-    expect(buttons.slice(1, 4)).toEqual(["Set up", "System", "New chat"]);
-    expect(within(nav).queryByText("Ancilo", { exact: true })).toBeNull();
+    // Code only for those who program: not chosen in the setup, no projects, simple view.
+    const tabs = within(nav).getByRole("tablist", { name: "Areas" });
+    expect(within(tabs).getAllByRole("tab").map((b) => b.textContent)).toEqual(["Chat", "Tasks"]);
+    expect(within(tabs).getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+    expect(within(nav).getByRole("tabpanel")).toHaveTextContent("New chat");
     // A clean sidebar: settings live in the status bar.
     expect(within(nav).queryByRole("switch")).toBeNull();
     expect(within(nav).queryByRole("combobox")).toBeNull();
+    // Arrow keys move between the areas; the page follows.
+    within(tabs).getByRole("tab", { name: "Chat" }).focus();
+    await userEvent.keyboard("{ArrowRight}");
+    await waitFor(() => expect(window.location.hash).toBe("#/tasks"));
+    expect(within(tabs).getByRole("tab", { name: "Tasks" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByTestId("tasks-area")).toBeInTheDocument();
+    // Back to the chat area: it opens where it was.
+    await userEvent.click(within(tabs).getByRole("tab", { name: "Chat" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/chat/new"));
+  });
+
+  // covers: M10-AC-01
+  it("lets the left column be resized by the keyboard, within its limits, and reset by a double click", async () => {
+    renderWithDaemon(<App />, base);
+    const handle = screen.getByRole("separator", { name: "Width of the left column" });
+    expect(handle).toHaveAttribute("aria-valuenow", "264");
+    handle.focus();
+    await userEvent.keyboard("{ArrowRight}{ArrowRight}");
+    expect(handle).toHaveAttribute("aria-valuenow", "284");
+    await userEvent.keyboard("{End}");
+    expect(handle).toHaveAttribute("aria-valuenow", "420");
+    await userEvent.dblClick(handle);
+    expect(handle).toHaveAttribute("aria-valuenow", "264");
+  });
+
+  it("shows the Code area for programmers, with the Coding Tasks in the expert view", async () => {
+    renderWithDaemon(<App />, { ...base, get_preferences: () => ({ view: "pro", purposes: ["chat"], setup: {}, documents: [] }) });
+    const nav = screen.getByRole("navigation", { name: "Navigation" });
+    await userEvent.click(await within(nav).findByRole("tab", { name: "Code" }));
+    await userEvent.click(within(nav).getByRole("button", { name: "Coding Tasks" }));
+    expect(await screen.findByRole("heading", { name: "Coding Tasks" })).toBeInTheDocument();
+    expect(screen.getByText("No Coding Tasks yet.")).toBeInTheDocument();
   });
 });
 
@@ -212,6 +253,8 @@ describe("Sidebar", () => {
     expect(await within(nav).findByRole("button", { name: "wcs" })).toBeInTheDocument();
     // The open session's project shows its sessions.
     expect(await within(nav).findByRole("button", { name: "Rename things" })).toHaveAttribute("aria-current", "page");
+    // The chats are in the chat area.
+    await userEvent.click(within(nav).getByRole("tab", { name: "Chat" }));
     await userEvent.click(await within(nav).findByRole("button", { name: "Delete Which models?" }));
     expect(calls.some((c) => c.op === "delete_conversation")).toBe(false);
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Yes" }));
@@ -291,7 +334,9 @@ describe("Sidebar", () => {
       ...base,
       choose_folder: () => ({ path: "/Users/me/proj" }),
       open_project: (i) => ({ root: i.path, name: "proj", git: true, sessions: [] }),
+      get_preferences: () => ({ view: "simple", purposes: ["code"], setup: {}, documents: [] }),
     });
+    await userEvent.click(await screen.findByRole("tab", { name: "Code" }));
     await userEvent.click(screen.getByRole("button", { name: "Add project" }));
     expect(await screen.findByRole("heading", { name: "Build something" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Choose…" }));

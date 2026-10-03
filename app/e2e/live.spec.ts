@@ -12,7 +12,10 @@ test("changes made elsewhere appear without reloading", async ({ page, daemon })
   await daemon.op("stop_model", { model: "chat-q8_0" });
   await expect(status).toHaveText(/ready/, { timeout: 15_000 });
   await waitStatus(daemon, "chat-q8_0", "ready");
-  // Settings too.
+  // Settings too – what Coding Tasks may do (Code area).
+  await page.getByRole("tab", { name: "Code" }).click();
+  await page.getByRole("button", { name: "Coding Tasks" }).click();
+  await expect(page.getByRole("radio", { name: "run commands" })).toBeChecked();
   await daemon.op("set_permissions", { max_access: "read" });
   await expect(page.getByRole("radio", { name: "read" })).toBeChecked({ timeout: 15_000 });
 });
