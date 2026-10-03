@@ -30,6 +30,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Sandbox for agents and the document reader (bubblewrap)
+        run: |
+          sudo apt-get install -y bubblewrap
+          # Ubuntu blocks unprivileged user namespaces by default; bwrap needs them.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - run: just verify
 
   # The app: end-to-end tests in Chromium and WebKit against a real daemon.
@@ -47,6 +52,11 @@ jobs:
           node-version: 22
       - run: npm ci --prefix app --no-audit --no-fund
       - run: cd app && npx playwright install --with-deps chromium webkit
+      - name: Sandbox for agents and the document reader (bubblewrap)
+        run: |
+          sudo apt-get install -y bubblewrap
+          # Ubuntu blocks unprivileged user namespaces by default; bwrap needs them.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - run: just app-e2e
 
   # The same tests with all outbound network blocked (M0-AC-02).
@@ -65,6 +75,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Sandbox for agents and the document reader (bubblewrap)
+        run: |
+          sudo apt-get install -y bubblewrap
+          # Ubuntu blocks unprivileged user namespaces by default; bwrap needs them.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Fetch and build while online
         run: |
           npm ci --prefix tests/contract --no-audit --no-fund
