@@ -13,7 +13,8 @@ class Ancilo < Formula
 
   def install
     bin.install "bin/ancilo"
-    # Ancilo finds its llama.cpp next to itself: libexec/ancilo/llama-server.
+    # Ancilo finds its llama.cpp and its text recognition next to itself:
+    # libexec/ancilo/llama-server, libexec/ancilo/ancilo-ocr.
     libexec.install "libexec/ancilo"
     doc.install Dir["share/doc/ancilo/*"]
   end

@@ -1,5 +1,6 @@
 //! Text from the user's documents: PDF (page by page), Word, spreadsheets
-//! (sheet by sheet) and plain text. Runs in a process of its own (see
+//! (sheet by sheet) and plain text; pictures and scanned PDFs get their text
+//! from recognition (see [`crate::ocr`], macOS). Runs in a process of its own (see
 //! [`crate::Extractor`]): a broken file cannot take Ancilo down with it.
 //!
 //! Everything has limits – file size, unpacked size, text, rows – and what
@@ -28,6 +29,8 @@ pub enum Kind {
     Pdf,
     Word,
     Spreadsheet,
+    /// A photo or scan (JPEG, PNG, HEIC, TIFF, WebP) – text by recognition.
+    Image,
 }
 
 /// Where a part of a document is – for the source an answer names.
@@ -49,8 +52,10 @@ pub struct Part {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Warning {
-    /// A PDF without text – probably scanned (text recognition comes later).
+    /// No text found – a scan or picture whose text could not be recognized.
     NoText,
+    /// The text was recognized in a picture or scan – it may have mistakes.
+    Recognized,
     /// Only the first part of the text was kept.
     Shortened,
     /// Only the first rows of a sheet were kept.
@@ -80,6 +85,12 @@ pub fn kind_of(name: &str) -> Option<Kind> {
         "xlsx" | "xlsm" | "xls" | "ods" => Kind::Spreadsheet,
         "txt" | "md" | "markdown" | "csv" | "tsv" | "json" | "xml" | "yaml" | "yml" | "log"
         | "rtf" | "html" | "htm" | "eml" => Kind::Text,
+        // Text recognition is there on macOS only.
+        "jpg" | "jpeg" | "png" | "heic" | "heif" | "tif" | "tiff" | "webp"
+            if cfg!(target_os = "macos") =>
+        {
+            Kind::Image
+        }
         _ => return None,
     })
 }
@@ -116,13 +127,24 @@ pub fn extract(name: &str, bytes: &[u8]) -> Result<Extracted> {
     }
     let kind = kind_of(name).ok_or_else(|| {
         Error::invalid(format!(
-            "Ancilo cannot read {name} – it reads PDF, Word (.docx), Excel, CSV and text files"
+            "Ancilo cannot read {name} – it reads PDF, Word (.docx), Excel, CSV and text files{}",
+            if cfg!(target_os = "macos") {
+                ", and pictures (JPEG, PNG, HEIC)"
+            } else {
+                ""
+            }
         ))
     })?;
     let mut doc = match kind {
         Kind::Pdf => pdf(name, bytes)?,
         Kind::Word => word(name, bytes)?,
         Kind::Spreadsheet => spreadsheet(name, bytes)?,
+        // The text comes from recognition (in its own process, see `ocr`).
+        Kind::Image => Extracted {
+            kind,
+            parts: Vec::new(),
+            warnings: vec![Warning::NoText],
+        },
         Kind::Text => Extracted {
             kind,
             parts: vec![Part {
@@ -137,7 +159,7 @@ pub fn extract(name: &str, bytes: &[u8]) -> Result<Extracted> {
 }
 
 /// Keeps at most [`MAX_CHARS`] of text.
-fn limit(doc: &mut Extracted) {
+pub(crate) fn limit(doc: &mut Extracted) {
     let mut left = MAX_CHARS;
     let mut cut = false;
     doc.parts.retain_mut(|p| {
@@ -467,7 +489,7 @@ pub(crate) mod tests {
 
     #[test]
     fn says_what_it_cannot_read_and_what_it_left_out() {
-        let e = extract("photo.heic", b"x").unwrap_err();
+        let e = extract("song.mp3", b"x").unwrap_err();
         assert!(e.message().contains("reads PDF, Word"), "{}", e.message());
         let e = extract("broken.pdf", b"not a pdf").unwrap_err();
         assert!(

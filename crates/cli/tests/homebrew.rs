@@ -95,6 +95,7 @@ fn homebrew_installs_the_formula_and_the_cask() {
     run("brew", &["install", "--cask", &format!("{tap}/ancilo-app")]);
     assert!(Path::new("/Applications/Ancilo.app/Contents/MacOS/ancilo").is_file());
     assert!(Path::new("/Applications/Ancilo.app/Contents/MacOS/llama-server").is_file());
+    assert!(Path::new("/Applications/Ancilo.app/Contents/MacOS/ancilo-ocr").is_file());
     assert!(run("ancilo", &["--version"]).contains(version));
     run("brew", &["uninstall", "--cask", "ancilo-app"]);
     run("brew", &["untap", tap]);

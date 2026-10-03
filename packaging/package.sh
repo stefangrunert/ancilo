@@ -34,6 +34,9 @@ if [ ! -x "$llama_out/llama-server" ]; then
     "$root/packaging/build-llama.sh" "$llama_out" "$out/work"
 fi
 
+echo "== text recognition (ancilo-ocr)"
+"$root/packaging/build-ocr.sh" "$out/ocr/ancilo-ocr"
+
 echo "== third-party notices"
 cargo run -q --locked -p xtask --manifest-path "$root/Cargo.toml" -- notices > "$out/THIRD_PARTY_NOTICES.txt"
 
@@ -43,11 +46,12 @@ rm -rf "$stage"
 mkdir -p "$stage/bin" "$stage/libexec/ancilo" "$stage/share/doc/ancilo"
 install -m 0755 "$CARGO_TARGET_DIR/release/ancilo" "$stage/bin/ancilo"
 install -m 0755 "$llama_out/llama-server" "$stage/libexec/ancilo/llama-server"
+install -m 0755 "$out/ocr/ancilo-ocr" "$stage/libexec/ancilo/ancilo-ocr"
 install -m 0644 "$root/LICENSE" "$root/README.md" "$root/PRIVACY.md" "$out/THIRD_PARTY_NOTICES.txt" "$llama_out/LICENSE-llama.cpp" "$stage/share/doc/ancilo/"
 
 # Local builds are ad-hoc signed so they start on this Mac; releases are
 # signed with the Developer ID afterwards (packaging/sign.sh).
-codesign --force --sign - "$stage/bin/ancilo" "$stage/libexec/ancilo/llama-server" 2>/dev/null || true
+codesign --force --sign - "$stage/bin/ancilo" "$stage/libexec/ancilo/llama-server" "$stage/libexec/ancilo/ancilo-ocr" 2>/dev/null || true
 
 # Normalized archive: sorted entries, fixed times, owner and permissions.
 find "$stage" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} + 2>/dev/null || find "$stage" -exec touch -h -t "$(date -r "$SOURCE_DATE_EPOCH" +%Y%m%d%H%M.%S)" {} +

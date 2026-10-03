@@ -29,6 +29,8 @@ API keys for cloud providers and the Serper key are stored in the system keychai
 
 **Documents you attach to a chat** are read on this computer, in a separate process without network access; Ancilo keeps only their text (in its database, deleted with the conversation), never a copy of the file. A conversation with a document stays with the AI on this computer for good: no cloud model – not even for its earlier messages. Web searches follow the web search switch, as everywhere: off (the default) – each search shows its words and asks first; on – only the search words go out, never the documents themselves (the search words may contain words from them).
 
+**Pictures and scans** (photos of receipts, scanned PDFs) get their text from the text recognition built into macOS (Vision), in a separate sandboxed process without network access. Nothing is uploaded.
+
 ## Claude Code and Codex
 
 When you connect Claude Code or Codex, they call Ancilo locally (MCP). `ancilo claude` starts Claude Code against the local model with a separate configuration directory, so your Claude account credentials are never sent to Ancilo.

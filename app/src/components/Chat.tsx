@@ -125,7 +125,7 @@ export function Composer({
               type="file"
               multiple
               hidden
-              accept=".pdf,.docx,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt,.md,.markdown,.json,.xml,.yaml,.yml,.log,.html,.htm,.eml"
+              accept=".pdf,.docx,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt,.md,.markdown,.json,.xml,.yaml,.yml,.log,.html,.htm,.eml,.jpg,.jpeg,.png,.heic,.heif,.tif,.tiff,.webp"
               onChange={(e) => {
                 take(e.target.files);
                 e.target.value = "";

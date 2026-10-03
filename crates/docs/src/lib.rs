@@ -8,6 +8,7 @@
 
 pub mod extract;
 pub mod library;
+pub mod ocr;
 pub mod write;
 
 use std::collections::HashSet;
@@ -39,6 +40,8 @@ pub struct Extractor {
     bin: Option<PathBuf>,
     scratch: PathBuf,
     hidden: Vec<PathBuf>,
+    /// The text recognition helper (`None`: pictures and scans stay without text).
+    ocr: Option<PathBuf>,
 }
 
 impl Extractor {
@@ -49,7 +52,19 @@ impl Extractor {
             bin,
             scratch,
             hidden,
+            ocr: None,
         }
+    }
+
+    /// Recognizes text in pictures and scanned PDFs with `helper` (see [`ocr`]).
+    pub fn with_ocr(mut self, helper: Option<PathBuf>) -> Self {
+        self.ocr = helper;
+        self
+    }
+
+    /// Whether pictures and scans get their text recognized here.
+    pub fn recognizes(&self) -> bool {
+        self.ocr.is_some()
     }
 
     /// A place of its own for one reading (the sandbox may write there).
@@ -63,8 +78,17 @@ impl Extractor {
 
     /// Reads `file`; `workdir` (from [`Self::workdir`]) is removed afterwards.
     pub async fn read(&self, file: &Path, workdir: &Path) -> Result<Extracted> {
-        let result = match &self.bin {
-            Some(bin) => self.read_apart(bin, file, workdir).await,
+        let result = self.read_in(file, workdir).await;
+        std::fs::remove_dir_all(workdir).ok();
+        result
+    }
+
+    async fn read_in(&self, file: &Path, workdir: &Path) -> Result<Extracted> {
+        let mut doc = match &self.bin {
+            Some(bin) => {
+                let file = self.inside(file, workdir)?;
+                self.read_apart(bin, &file, workdir).await?
+            }
             None => {
                 let file = file.to_path_buf();
                 tokio::task::spawn_blocking(move || {
@@ -72,37 +96,51 @@ impl Extractor {
                         .unwrap_or_else(|_| Err(Error::invalid("this file could not be read")))
                 })
                 .await
-                .map_err(Error::internal)?
+                .map_err(Error::internal)??
             }
         };
-        std::fs::remove_dir_all(workdir).ok();
-        result
+        // A picture or a scan: its text by recognition.
+        if let Some(helper) = &self.ocr
+            && ocr::wanted(&doc)
+        {
+            let file = self.inside(file, workdir)?;
+            match ocr::recognize(helper, &file, workdir).await {
+                Ok(pages) => ocr::merge(&mut doc, pages),
+                Err(e) => tracing::warn!(error = %e.message(), "text recognition failed"),
+            }
+        }
+        Ok(doc)
+    }
+
+    /// `file` inside `workdir` – the reading processes see only their own
+    /// place: a document from elsewhere is put there first (a clone on APFS).
+    /// Ancilo's own data is never handed over.
+    fn inside(&self, file: &Path, workdir: &Path) -> Result<PathBuf> {
+        if file.starts_with(workdir) {
+            return Ok(file.to_path_buf());
+        }
+        let real = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+        if self
+            .hidden
+            .iter()
+            .any(|h| real.starts_with(std::fs::canonicalize(h).unwrap_or_else(|_| h.clone())))
+        {
+            return Err(Error::PermissionDenied(
+                "Ancilo's own data is not read as a document".into(),
+            ));
+        }
+        let name = file.file_name().unwrap_or_default();
+        let inside = workdir.join(name);
+        if !inside.exists() {
+            std::fs::copy(file, &inside).map_err(|e| {
+                Error::invalid(format!("cannot read {}: {e}", name.to_string_lossy()))
+            })?;
+        }
+        Ok(inside)
     }
 
     async fn read_apart(&self, bin: &Path, file: &Path, workdir: &Path) -> Result<Extracted> {
-        // The reader sees only its own place: a document from elsewhere is
-        // put there first (a clone on APFS).
-        let file =
-            if file.starts_with(workdir) {
-                file.to_path_buf()
-            } else {
-                // Ancilo's own data is never handed to the reader.
-                let real = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-                if self.hidden.iter().any(|h| {
-                    real.starts_with(std::fs::canonicalize(h).unwrap_or_else(|_| h.clone()))
-                }) {
-                    return Err(Error::PermissionDenied(
-                        "Ancilo's own data is not read as a document".into(),
-                    ));
-                }
-                let name = file.file_name().unwrap_or_default();
-                let inside = workdir.join(name);
-                std::fs::copy(file, &inside).map_err(|e| {
-                    Error::invalid(format!("cannot read {}: {e}", name.to_string_lossy()))
-                })?;
-                inside
-            };
-        let mut cmd = reader_command(bin, &file, workdir, &self.hidden)?;
+        let mut cmd = reader_command(bin, file, workdir, &self.hidden)?;
         cmd.current_dir(workdir)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -570,5 +608,52 @@ mod tests {
         assert!(e.message().contains("reads PDF, Word"), "{}", e.message());
         let e = a.add_path(Path::new("relative.pdf")).await.unwrap_err();
         assert!(e.message().contains("full path"));
+    }
+
+    // covers: M10-AC-02
+    /// A photo of a receipt and a scanned PDF get their text – recognized on
+    /// this computer, in the sandbox, marked as recognized.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn pictures_and_scans_get_their_text_recognized() {
+        let Some(helper) = ocr::helper(None) else {
+            eprintln!("no text recognition helper in this build (swiftc missing)");
+            return;
+        };
+        let t = tempfile::tempdir().unwrap();
+        let ex = Extractor::new(None, t.path().join("scratch"), Vec::new()).with_ocr(Some(helper));
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let photo = ex
+            .read(&fixtures.join("receipt.jpg"), &ex.workdir().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(photo.kind, Kind::Image);
+        assert_eq!(photo.warnings, [Warning::Recognized]);
+        assert_eq!(photo.parts.len(), 1);
+        assert!(
+            photo.parts[0].text.contains("Summe 6,30 EUR"),
+            "{:?}",
+            photo.parts
+        );
+        assert_eq!(photo.parts[0].at, None);
+        let scan = ex
+            .read(&fixtures.join("scan.pdf"), &ex.workdir().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(scan.kind, Kind::Pdf);
+        assert_eq!(scan.warnings, [Warning::Recognized]);
+        assert_eq!(scan.parts[0].at, Some(Locator::Page(1)));
+        assert!(
+            scan.parts[0].text.contains("Datum 21.10.2022"),
+            "{:?}",
+            scan.parts
+        );
+        // Without recognition a picture is a document without text.
+        let plain = Extractor::new(None, t.path().join("scratch2"), Vec::new());
+        let photo = plain
+            .read(&fixtures.join("receipt.jpg"), &plain.workdir().unwrap())
+            .await
+            .unwrap();
+        assert!(photo.parts.is_empty() && photo.warnings == [Warning::NoText]);
     }
 }

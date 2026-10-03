@@ -23,7 +23,7 @@ The agent can:
 
 | | |
 |---|---|
-| look | list the files, read documents (PDF by page, Word, Excel by sheet, CSV, text), find passages in all of them |
+| look | list the files, read documents (PDF by page, Word, Excel by sheet, CSV, text – and pictures and scans, by text recognition), find passages in all of them (up to 30 pictures per search) |
 | write | new text files (`.txt`, `.md`, `.csv` and other plain text – nothing that runs when opened), Excel files (`write_spreadsheet`: numbers stay numbers, nothing ever becomes a formula), Word documents (`write_document`) |
 | sort | move and rename files (a file keeps its ending) and folders (up to 2,000 files at once), make folders, delete files |
 

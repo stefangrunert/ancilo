@@ -543,11 +543,19 @@ pub async fn start(
             .ok()
             .filter(|p| p.file_name().is_some_and(|n| n == "ancilo"))
     });
-    let extractor = Arc::new(ancilo_docs::Extractor::new(
-        reader,
-        paths.home().join("tmp").join("documents"),
-        vec![paths.home().to_path_buf()],
-    ));
+    // Text recognition (macOS): the helper next to the program.
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| std::fs::canonicalize(p).ok());
+    let ocr = ancilo_docs::ocr::helper(reader.as_deref().or(exe.as_deref()));
+    let extractor = Arc::new(
+        ancilo_docs::Extractor::new(
+            reader,
+            paths.home().join("tmp").join("documents"),
+            vec![paths.home().to_path_buf()],
+        )
+        .with_ocr(ocr),
+    );
     let web_search = web::WebSearch::new(&config, db.clone(), manager.secrets(), bus.clone());
     let sessions = ancilo_sessions::Sessions::new(
         db.clone(),

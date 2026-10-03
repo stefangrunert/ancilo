@@ -38,6 +38,7 @@ pkg="$out/ancilo-$version-$target"
 mkdir -p "$root/app/src-tauri/binaries"
 cp "$pkg/bin/ancilo" "$root/app/src-tauri/binaries/ancilo-$target"
 cp "$pkg/libexec/ancilo/llama-server" "$root/app/src-tauri/binaries/llama-server-$target"
+cp "$pkg/libexec/ancilo/ancilo-ocr" "$root/app/src-tauri/binaries/ancilo-ocr-$target"
 
 if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
     APPLE_SIGNING_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null |

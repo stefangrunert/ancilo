@@ -61,10 +61,11 @@ sign() {
 for pkg in "$dist"/ancilo-*-aarch64-apple-darwin; do
     [ -d "$pkg" ] && [ "$what" != app ] || continue
     sign "$pkg/libexec/ancilo/llama-server"
+    sign "$pkg/libexec/ancilo/ancilo-ocr"
     sign "$pkg/bin/ancilo"
     (cd "$dist" && ditto -c -k --keepParent "$(basename "$pkg")" "$pkg.zip")
     notary "$pkg.zip"
-    codesign --verify --strict --verbose=2 "$pkg/bin/ancilo" "$pkg/libexec/ancilo/llama-server"
+    codesign --verify --strict --verbose=2 "$pkg/bin/ancilo" "$pkg/libexec/ancilo/llama-server" "$pkg/libexec/ancilo/ancilo-ocr"
     # The archive users download carries the signed binaries (same normalization as package.sh).
     name=$(basename "$pkg")
     epoch=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}

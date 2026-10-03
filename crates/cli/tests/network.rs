@@ -93,6 +93,10 @@ async fn the_package_talks_only_to_this_machine() {
         package.join("libexec/ancilo/llama-server").is_file(),
         "llama.cpp must be in the package"
     );
+    assert!(
+        package.join("libexec/ancilo/ancilo-ocr").is_file(),
+        "text recognition must be in the package"
+    );
     let model = real_model();
     assert!(
         model.is_file(),

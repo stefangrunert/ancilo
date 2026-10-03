@@ -3092,8 +3092,7 @@ export interface components {
             note: string;
             scores: components["schemas"]["JudgeScore"][];
         };
-        /** @enum {string} */
-        Kind: "text" | "pdf" | "word" | "spreadsheet";
+        Kind: ("text" | "pdf" | "word" | "spreadsheet") | "image";
         LeaderboardEntry: {
             /** Format: uint64 */
             duration_p50_ms?: number | null;
@@ -3729,7 +3728,7 @@ export interface components {
         Via: "explicit" | "kind" | "role" | "default" | "ab_test";
         View: "simple" | "pro";
         /** @description Something worth saying about a document that was read. */
-        Warning: "no_text" | "shortened" | "rows_left_out";
+        Warning: "no_text" | "recognized" | "shortened" | "rows_left_out";
         /** @description A web search, as a message shows it. */
         WebNote: {
             /** @description Why the search failed. */

@@ -399,7 +399,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(folder.join("kaputt.pdf"), b"not a pdf").unwrap();
-        std::fs::write(folder.join("foto.jpg"), b"\xff\xd8").unwrap();
+        std::fs::write(folder.join("musik.mp3"), b"ID3").unwrap();
         std::fs::write(folder.join(".hidden/geheim.txt"), "x").unwrap();
         std::fs::write(folder.join("node_modules/readme.md"), "x").unwrap();
         let l = lib(tmp.path());
