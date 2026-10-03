@@ -84,6 +84,15 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
+# Debug builds and tests without debug info: on macOS each build's object
+# files stay in target/debug/deps for it (unpacked debug info) and Cargo
+# never removes old ones – they piled up to 130 GB and 800,000 files and
+# slowed every build and test run. Panics and failed tests still say what
+# and where; for line numbers in backtraces build once with
+# CARGO_PROFILE_DEV_DEBUG=line-tables-only.
+[profile.dev]
+debug = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
