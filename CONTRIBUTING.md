@@ -10,7 +10,7 @@ Thanks for your interest in Ancilo!
 ## Development
 
 ```bash
-just verify       # the gate for every commit: formatting, clippy, tests, app checks (~5 min, offline)
+just verify       # the gate for every commit: formatting, clippy, tests, app checks (~2 min, offline)
 just app-e2e      # app end-to-end tests (Chromium, WebKit)
 just app-dev      # "Ancilo Dev" beside the release: own app, data, port 7425, login item; `ancilo-dev` CLI
 ```
