@@ -461,3 +461,86 @@ steps:
     std::fs::remove_dir_all(&scripts).ok();
     env.stop().await;
 }
+
+/// A model that works keeps working, part two: a larger context fit while
+/// the model ran, but once it stopped its memory did not show as free (on
+/// macOS it lands in the file cache) – the larger one is refused. Then the
+/// model comes back as it ran, not lost to the same measurement.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_model_whose_larger_context_does_not_start_comes_back_as_it_ran() {
+    let scripts = std::env::temp_dir().join(format!("ancilo-back-{}", std::process::id()));
+    std::fs::create_dir_all(&scripts).unwrap();
+    std::fs::write(
+        scripts.join("Long-Q8_0.yaml"),
+        r#"
+steps:
+  - respond: { tool_calls: [{ name: read_file, arguments: { path: "big.txt" } }] }
+  - respond: { tool_calls: [{ name: read_file, arguments: { path: "small.txt" } }] }
+  - respond: { http_error: { status: 400, message: "request (6000 tokens) exceeds the available context size (4096 tokens), try increasing it" } }
+  - respond: { text: "Done." }
+"#,
+    )
+    .unwrap();
+    let env = Env::with_scripts(Some(scripts.clone())).await;
+    let id = env.add("o/Long-GGUF").await;
+    env.op("start_model", json!({"model": id})).await;
+    env.until("running", || async { env.status(&id).await == "running" })
+        .await;
+    let started_with = std::fs::read_to_string(&env.args).unwrap();
+    let models = env.op("list_models", json!({})).await;
+    let runs = models
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == id.as_str())
+        .unwrap()["expected_ram_bytes"]
+        .as_u64()
+        .unwrap();
+    // Enough with the running model's memory counted in; without it, not even
+    // for the model as it runs.
+    std::fs::write(
+        &env.probe,
+        json!({"available_bytes": GIB + runs * 9 / 10, "pressure": "normal", "thermal": "nominal"})
+            .to_string(),
+    )
+    .unwrap();
+    let mut events = env.d.as_ref().unwrap().bus.subscribe();
+    let project = env.home.scratch("project");
+    std::fs::write(
+        project.join("big.txt"),
+        format!("{}TAIL-OF-BIG\n", "a line of the big file\n".repeat(250)),
+    )
+    .unwrap();
+    std::fs::write(project.join("small.txt"), "small").unwrap();
+    let s = env
+        .op("create_session", json!({"cwd": project, "model": id}))
+        .await;
+    // (The fake model starts its script over with each start: how the turn
+    // ends does not matter here – the model does.)
+    env.op(
+        "send_message",
+        json!({"session": s["id"], "text": "Look at the files", "wait": true}),
+    )
+    .await;
+    let mut restarted = 0;
+    while let Ok(e) = events.try_recv() {
+        if e.kind == "instance.starting" && e.subject.as_deref() == Some(id.as_str()) {
+            restarted += 1;
+        }
+    }
+    assert!(restarted >= 1, "stopped for the larger context, then back");
+    assert_eq!(env.status(&id).await, "running", "the model still runs");
+    let ctx = |args: &str| {
+        args.lines()
+            .skip_while(|l| *l != "--ctx-size")
+            .nth(1)
+            .map(String::from)
+    };
+    assert_eq!(
+        ctx(&std::fs::read_to_string(&env.args).unwrap()),
+        ctx(&started_with),
+        "with the context it ran with"
+    );
+    std::fs::remove_dir_all(&scripts).ok();
+    env.stop().await;
+}

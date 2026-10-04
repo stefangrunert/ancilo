@@ -1454,7 +1454,13 @@ fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("ANCILO_LOG").unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new(if daemon { "info" } else { "warn" })
+                // html5ever (reading web pages) warns once per odd element:
+                // thousands of lines for one page, saying nothing to anyone.
+                tracing_subscriber::EnvFilter::new(if daemon {
+                    "info,html5ever=error"
+                } else {
+                    "warn,html5ever=error"
+                })
             }),
         )
         .with_writer(std::io::stderr)

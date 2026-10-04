@@ -85,9 +85,44 @@ fn free_disk(path: &Path) -> u64 {
 /// Memory other programs leave free right now (live – changes as programs
 /// open and close).
 pub fn available_memory_now() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    if let Some(bytes) = macos_available() {
+        return Some(bytes);
+    }
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
     Some(sys.available_memory()).filter(|a| *a > 0)
+}
+
+/// What macOS gives a program that asks for memory now: free pages, purgeable
+/// ones, and the cache of files ("Cached Files" in Activity Monitor) – the
+/// system drops that at once. A model that just stopped lands there too
+/// (its file was mapped). Counting only "free" memory, a 128 GB Mac with
+/// 50 GB of cache looked full.
+#[cfg(target_os = "macos")]
+fn macos_available() -> Option<u64> {
+    let out = std::process::Command::new("/usr/sbin/sysctl")
+        .args([
+            "-n",
+            "hw.pagesize",
+            "vm.page_free_count",
+            "vm.page_purgeable_count",
+            "vm.page_pageable_external_count",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let values: Vec<u64> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().parse::<u64>())
+        .collect::<std::result::Result<_, _>>()
+        .ok()?;
+    let [page, free, purgeable, cached] = values[..] else {
+        return None;
+    };
+    Some(page.saturating_mul(free + purgeable + cached)).filter(|b| *b > 0)
 }
 
 /// Detects the hardware, or reads `config.hardware_override` (tests).
@@ -175,5 +210,26 @@ mod tests {
             detect(&config, dir.path()).unwrap().total_ram_bytes,
             16 * GIB
         );
+    }
+
+    /// What macOS gives a program now counts the file cache too: never less
+    /// than the free memory alone, never more than the machine has.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn available_memory_counts_what_macos_gives_back() {
+        let ours = macos_available().expect("macOS reports its memory");
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        assert!(ours <= sys.total_memory(), "{ours} > total");
+        let out = std::process::Command::new("/usr/sbin/sysctl")
+            .args(["-n", "hw.pagesize", "vm.page_free_count"])
+            .output()
+            .unwrap();
+        let v: Vec<u64> = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| l.trim().parse().unwrap())
+            .collect();
+        assert!(ours >= v[0] * v[1], "at least the free pages");
+        println!("available now: {:.1} GB", ours as f64 / (1u64 << 30) as f64);
     }
 }

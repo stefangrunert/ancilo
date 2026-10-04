@@ -2,7 +2,7 @@
 //!
 //! Every public method backs an operation (see [`crate::ops`]).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -248,6 +248,9 @@ struct Inner {
     busy: Mutex<HashMap<String, usize>>,
     /// Models an agent is working with (see [`ModelManager::begin_work`]).
     working: Mutex<HashMap<String, usize>>,
+    /// Models coming back as they ran a moment ago (a larger context did not
+    /// start): only an emergency keeps them from it.
+    restoring: Mutex<HashSet<String>>,
     /// Serialises on-demand loading so two requests do not evict each other.
     loading: tokio::sync::Mutex<()>,
     /// How much of the computer Ancilo may take.
@@ -417,6 +420,7 @@ impl ModelManager {
                 last_used: Default::default(),
                 busy: Default::default(),
                 working: Default::default(),
+                restoring: Default::default(),
                 loading: Default::default(),
                 resources: Mutex::new(ResourceSettings::default()),
                 guard: Mutex::new(GuardLog::default()),
@@ -772,6 +776,15 @@ impl ModelManager {
             let fits_budget = used + need <= budget;
             let admitted = resources::admit(&settings, &state, need, reclaimable);
             if fits_budget && admitted.is_ok() {
+                return Ok(());
+            }
+            // It ran like this a moment ago – the memory it gave back may
+            // not show as free yet. Only an emergency keeps it away.
+            if fits_budget
+                && state.pressure != resources::Pressure::Critical
+                && self.inner.restoring.lock().unwrap().contains(id)
+            {
+                tracing::info!(model = %id, why = %admitted.err().unwrap_or_default(), "back as it ran a moment ago");
                 return Ok(());
             }
             if evict
@@ -1984,7 +1997,10 @@ impl ModelManager {
             self.wait_for_memory(&r.id, r.plan.expected_ram_bytes, Duration::from_secs(15))
                 .await;
             if running {
-                self.ensure_running(&r.id, timeout).await?;
+                self.inner.restoring.lock().unwrap().insert(r.id.clone());
+                let back = self.ensure_running(&r.id, timeout).await;
+                self.inner.restoring.lock().unwrap().remove(&r.id);
+                back?;
             }
             return Ok(false);
         }

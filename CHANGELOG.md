@@ -4,6 +4,8 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **Fixed: a loaded model was lost when its conversation grew** – "needs about 41.6 GB, but only about 33 GB are free" on a Mac with 128 GB. Ancilo counted only "free" memory, not the file cache macOS hands back at once (where a stopped model's memory lands, too). It now counts what macOS gives a program, and a model whose larger context does not start always comes back as it ran (unless memory is critically short).
+
 ## 0.3.0 – 2026-10-03
 
 - **A proper install window**: the DMG opens a styled window – Ancilo on the left, Applications on the right, an arrow and one line in English and German between them; no toolbar, nothing hidden in sight (also with hidden files shown). Readable in light and dark mode.
