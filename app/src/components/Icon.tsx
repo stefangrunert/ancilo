@@ -21,6 +21,7 @@ const paths = {
   gear: "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4",
   globe: "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9s1.3-6.4 3.8-9z",
   help: "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.7M12 16.8v.2",
+  update: "M12 4v11M7 10l5 5 5-5M5 20h14",
 } as const;
 
 export type IconName = keyof typeof paths;

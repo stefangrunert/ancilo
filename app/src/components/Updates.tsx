@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 import { useClient, useOp, useRefresh } from "../state/store";
+import { Icon } from "./Icon";
 import { Dialog, ErrorNote } from "./ui";
 
 /** What the app's updater says (Tauri, `update_state`). */
@@ -160,7 +161,7 @@ export function UpdateButton() {
     return (
       <>
         <button type="button" className="header-link update-ready" data-testid="update-button" onClick={() => setOpen(true)}>
-          <span className="update-dot" aria-hidden="true" />
+          <Icon name="update" />
           <span>{t("updates.available", { version: view.available.version })}</span>
         </button>
         <UpdateDialog open={open} onClose={() => setOpen(false)} version={view.available.version} notes={view.available.notes} install={install} />
@@ -177,6 +178,7 @@ export function UpdateButton() {
       disabled={view.checking}
       onClick={() => void check()}
     >
+      <Icon name="update" />
       <span>{label}</span>
     </button>
   );
