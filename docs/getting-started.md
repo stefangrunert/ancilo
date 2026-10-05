@@ -8,7 +8,7 @@ Ancilo runs local language models on your Mac (Apple Silicon) or Linux machine a
 
 ## Install and add a first model
 
-**In the app:** the first start asks what you want to use Ancilo for (chat and writing, programming, your own documents), looks at your computer – its memory, what other programs use right now, how fast its chip is – and recommends the model that fits, with two or three alternatives. One click downloads and starts it. Later: *Overview → Find another model*. The same recommendation from the command line: `ancilo op recommend_models '{"purposes": ["chat"]}'`.
+**In the app:** the first start asks what you want to use Ancilo for (chat and writing, programming, your own documents), looks at your computer – its memory, what other programs use right now, how fast its chip is – and recommends the model that fits, with two or three alternatives. One click downloads and starts it. Later: *Set up → The AI for your computer → Change*. The same recommendation from the command line: `ancilo op recommend_models '{"purposes": ["chat"]}'`.
 
 **From the command line:**
 
