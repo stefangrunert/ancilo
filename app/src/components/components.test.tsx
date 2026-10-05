@@ -464,22 +464,73 @@ describe("Views", () => {
 });
 
 describe("Updates", () => {
-  it("is only shown in the desktop app, off by default, and saves the choice", async () => {
-    const { Updates } = await import("./Settings");
-    const settings = { auto_check: false };
-    const first = renderWithDaemon(<Updates />, { get_update_settings: () => settings, set_update_settings: (i) => Object.assign(settings, i) });
-    expect(first.container).toBeEmptyDOMElement();
-    first.unmount();
+  const setNative = (state: Record<string, unknown>, invoked: string[]) => {
     window.__ANCILO__ = { token: "t", app: true };
-    try {
-      const { calls } = renderWithDaemon(<Updates />, { get_update_settings: () => settings, set_update_settings: (i) => Object.assign(settings, i) });
-      const box = await screen.findByRole("checkbox", { name: /Look for updates automatically/ });
-      expect(box).not.toBeChecked();
-      await userEvent.click(box);
-      await waitFor(() => expect(calls.find((c) => c.op === "set_update_settings")?.input).toEqual({ auto_check: true }));
-    } finally {
-      delete window.__ANCILO__;
-    }
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd) => {
+        invoked.push(cmd);
+        if (cmd === "check_update") return { ...state, available: { version: "0.4.5", notes: "- **Faster chats**: answers sooner.\n- **Fixed: x** y." } };
+        return state;
+      },
+    };
+  };
+  afterEach(() => {
+    delete window.__ANCILO__;
+    delete window.__TAURI_INTERNALS__;
+  });
+  const current = { configured: true, current: "0.4.4", available: null, checking: false };
+
+  it("is not there outside the app or in Ancilo Dev", async () => {
+    const { UpdateButton, UpdatesPanel } = await import("./Updates");
+    const r = renderWithDaemon(<><UpdateButton /><UpdatesPanel /></>, { get_update_settings: () => ({ auto_check: false, last_checked: null }) });
+    expect(r.container).toBeEmptyDOMElement();
+    r.unmount();
+    setNative({ ...current, configured: false }, []);
+    const dev = renderWithDaemon(<><UpdateButton /><UpdatesPanel /></>, { get_update_settings: () => ({ auto_check: false, last_checked: null }) });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(dev.container).toBeEmptyDOMElement();
+  });
+
+  it("checks on a click while Ancilo does not look by itself, then offers the update", async () => {
+    const { UpdateButton } = await import("./Updates");
+    const invoked: string[] = [];
+    setNative(current, invoked);
+    renderWithDaemon(<UpdateButton />, { get_update_settings: () => ({ auto_check: false, last_checked: null }), list_sessions: () => [] });
+    const button = await screen.findByRole("button", { name: "Check for updates" });
+    expect(invoked).toEqual(["update_state"]);
+    await userEvent.click(button);
+    const update = await screen.findByRole("button", { name: /Update to 0.4.5/ });
+    expect(invoked).toContain("check_update");
+    await userEvent.click(update);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Faster chats")).toBeInTheDocument();
+    expect(invoked).not.toContain("install_update");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Install and restart" }));
+    await waitFor(() => expect(invoked).toContain("install_update"));
+  });
+
+  it("stays out of the way while Ancilo looks by itself and all is current", async () => {
+    const { UpdateButton } = await import("./Updates");
+    setNative(current, []);
+    const r = renderWithDaemon(<UpdateButton />, { get_update_settings: () => ({ auto_check: true, last_checked: "2026-10-05T10:00:00Z" }) });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(r.container).toBeEmptyDOMElement();
+  });
+
+  it("System › Updates: the version, the daily look switched on, a check now", async () => {
+    const { UpdatesPanel } = await import("./Updates");
+    setNative(current, []);
+    const settings = { auto_check: false, last_checked: null };
+    const { calls } = renderWithDaemon(<UpdatesPanel />, {
+      get_update_settings: () => settings,
+      set_update_settings: (i) => Object.assign(settings, i),
+    });
+    expect(await screen.findByText(/This is Ancilo 0.4.4/)).toBeInTheDocument();
+    const box = screen.getByRole("checkbox", { name: /Look for updates automatically/ });
+    expect(box).not.toBeChecked();
+    await userEvent.click(box);
+    await waitFor(() => expect(calls.find((c) => c.op === "set_update_settings")?.input).toEqual({ auto_check: true }));
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeInTheDocument();
   });
 });
 

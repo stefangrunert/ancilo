@@ -6575,8 +6575,9 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @description Check for updates automatically (default: off – only on request). */
                         auto_check: boolean;
+                        /** @description The app's last update check (noted with its log entry). */
+                        last_checked?: string | null;
                     };
                 };
             };

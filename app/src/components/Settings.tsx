@@ -99,37 +99,3 @@ export function Connect() {
     </div>
   );
 }
-
-/**
- * Only in the desktop app: may it look for updates automatically? Checking
- * is network traffic, so it is off until the user allows it; "Check for
- * Updates…" in the menu works either way.
- */
-export function Updates() {
-  const { t } = useI18n();
-  const client = useClient();
-  const refresh = useRefresh();
-  const settings = useOp("get_update_settings", undefined, Boolean(window.__ANCILO__?.app));
-  const [error, setError] = useState<unknown>(null);
-  if (!window.__ANCILO__?.app || !settings.data) return null;
-  return (
-    <div className="row">
-      <label>
-        <input
-          type="checkbox"
-          checked={settings.data.auto_check}
-          onChange={async (e) => {
-            try {
-              await client.op("set_update_settings", { auto_check: e.target.checked });
-              await refresh("get_update_settings");
-            } catch (err) {
-              setError(err);
-            }
-          }}
-        />
-        {t("updates.auto")}
-      </label>
-      <ErrorNote error={error} onDismiss={() => setError(null)} />
-    </div>
-  );
-}

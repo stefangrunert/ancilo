@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { UpdateButton } from "./components/Updates";
 import { useI18n } from "./i18n";
 import { Boundary } from "./components/ui";
 import { useLive, useOp } from "./state/store";
@@ -122,6 +123,7 @@ function AppHeader({ route, collapsed, onToggle }: { route: Route; collapsed: bo
         <Icon name="help" />
         <span>{t("nav.manual")}</span>
       </a>
+      <UpdateButton />
       <span className="spacer" data-tauri-drag-region />
       <AppSettings />
     </header>

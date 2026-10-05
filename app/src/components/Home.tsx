@@ -7,7 +7,8 @@ import { AddModel } from "./AddModel";
 import { Cockpit } from "./Cockpit";
 import { CompareSection } from "./Compare";
 import { ModelsSection, PrimaryModels } from "./Models";
-import { Connect, Updates } from "./Settings";
+import { Connect } from "./Settings";
+import { UpdatesPanel } from "./Updates";
 import { OutboundLog } from "./OutboundLog";
 import { RemoveAncilo } from "./RemoveAncilo";
 import { StatusDot } from "./ui";
@@ -87,7 +88,6 @@ export function SystemPage({ models, loaded = true }: { models: Model[]; loaded?
           </header>
           <p className="hint">{t("home.connectHint")}</p>
           <Connect />
-          <Updates />
         </section>
         <WebSearchPanel />
         <Cockpit />
@@ -101,6 +101,7 @@ export function SystemPage({ models, loaded = true }: { models: Model[]; loaded?
             <CompareSection models={models} />
           </div>
         )}
+        <UpdatesPanel />
         <OutboundLog />
         <RemoveAncilo />
       </div>

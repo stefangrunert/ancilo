@@ -12,8 +12,6 @@ mod remove;
 mod update;
 mod variant;
 
-use std::sync::{Arc, Mutex};
-
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -76,29 +74,6 @@ fn show_window_at(app: &AppHandle, d: &daemon::Daemon, route: Option<&str>) -> t
         .traffic_light_position(tauri::LogicalPosition::new(14.0, 20.0));
     builder.build()?;
     Ok(())
-}
-
-/// Looks for an update; a found one is offered in the menu ("Install … and
-/// restart") – installing waits for the user's click.
-async fn offer(
-    app: &AppHandle,
-    pending: &Mutex<Option<tauri_plugin_updater::Update>>,
-    item: &MenuItem<tauri::Wry>,
-    asked: bool,
-) {
-    match update::check(app, asked).await {
-        Ok(Some(u)) => {
-            let _ = item.set_text(format!("Install Ancilo {} and Restart", u.version));
-            *pending.lock().unwrap() = Some(u);
-        }
-        Ok(None) if asked => {
-            let _ = item.set_text("Ancilo is up to date");
-        }
-        Err(e) if asked => {
-            let _ = item.set_text(format!("Update check failed: {e}"));
-        }
-        _ => {}
-    }
 }
 
 async fn tokio_sleep(d: std::time::Duration) {
@@ -241,6 +216,25 @@ async fn remove_ancilo(app: AppHandle, keep_data: bool) -> Result<remove::Outcom
         .map_err(|e| e.to_string())?
 }
 
+/// The header's update button and System › Updates: what is there.
+#[tauri::command]
+fn update_state(app: AppHandle) -> update::View {
+    update::view(&app)
+}
+
+/// Looks for an update now (the user's click).
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<update::View, String> {
+    update::check_now(&app, true).await
+}
+
+/// Installs the found update and restarts (the user's click).
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    update::install_pending(&app).await?;
+    app.restart()
+}
+
 /// Quits the app (after Remove Ancilo: nothing left to run).
 #[tauri::command]
 fn quit(app: AppHandle) {
@@ -269,7 +263,14 @@ fn main() {
             }
             _ => {}
         })
-        .invoke_handler(tauri::generate_handler![remove_ancilo, quit])
+        .manage(update::Updates::default())
+        .invoke_handler(tauri::generate_handler![
+            remove_ancilo,
+            quit,
+            update_state,
+            check_update,
+            install_update
+        ])
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
@@ -317,8 +318,7 @@ fn main() {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &updates, &quit])?;
             let d2 = d.clone();
-            let pending: Arc<Mutex<Option<tauri_plugin_updater::Update>>> = Arc::default();
-            let (p2, u2) = (pending.clone(), updates.clone());
+            *app.state::<update::Updates>().item.lock().unwrap() = Some(updates.clone());
             TrayIconBuilder::with_id("ancilo")
                 .icon(app.default_window_icon().cloned().expect("icon"))
                 .tooltip(variant::NAME)
@@ -329,23 +329,14 @@ fn main() {
                     }
                     // Checking and installing only on the user's click.
                     "update" => {
-                        let (app, pending, item) = (app.clone(), p2.clone(), u2.clone());
+                        let app = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            let ready = pending.lock().unwrap().take();
-                            match ready {
-                                Some(u) => {
-                                    let _ = item.set_text("Installing update…");
-                                    match update::install(&app, u).await {
-                                        Ok(()) => app.restart(),
-                                        Err(e) => {
-                                            let _ = item.set_text(format!("Update failed: {e}"));
-                                        }
-                                    }
+                            if update::view(&app).available.is_some() {
+                                if update::install_pending(&app).await.is_ok() {
+                                    app.restart();
                                 }
-                                None => {
-                                    let _ = item.set_text("Checking for updates…");
-                                    offer(&app, &pending, &item, true).await;
-                                }
+                            } else {
+                                let _ = update::check_now(&app, true).await;
                             }
                         });
                     }
@@ -353,12 +344,15 @@ fn main() {
                     _ => {}
                 })
                 .build(app)?;
-            // Automatically only if the user allowed it (Settings in the app).
-            if update::configured(app.handle()) && !smoke && daemon::auto_update_checks(&d) {
-                let (app, pending, item) = (app.handle().clone(), pending.clone(), updates.clone());
+            // Automatically – at the start and daily – only while the user
+            // allows it (System › Updates; switched on later, it counts too).
+            if update::configured(app.handle()) && !smoke {
+                let (app, d) = (app.handle().clone(), d.clone());
                 tauri::async_runtime::spawn(async move {
                     loop {
-                        offer(&app, &pending, &item, false).await;
+                        if daemon::auto_update_checks(&d) {
+                            let _ = update::check_now(&app, false).await;
+                        }
                         tokio_sleep(std::time::Duration::from_secs(24 * 3600)).await;
                     }
                 });

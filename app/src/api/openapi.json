@@ -9192,18 +9192,23 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": false,
-                  "description": "How the desktop app looks for updates. Checking is network traffic, so it\nhappens automatically only with the user's consent (M9, PRIVACY.md).",
+                  "description": "The settings and when the app last looked for an update.",
                   "properties": {
                     "auto_check": {
-                      "description": "Check for updates automatically (default: off – only on request).",
                       "type": "boolean"
+                    },
+                    "last_checked": {
+                      "description": "The app's last update check (noted with its log entry).",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
                     "auto_check"
                   ],
-                  "title": "UpdateSettings",
+                  "title": "UpdateSettingsView",
                   "type": "object"
                 }
               }

@@ -7,8 +7,111 @@
 //! ("Check for updates…") or automatically only after they allowed it
 //! (`set_update_settings`). Installing always waits for a click.
 
-use tauri::{AppHandle, Runtime};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use tauri::menu::MenuItem;
+use tauri::{AppHandle, Manager, Runtime, Wry};
 use tauri_plugin_updater::{Update, UpdaterExt};
+
+/// What the window (the header's update button, System › Updates) and the
+/// menu bar icon share: a found update, and whether a check runs.
+#[derive(Default)]
+pub struct Updates {
+    pending: Mutex<Option<Update>>,
+    checking: AtomicBool,
+    /// The menu bar icon's item ("Check for Updates…" / "Install … and Restart").
+    pub item: Mutex<Option<MenuItem<Wry>>>,
+}
+
+/// For the window.
+#[derive(Debug, serde::Serialize)]
+pub struct View {
+    /// Updates exist in this build (never in Ancilo Dev).
+    pub configured: bool,
+    pub current: String,
+    pub available: Option<Available>,
+    pub checking: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Available {
+    pub version: String,
+    /// What is new (from the release's changelog).
+    pub notes: Option<String>,
+}
+
+pub fn view(app: &AppHandle) -> View {
+    let u = app.state::<Updates>();
+    View {
+        configured: configured(app),
+        current: app.package_info().version.to_string(),
+        available: u.pending.lock().unwrap().as_ref().map(|p| Available {
+            version: p.version.clone(),
+            notes: p.body.clone(),
+        }),
+        checking: u.checking.load(Ordering::SeqCst),
+    }
+}
+
+fn menu_text(app: &AppHandle, text: &str) {
+    if let Some(item) = app.state::<Updates>().item.lock().unwrap().as_ref() {
+        let _ = item.set_text(text);
+    }
+}
+
+/// Looks for an update (`asked`: the user clicked – else the daily check
+/// they allowed); a found one waits for their click to install.
+pub async fn check_now(app: &AppHandle, asked: bool) -> Result<View, String> {
+    let u = app.state::<Updates>();
+    if u.checking.swap(true, Ordering::SeqCst) {
+        return Ok(view(app));
+    }
+    if asked {
+        menu_text(app, "Checking for updates…");
+    }
+    let found = check(app, asked).await;
+    u.checking.store(false, Ordering::SeqCst);
+    match found {
+        Ok(Some(update)) => {
+            menu_text(
+                app,
+                &format!("Install Ancilo {} and Restart", update.version),
+            );
+            *u.pending.lock().unwrap() = Some(update);
+        }
+        Ok(None) => {
+            *u.pending.lock().unwrap() = None;
+            if asked {
+                menu_text(app, "Ancilo is up to date");
+            }
+        }
+        Err(e) => {
+            if asked {
+                menu_text(app, &format!("Update check failed: {e}"));
+            }
+            return Err(e);
+        }
+    }
+    Ok(view(app))
+}
+
+/// Installs the update found (checking first if none is known); the
+/// caller restarts the app.
+pub async fn install_pending(app: &AppHandle) -> Result<(), String> {
+    if app.state::<Updates>().pending.lock().unwrap().is_none() {
+        check_now(app, true).await?;
+    }
+    let Some(update) = app.state::<Updates>().pending.lock().unwrap().take() else {
+        return Err("Ancilo is up to date".into());
+    };
+    menu_text(app, "Installing update…");
+    let result = install(app, update).await;
+    if let Err(e) = &result {
+        menu_text(app, &format!("Update failed: {e}"));
+    }
+    result
+}
 
 /// Whether the release has an updater key (the owner creates it for a
 /// release). Without one there are no updates.
@@ -80,7 +183,6 @@ fn log<R: Runtime>(
     asked: bool,
     error: Option<&str>,
 ) {
-    use tauri::Manager;
     if let Some(d) = app.try_state::<crate::daemon::Daemon>() {
         let _ = crate::daemon::op_with(
             &d,

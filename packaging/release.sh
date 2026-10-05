@@ -86,8 +86,12 @@ build() {
   node -e '
     const fs = require("fs");
     const [version, repo, sigFile, out] = process.argv.slice(1);
+    // What is new – this version'"'"'s changelog section, for the app'"'"'s update dialog.
+    const log = fs.readFileSync("CHANGELOG.md", "utf8").split(/^## /m);
+    const section = log.find((s) => s.startsWith(version + " ")) || "";
+    const notes = section.split("\n").slice(1).join("\n").trim();
     fs.writeFileSync(out, JSON.stringify({
-      version, pub_date: new Date().toISOString(),
+      version, notes, pub_date: new Date().toISOString(),
       platforms: { "darwin-aarch64": { signature: fs.readFileSync(sigFile, "utf8").trim(),
         url: `https://github.com/${repo}/releases/download/v${version}/Ancilo.app.tar.gz` } }
     }, null, 2));

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { OpOutput } from "../api/client";
+import { UpdatesPanel } from "./Updates";
 import { useI18n, type Key } from "../i18n";
 import { usePreferences, useSetPreferences, type Step } from "../state/prefs";
 import { navigate } from "../state/route";
@@ -357,11 +358,6 @@ export function SetupPage() {
           <div className="card done-card stack">
             <h2>{t("setup.doneTitle")}</h2>
             <p>{t("setup.doneHint")}</p>
-            <div className="row">
-              <button type="button" onClick={() => navigate({ view: "chat", id: null })}>
-                {t("choose.askNow")}
-              </button>
-            </div>
           </div>
           <ul className="checklist">
             {STEPS.map((s) => (
@@ -391,6 +387,7 @@ export function SetupPage() {
               </button>
             </li>
           </ul>
+          <UpdatesPanel />
         </section>
       );
   }

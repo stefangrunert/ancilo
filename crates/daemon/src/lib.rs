@@ -183,6 +183,14 @@ struct UpdateSettings {
     auto_check: bool,
 }
 
+/// The settings and when the app last looked for an update.
+#[derive(Debug, Serialize, JsonSchema)]
+struct UpdateSettingsView {
+    auto_check: bool,
+    /// The app's last update check (noted with its log entry).
+    last_checked: Option<String>,
+}
+
 const AUTO_CHECK: &str = "updates.auto_check";
 
 fn register_update_settings(registry: &mut Registry, db: Db) {
@@ -193,8 +201,9 @@ fn register_update_settings(registry: &mut Registry, db: Db) {
             .handler(move |_ctx, _i: NoInput| {
                 let d = d.clone();
                 async move {
-                    Ok(UpdateSettings {
+                    Ok(UpdateSettingsView {
                         auto_check: d.get_setting(AUTO_CHECK)?.as_deref() == Some("true"),
+                        last_checked: d.get_setting(outbound::LAST_UPDATE_CHECK)?,
                     })
                 }
             }),

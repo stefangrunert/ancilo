@@ -23,6 +23,9 @@ use serde_json::json;
 /// How long entries are kept.
 pub const KEEP_DAYS: i64 = 30;
 
+/// When the app last looked for an update (a setting – the log may be emptied).
+pub const LAST_UPDATE_CHECK: &str = "updates.last_checked";
+
 /// The log in the database.
 #[derive(Clone)]
 pub struct Log {
@@ -250,6 +253,9 @@ pub fn register(registry: &mut Registry, log: Log) {
                         return Err(Error::invalid(
                             "the app logs only its update check and download",
                         ));
+                    }
+                    if i.purpose == Purpose::UpdateCheck && i.error.is_none() {
+                        l.db.set_setting(LAST_UPDATE_CHECK, &Utc::now().to_rfc3339())?;
                     }
                     let url = reqwest_free_host(&i.url);
                     l.record(Departure {

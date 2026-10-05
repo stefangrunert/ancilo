@@ -56,9 +56,8 @@ test("a layperson is led through the setup – the AI runs and Claude Code is co
   // The setup stays the start page – now as the checklist.
   await page.reload();
   await expect(page.getByTestId("setup-checklist")).toBeVisible();
-  // Ask something now.
-  await list.getByRole("button", { name: "Ask something now" }).click();
-  await expect(page.getByRole("textbox", { name: "What should Ancilo do?" })).toBeFocused();
+  // No "Ask something now" in the checklist: the Chat tab is right there.
+  await expect(list.getByRole("button", { name: "Ask something now" })).toHaveCount(0);
 });
 
 // covers: M7-AC-12

@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+- **Updates you can see**: when a new version is there, the header shows *Update to 0.4.5* next to *Manual* – a click shows what is new and installs it with a restart (it warns if a task is still working). While Ancilo does not look by itself, the header has *Check for updates* (a little highlighted after a month without a look). The switch for the daily look moved to a box of its own, **Updates** – in *System* and in the setup – with the version and the last look. Ancilo looks at its start too when the daily look is on. Installing still always waits for your click.
+- The setup checklist no longer has *Ask something now* – the Chat tab is right there.
+
 ## 0.4.4 – 2026-10-05
 
 - **What left this Mac** (*System*): everything Ancilo sent over the internet – web searches and the pages they read, model searches and downloads, the model list, messages to cloud models, update checks – in plain words: what, to whom, when, started by you or by Ancilo itself. A click shows each request in detail: the full address, what was sent, the answer. Kept 30 days on this Mac only, can be emptied; keys are never in it, and models (Claude Code, Codex, the assistant) cannot read it. Every request to the internet goes through one place that writes this log – a test makes sure nothing goes past it.

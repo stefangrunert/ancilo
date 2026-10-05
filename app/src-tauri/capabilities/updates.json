@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updates",
+  "description": "The header's update button and System › Updates: whether an update is there, looking for one on the user's click, installing it on their click.",
+  "windows": ["main"],
+  "remote": { "urls": ["http://127.0.0.1:*/*"] },
+  "permissions": ["allow-update-state", "allow-check-update", "allow-install-update"]
+}
