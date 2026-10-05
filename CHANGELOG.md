@@ -2,7 +2,7 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 0.4.2 – 2026-10-05
 
 - **Security fixes** from an independent review:
   - The coding agent's file tools no longer follow links out of the project. A broken link (to a file that does not exist yet) let `write_file` create a file outside it; `grep` and the file list read and listed files outside through links. Links inside the project work as before.

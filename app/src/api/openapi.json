@@ -3865,7 +3865,7 @@
   },
   "info": {
     "title": "Ancilo control API",
-    "version": "0.4.1"
+    "version": "0.4.2"
   },
   "openapi": "3.1.0",
   "paths": {

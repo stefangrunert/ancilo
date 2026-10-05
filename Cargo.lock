@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "ancilo-daemon",
@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-agent"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "ancilo-gateway",
@@ -102,7 +102,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-assistant"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-agent",
  "ancilo-core",
@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-compare"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-agent",
  "ancilo-core",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-connect"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "chrono",
@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-core"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "chrono",
  "dirs",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-daemon"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-agent",
  "ancilo-assistant",
@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-docs"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-agent",
  "ancilo-core",
@@ -245,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-e2e"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-agent",
  "ancilo-core",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-eval"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "ancilo-testkit",
@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-gateway"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "ancilo-eval",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-index"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "ancilo-gateway",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-mcp"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "ancilo-server",
@@ -348,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-models"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "ancilo-storage",
@@ -376,7 +376,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-server"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "ancilo-storage",
@@ -396,7 +396,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-sessions"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-agent",
  "ancilo-core",
@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-storage"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "chrono",
@@ -438,7 +438,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-tasks"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-agent",
  "ancilo-core",
@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-testkit"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "anyhow",
@@ -479,7 +479,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-web"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ancilo-core",
  "axum",
@@ -4730,7 +4730,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "serde",
