@@ -444,6 +444,19 @@ impl Attachments {
         })
     }
 
+    /// The names of attached documents without any text (a picture without
+    /// recognizable text, a scan that could not be read) – the model must
+    /// say so instead of guessing.
+    pub fn without_text(&self, ids: &[String]) -> Result<Vec<String>> {
+        let mut names = Vec::new();
+        for id in ids {
+            if self.parts(id)?.iter().all(|p| p.text.trim().is_empty()) {
+                names.push(self.view(id)?.name);
+            }
+        }
+        Ok(names)
+    }
+
     /// The text for a question: everything when the documents are short,
     /// else the passages that fit `query` best – in document order, each with
     /// its source (`[file, page 3]`).
@@ -619,6 +632,17 @@ mod tests {
             return;
         };
         let t = tempfile::tempdir().unwrap();
+        // As in the app: the helper inside an app bundle (Foundation reads the
+        // bundle – in a sandbox that forgot it, Vision found nothing).
+        let macos = t.path().join("Ancilo.app/Contents/MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        std::fs::write(
+            macos.parent().unwrap().join("Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>app.ancilo.test</string><key>CFBundleExecutable</key><string>ancilo-app</string></dict></plist>"#,
+        )
+        .unwrap();
+        std::fs::copy(&helper, macos.join("ancilo-ocr")).unwrap();
+        let helper = macos.join("ancilo-ocr");
         let ex = Extractor::new(None, t.path().join("scratch"), Vec::new()).with_ocr(Some(helper));
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
         let photo = ex

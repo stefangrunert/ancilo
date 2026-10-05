@@ -499,6 +499,86 @@ steps:
     env.stop().await;
 }
 
+/// The model's query finds nothing (a small model mangles names): Ancilo
+/// searches once more with the user's own words before answering "not found".
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn nothing_found_searches_again_with_the_users_words() {
+    let script = r#"
+steps:
+  - expect: { any_message_contains: "Classify the user's last message" }
+    respond: { text: '{"type": "facts", "query": "Telemarkgipfel Höhenangabe", "topic": "Telemarkgipfel", "lang": "de"}' }
+  - expect: { any_message_contains: "1883", has_tools: false }
+    respond: { text: "Der Gaustatoppen ist 1883 Meter hoch [1]." }
+"#;
+    let env = Env::start(script).await;
+    env.web.article(
+        "de",
+        "Gaustatoppen",
+        "Gaustatoppen ist mit 1883 Metern der höchste Berg in Telemark.",
+    );
+    env.op(
+        "set_web_search",
+        json!({"provider": "wikipedia", "mode": "auto"}),
+    )
+    .await;
+    let r = env
+        .op(
+            "ask",
+            json!({"prompt": "Wie hoch ist der Gaustatoppen?", "kind": "chat"}),
+        )
+        .await;
+    assert_eq!(
+        r["answer"], "Der Gaustatoppen ist 1883 Meter hoch [1].",
+        "{r}"
+    );
+    assert_eq!(r["web"]["query"], "Wie hoch ist der Gaustatoppen?", "{r}");
+    let searched: Vec<String> = env
+        .web
+        .requests()
+        .iter()
+        .filter_map(|q| q.params["srsearch"].as_str().map(String::from))
+        .collect();
+    assert!(
+        searched.iter().any(|q| q.contains("Telemarkgipfel"))
+            && searched.iter().any(|q| q.contains("Gaustatoppen")),
+        "{searched:?}"
+    );
+    env.stop().await;
+}
+
+/// A document without any text (a photo whose text could not be
+/// recognized): the model is told so and asks for a better one – on a
+/// MacBook Air it guessed instead ("I have no access", or asked about pensions).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_document_without_text_is_said_not_guessed() {
+    let script = r#"
+steps:
+  - expect: { last_user_contains: "Was hat", any_message_contains: "no text could be read" }
+    respond: { text: "Auf dem Foto kann ich keinen Text lesen – schick mir bitte ein schärferes." }
+"#;
+    let env = Env::start(script).await;
+    let d = env.d.as_ref().unwrap();
+    let doc: Value = reqwest::Client::new()
+        .post(format!("{}/api/v1/attachments", d.url()))
+        .query(&[("name", "Beleg.txt")])
+        .bearer_auth(&d.token)
+        .body("   \n  \n")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r = env
+        .op(
+            "ask",
+            json!({"prompt": "Was hat der Einkauf gekostet?", "kind": "chat", "attachments": [doc["id"]]}),
+        )
+        .await;
+    assert!(r["answer"].as_str().unwrap().contains("keinen Text"), "{r}");
+    env.stop().await;
+}
+
 // covers: M10-AC-02
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_chat_answers_from_an_attached_document_and_keeps_it_local() {

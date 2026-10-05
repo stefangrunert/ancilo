@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+- **Fixed: photos and scans had no text in the app.** Text recognition worked from the command line, but inside Ancilo.app its sandbox kept macOS from reading the app itself – every picture came back empty. Found on a MacBook Air; now a receipt photo (JPEG, HEIC) and a scanned letter are read in half a second.
+- **A picture without readable text is said, not guessed**: the AI tells you it cannot read it and asks for a sharper photo (before, a small model claimed to have no access, or guessed).
+- **Web search keeps your words**: a small model sometimes misspelled a name in its search ("Gaustopfes" for "Gaustatoppen") or added a year you never named – now your spelling is used, invented years are dropped, and if nothing is found Ancilo searches once more with your own question.
+
 ## 0.4.3 – 2026-10-05
 
 - **Two people, one Mac**: when someone else on the Mac runs Ancilo too, Ancilo no longer fails to start – it takes the next free port (the other one's stays untouched), and never mistakes the other person's Ancilo for its own.

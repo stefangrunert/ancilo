@@ -62,6 +62,50 @@ pub fn parse_plan(reply: &str) -> Option<Plan> {
     Some(plan)
 }
 
+/// The model's query or topic – with the user's own spelling of the words it
+/// took from the question, and without years the user never named. Measured
+/// on a MacBook Air (Qwen3.5 4B): "Gaustatoppen" became "Gaustopfes" (no
+/// hit, then a made-up answer), and "who is prime minister now" got "2024"
+/// added (articles from back then).
+pub fn faithful(text: &str, prompt: &str) -> String {
+    let said: Vec<&str> = prompt
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let lower = |w: &str| w.to_lowercase();
+    let prefix = |a: &str, b: &str| a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count();
+    let words: Vec<String> = text
+        .split_whitespace()
+        .filter_map(|w| {
+            let core = w.trim_matches(|c: char| !c.is_alphanumeric());
+            let year = core.len() == 4
+                && core.chars().all(|c| c.is_ascii_digit())
+                && (core.starts_with("19") || core.starts_with("20"));
+            if year && !said.contains(&core) {
+                return None;
+            }
+            let l = lower(core);
+            let users = said.iter().find(|s| {
+                let sl = lower(s);
+                sl != l
+                    && sl.chars().count() >= 5
+                    && l.chars().count() >= 4
+                    && prefix(&sl, &l) >= 4
+                    // A compound or an inflection of the user's word is a
+                    // good query word ("Einwohnerzahl", "Norwegens").
+                    && !l.starts_with(&sl)
+                    && !sl.starts_with(&l)
+                    && !said.iter().any(|x| lower(x) == l)
+            });
+            Some(match users {
+                Some(u) if !core.is_empty() => w.replacen(core, u, 1),
+                _ => w.to_string(),
+            })
+        })
+        .collect();
+    clip_query(&words.join(" "))
+}
+
 /// A query as it may go out: one line, at most 120 characters.
 pub fn clip_query(q: &str) -> String {
     q.split_whitespace()
@@ -117,6 +161,53 @@ pub fn keep_valid_citations(answer: &str, sources: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_users_words_and_no_invented_years_go_out() {
+        // A name the model misspelled: the user's spelling.
+        assert_eq!(
+            faithful("Höhe des Gaustopfes", "Wie hoch ist der Gaustatoppen?"),
+            "Höhe des Gaustatoppen"
+        );
+        // A year the user did not name is dropped; one they named stays.
+        assert_eq!(
+            faithful(
+                "norwegen ministerpräsident 2024",
+                "Wer ist zurzeit Ministerpräsident von Norwegen?"
+            ),
+            "norwegen ministerpräsident"
+        );
+        assert_eq!(
+            faithful(
+                "Olympische Spiele 1994 Lillehammer",
+                "Was war 1994 in Lillehammer?"
+            ),
+            "Olympische Spiele 1994 Lillehammer"
+        );
+        // Words the model added or kept stay as they are.
+        assert_eq!(
+            faithful(
+                "Holmenkollbakken Umbau",
+                "Wann wurde die Holmenkollbakken zuletzt umgebaut?"
+            ),
+            "Holmenkollbakken Umbau"
+        );
+        assert_eq!(
+            faithful("Einwohnerzahl Oslo", "Wie viele Menschen leben in Oslo?"),
+            "Einwohnerzahl Oslo"
+        );
+        assert_eq!(
+            faithful("Einwohnerzahl Oslo", "Wie viele Einwohner hat Oslo?"),
+            "Einwohnerzahl Oslo"
+        );
+        assert_eq!(
+            faithful(
+                "Hauptstadt Norwegens",
+                "Was ist die Hauptstadt von Norwegen?"
+            ),
+            "Hauptstadt Norwegens"
+        );
+    }
 
     #[test]
     fn plans_are_read_even_when_wrapped() {

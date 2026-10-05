@@ -116,13 +116,23 @@ pub fn merge(doc: &mut Extracted, pages: Vec<String>) {
 /// The helper in a sandbox: like the document reader – its own place, the
 /// system's libraries, no network, no other file of the user – plus what
 /// Vision needs to work: system services (the graphics and neural engines,
-/// its models) and the folder of the helper itself. At low priority: the
+/// its models), the folder of the helper itself and, inside the app, the app
+/// bundle (Foundation reads the bundle the helper lives in – denied, Vision
+/// fails with "Foundation._GenericObjCError error 0"). At low priority: the
 /// computer stays usable.
 #[cfg(target_os = "macos")]
 fn command(helper: &Path, file: &Path, workdir: &Path) -> Result<tokio::process::Command> {
     let q = |p: &Path| p.display().to_string().replace(['"', '\\'], "");
     let real = std::fs::canonicalize(helper).unwrap_or_else(|_| helper.to_path_buf());
     let dir = |p: &Path| p.parent().map(q).unwrap_or_default();
+    let bundles: String = [helper, real.as_path()]
+        .iter()
+        .filter_map(|p| {
+            p.ancestors()
+                .find(|a| a.extension().is_some_and(|e| e == "app"))
+        })
+        .map(|b| format!("(allow file-read* (subpath \"{}\"))\n", q(b)))
+        .collect();
     let profile = format!(
         r#"(version 1)
 (deny default)
@@ -136,7 +146,7 @@ fn command(helper: &Path, file: &Path, workdir: &Path) -> Result<tokio::process:
 (allow sysctl-read)
 (allow mach-lookup)
 (allow iokit-open)
-"#,
+{bundles}"#,
         bin = q(helper),
         real = q(&real),
         dir = dir(helper),
