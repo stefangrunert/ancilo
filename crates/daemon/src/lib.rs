@@ -770,7 +770,9 @@ pub async fn start(
 pub async fn run(paths: Paths, config: Config) -> Result<()> {
     let options = DaemonOptions {
         manager: ManagerOptions {
-            secrets: Arc::new(secrets::KeyringSecrets::new("ancilo")),
+            // Each home its own keys: Ancilo Dev never asks for (or
+            // touches) the keys of the installed app.
+            secrets: Arc::new(secrets::KeyringSecrets::new(&paths.keychain_service())),
             ..Default::default()
         },
         ..Default::default()

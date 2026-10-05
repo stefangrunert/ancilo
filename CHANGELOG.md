@@ -4,6 +4,8 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **Fixed: Ancilo Dev asked for the installed app's keys** (a keychain dialog "ancilo wants to use your confidential information"). Each data directory now keeps its keys under a keychain entry of its own; the installed app keeps 'ancilo', so saved keys stay where they are.
+
 - **A tidy menu bar**: only Ancilo, Edit and Window. The system's Services submenu (the services of every other app on the Mac), the empty File menu and Help are gone.
 
 ## 0.3.1 – 2026-10-04
