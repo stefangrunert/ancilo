@@ -2,7 +2,7 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 0.4.1 – 2026-10-05
 
 - **Settings… (⌘,)** in the Ancilo menu opens System; **Help › Ancilo Manual** and *Manual* in the header open the new user manual on ancilo.app (German or English).
 
