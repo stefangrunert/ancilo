@@ -274,6 +274,17 @@ enum Command {
     Connect { client: String },
     /// Remove Ancilo from Claude Code or Codex.
     Disconnect { client: String },
+    /// Remove Ancilo from this computer: disconnects Claude Code and Codex,
+    /// deletes the keys and the data directory (models Ancilo downloaded,
+    /// conversations, settings). Files you saved stay where they are.
+    Uninstall {
+        /// Keep the data directory and the keys (for installing again later).
+        #[arg(long)]
+        keep_data: bool,
+        /// Do not ask.
+        #[arg(long)]
+        yes: bool,
+    },
     /// MCP server on stdin/stdout (started by Claude Code, Codex, …).
     Mcp,
     /// Reads one document and prints its text as JSON – how the daemon reads
@@ -399,6 +410,58 @@ fn context_arg(c: &Option<String>) -> Result<Option<Value>> {
                 Error::invalid(format!("context must be small, medium or large, not '{s}'"))
             }),
     }
+}
+
+/// `ancilo uninstall`: stops the daemon, then removes what Ancilo set up.
+async fn uninstall(paths: &Paths, keep_data: bool, yes: bool, json_out: bool) -> Result<()> {
+    if !yes {
+        let what = if keep_data {
+            "Disconnect Claude Code and Codex and stop Ancilo (your data stays)?".to_string()
+        } else {
+            format!(
+                "Remove Ancilo's data – models it downloaded, conversations, settings, keys – in {}?",
+                paths.home().display()
+            )
+        };
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return Err(Error::invalid(
+                "nothing removed – confirm with `ancilo uninstall --yes` when not running in a terminal",
+            ));
+        }
+        if !confirm_prompt(&what) {
+            println!("nothing removed");
+            return Ok(());
+        }
+    }
+    if let Ok(c) = Client::connect(paths, false).await {
+        c.stop_and_wait(paths).await?;
+    }
+    let p = paths.clone();
+    let removed =
+        tokio::task::spawn_blocking(move || ancilo_daemon::uninstall::uninstall(&p, keep_data))
+            .await
+            .map_err(Error::internal)??;
+    if json_out {
+        print_json(&serde_json::to_value(&removed)?);
+        return Ok(());
+    }
+    for client in &removed.disconnected {
+        println!("✓ disconnected {client}");
+    }
+    if removed.keys > 0 {
+        println!("✓ deleted {} keys from the keychain", removed.keys);
+    }
+    match &removed.data {
+        Some(dir) => println!("✓ deleted {}", dir.display()),
+        None => println!("kept {}", paths.home().display()),
+    }
+    for p in &removed.problems {
+        eprintln!("! {p}");
+    }
+    println!(
+        "The ancilo program itself: delete Ancilo.app, or `brew uninstall ancilo` if Homebrew installed it."
+    );
+    Ok(())
 }
 
 /// Asks a yes/no question on the terminal (no in non-interactive use).
@@ -570,6 +633,11 @@ async fn run(cli: Cli) -> Result<()> {
 
     if let Command::Mcp = &cli.command {
         return mcp_bridge(&paths).await;
+    }
+
+    // Never starts a daemon: it stops the running one.
+    if let Command::Uninstall { keep_data, yes } = cli.command {
+        return uninstall(&paths, keep_data, yes, cli.json).await;
     }
 
     let client = Client::connect(&paths, true).await?;
@@ -1362,7 +1430,9 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Command::Connect { client: target } => connect(&client, &target, false, cli.json).await?,
         Command::Disconnect { client: target } => connect(&client, &target, true, cli.json).await?,
-        Command::Mcp | Command::ExtractDocument { .. } => unreachable!(),
+        Command::Mcp | Command::ExtractDocument { .. } | Command::Uninstall { .. } => {
+            unreachable!()
+        }
         Command::ClaudePlugin => {
             let v = client.call("claude_plugin_dir", json!({}), true).await?;
             println!("{}", v["path"].as_str().unwrap_or_default());

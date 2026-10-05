@@ -2,6 +2,10 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+- **Remove Ancilo** (*System › Remove Ancilo…*, or `ancilo uninstall`): one click removes the app, its background service, the connections to Claude Code and Codex and – unless you keep them for a later install – the models Ancilo downloaded, conversations, settings and keys. Your own files, projects and the models of LM Studio or Ollama stay. Removing Ancilo Dev leaves the installed app's connection to Claude Code and Codex alone (both connect under the same names).
+
 ## 0.4.1 – 2026-10-05
 
 - **Settings… (⌘,)** in the Ancilo menu opens System; **Help › Ancilo Manual** and *Manual* in the header open the new user manual on ancilo.app (German or English).

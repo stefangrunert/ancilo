@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 const KEY: &str = "web_search";
-const SERPER_SECRET: &str = "web.serper";
+pub(crate) const SERPER_SECRET: &str = "web.serper";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WebSettings {

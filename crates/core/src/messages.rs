@@ -141,6 +141,27 @@ pub const MESSAGES: &[(&str, &str)] = &[
         "connect.not_installed",
         "{product} is not installed on this computer – the `{command}` command was not found. Install it ({site}), then connect again",
     ),
+    // Removing Ancilo
+    (
+        "remove.not_disconnected",
+        "{client} could not be disconnected: {why}",
+    ),
+    (
+        "remove.key_left",
+        "the key '{name}' could not be removed from the keychain: {why}",
+    ),
+    (
+        "remove.keychain_unreadable",
+        "cannot read the keychain: {why}",
+    ),
+    (
+        "remove.app_left",
+        "{path} could not be deleted ({why}) – move it to the Trash",
+    ),
+    (
+        "remove.app_elsewhere",
+        "{path} is not in a folder Ancilo can delete from – move it to the Trash",
+    ),
     // Chats
     (
         "chat.documents_local",

@@ -9,6 +9,7 @@ mod knowledge;
 pub mod preferences;
 pub mod secrets;
 pub mod system;
+pub mod uninstall;
 pub mod web;
 
 use std::path::PathBuf;
@@ -426,7 +427,7 @@ fn yaml_to_json(text: &str) -> Result<serde_json::Value> {
     ancilo_eval::yaml_value(text)
 }
 
-fn clients(paths: &Paths, config: &Config) -> ancilo_connect::Clients {
+pub(crate) fn clients(paths: &Paths, config: &Config) -> ancilo_connect::Clients {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();

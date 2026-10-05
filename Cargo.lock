@@ -150,11 +150,13 @@ version = "0.4.1"
 dependencies = [
  "ancilo-core",
  "chrono",
+ "dirs",
  "schemars",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "toml",
  "tracing",
 ]
 
@@ -204,6 +206,7 @@ dependencies = [
  "keyring",
  "reqwest",
  "schemars",
+ "security-framework 3.7.0",
  "serde",
  "serde_json",
  "tempfile",

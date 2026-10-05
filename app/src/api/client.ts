@@ -45,6 +45,8 @@ declare global {
   interface Window {
     /** Set by the native shell (Tauri) before the page loads. */
     __ANCILO__?: { token?: string; url?: string; app?: boolean };
+    /** The native shell's commands (Tauri IPC) – only in the desktop app. */
+    __TAURI_INTERNALS__?: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
   }
 }
 

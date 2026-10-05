@@ -8,11 +8,13 @@ rust-version.workspace = true
 
 [dependencies]
 chrono.workspace = true
+dirs.workspace = true
 ancilo-core.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+toml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

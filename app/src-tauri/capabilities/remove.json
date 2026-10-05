@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remove-ancilo",
+  "description": "System › Remove Ancilo: the page asks the app to remove Ancilo after the user confirmed in its dialog, and to quit afterwards – the app's only commands.",
+  "windows": ["main"],
+  "remote": { "urls": ["http://127.0.0.1:*/*"] },
+  "permissions": ["allow-remove-ancilo", "allow-quit"]
+}

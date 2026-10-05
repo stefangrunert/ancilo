@@ -8,6 +8,7 @@ import { Cockpit } from "./Cockpit";
 import { CompareSection } from "./Compare";
 import { ModelsSection, PrimaryModels } from "./Models";
 import { Connect, Updates } from "./Settings";
+import { RemoveAncilo } from "./RemoveAncilo";
 import { StatusDot } from "./ui";
 
 type Model = OpOutput<"list_models">[number];
@@ -99,6 +100,7 @@ export function SystemPage({ models, loaded = true }: { models: Model[]; loaded?
             <CompareSection models={models} />
           </div>
         )}
+        <RemoveAncilo />
       </div>
     </div>
   );

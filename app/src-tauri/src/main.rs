@@ -7,6 +7,7 @@
 mod daemon;
 mod links;
 mod monitor;
+mod remove;
 mod update;
 mod variant;
 
@@ -244,6 +245,21 @@ fn app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     Ok(menu)
 }
 
+/// System › Remove Ancilo, after the user confirmed in the page.
+#[tauri::command]
+async fn remove_ancilo(app: AppHandle, keep_data: bool) -> Result<remove::Outcome, String> {
+    let id = app.config().identifier.clone();
+    tauri::async_runtime::spawn_blocking(move || remove::remove(&variant::paths(), &id, keep_data))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Quits the app (after Remove Ancilo: nothing left to run).
+#[tauri::command]
+fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
 fn anyhow_like(msg: String) -> std::io::Error {
     std::io::Error::other(msg)
 }
@@ -266,6 +282,7 @@ fn main() {
             }
             _ => {}
         })
+        .invoke_handler(tauri::generate_handler![remove_ancilo, quit])
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {

@@ -40,5 +40,10 @@ export const messagesEn = {
   "msg.session.turn_running": "a turn is still running – wait or cancel it",
   "msg.session.busy": "the session is busy – try again",
   "msg.connect.not_installed": "{product} is not installed on this computer – the `{command}` command was not found. Install it ({site}), then connect again",
+  "msg.remove.not_disconnected": "{client} could not be disconnected: {why}",
+  "msg.remove.key_left": "the key '{name}' could not be removed from the keychain: {why}",
+  "msg.remove.keychain_unreadable": "cannot read the keychain: {why}",
+  "msg.remove.app_left": "{path} could not be deleted ({why}) – move it to the Trash",
+  "msg.remove.app_elsewhere": "{path} is not in a folder Ancilo can delete from – move it to the Trash",
   "msg.chat.documents_local": "this conversation holds your documents – they stay with the AI on this computer; choose a local model",
 } as const;

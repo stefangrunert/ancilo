@@ -43,6 +43,8 @@ futures = "0.3"
 globset = "0.4"
 rust-embed = { version = "8", features = ["mime-guess"] }
 keyring = { version = "3.6", features = ["apple-native", "linux-native"] }
+# Listing a home's keychain entries (removing Ancilo); keyring itself cannot list.
+security-framework = "3.7"
 tree-sitter = "0.25"
 tree-sitter-rust = "0.24"
 tree-sitter-python = "0.25"

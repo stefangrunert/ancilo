@@ -482,3 +482,36 @@ describe("Updates", () => {
     }
   });
 });
+
+describe("RemoveAncilo", () => {
+  it("is only in the desktop app and removes only after the user confirmed – keeping the data if asked", async () => {
+    const { RemoveAncilo } = await import("./RemoveAncilo");
+    const first = renderWithDaemon(<RemoveAncilo />, {});
+    expect(first.container).toBeEmptyDOMElement();
+    first.unmount();
+    const invoked: { cmd: string; args?: Record<string, unknown> }[] = [];
+    window.__ANCILO__ = { token: "t", app: true };
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        invoked.push({ cmd, args });
+        return { problems: ["/Volumes/Ancilo/Ancilo.app is not in a folder Ancilo can delete from – move it to the Trash"] };
+      },
+    };
+    try {
+      renderWithDaemon(<RemoveAncilo />, {});
+      await userEvent.click(screen.getByTestId("remove-ancilo"));
+      expect(invoked).toEqual([]);
+      await userEvent.click(screen.getByRole("checkbox", { name: /Keep conversations, models and settings/ }));
+      await userEvent.click(screen.getByTestId("remove-confirm"));
+      await waitFor(() => expect(invoked[0]).toEqual({ cmd: "remove_ancilo", args: { keepData: true } }));
+      expect(await screen.findByText(/except for the following/)).toBeInTheDocument();
+      expect(screen.getByText(/move it to the Trash/)).toBeInTheDocument();
+      // Something left to read: the app waits for the user.
+      await userEvent.click(screen.getByRole("button", { name: "Close" }));
+      expect(invoked.map((i) => i.cmd)).toEqual(["remove_ancilo", "quit"]);
+    } finally {
+      delete window.__ANCILO__;
+      delete window.__TAURI_INTERNALS__;
+    }
+  });
+});

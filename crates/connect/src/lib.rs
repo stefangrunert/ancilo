@@ -386,6 +386,11 @@ pub struct PluginDir {
     pub path: PathBuf,
 }
 
+fn same_path(a: &Path, b: &Path) -> bool {
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    canon(a) == canon(b)
+}
+
 pub fn register(registry: &mut Registry, clients: Clients) {
     let c = clients.clone();
     registry.register(
@@ -496,6 +501,77 @@ impl Clients {
         .ok();
     }
 
+    /// Disconnects every client this home connected (removing Ancilo):
+    /// each with its outcome; a failure does not stop the others.
+    ///
+    /// Every Ancilo connects under the same names: a connection another
+    /// Ancilo made since (the installed app beside Ancilo Dev) is not this
+    /// home's – it stays.
+    pub fn disconnect_all(&self) -> Vec<(String, Result<ConnectReport>)> {
+        self.connections()
+            .into_iter()
+            .filter(|c| c.connected)
+            .filter_map(|c| {
+                let ours = match c.client.as_str() {
+                    "claude_code" => self.claude_is_ours(),
+                    _ => self.codex_is_ours(),
+                };
+                let report = match (ours, c.client.as_str()) {
+                    (Some(false), client) => {
+                        self.remember(&ConnectReport {
+                            client: client.into(),
+                            connected: false,
+                            actions: Vec::new(),
+                            verified: false,
+                            notes: "connected to another Ancilo".into(),
+                        });
+                        return None;
+                    }
+                    (_, "claude_code") => self.disconnect_claude_code(),
+                    _ => self.disconnect_codex(),
+                };
+                if let Ok(r) = &report {
+                    self.remember(r);
+                }
+                Some((c.client, report))
+            })
+            .collect()
+    }
+
+    /// Whether Claude Code's Ancilo plugin comes from this home: Claude's
+    /// list of marketplaces names the directory. `None`: cannot tell.
+    fn claude_is_ours(&self) -> Option<bool> {
+        let config = self
+            .env
+            .iter()
+            .find(|(k, _)| k == "CLAUDE_CONFIG_DIR")
+            .map(|(_, v)| PathBuf::from(v))
+            .or_else(|| std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from))
+            .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))?;
+        let text = std::fs::read_to_string(config.join("plugins/known_marketplaces.json")).ok()?;
+        let all: serde_json::Value = serde_json::from_str(&text).ok()?;
+        let Some(m) = all.get(MARKETPLACE) else {
+            return Some(false);
+        };
+        let path = m["source"]["path"]
+            .as_str()
+            .or(m["installLocation"].as_str())?;
+        Some(same_path(Path::new(path), &self.marketplace_dir()))
+    }
+
+    /// Whether Codex's `ancilo` MCP server is this home's (its `ANCILO_HOME`).
+    /// `None`: cannot tell.
+    fn codex_is_ours(&self) -> Option<bool> {
+        let text = std::fs::read_to_string(self.codex_home.join("config.toml")).ok()?;
+        let config: toml::Value = toml::from_str(&text).ok()?;
+        let Some(server) = config.get("mcp_servers").and_then(|s| s.get("ancilo")) else {
+            return Some(false);
+        };
+        let home = server.get("env")?.get("ANCILO_HOME")?.as_str()?;
+        let ours = self.env.iter().find(|(k, _)| k == "ANCILO_HOME")?;
+        Some(same_path(Path::new(home), Path::new(&ours.1)))
+    }
+
     pub fn connections(&self) -> Vec<ConnectionState> {
         let all: std::collections::BTreeMap<String, ConnectionState> =
             std::fs::read_to_string(self.state_file())
@@ -573,7 +649,14 @@ esac
             ancilo_bin: PathBuf::from("/nonexistent/ancilo"),
             dir: dir.join("clients"),
             codex_home: dir.join("codex-home"),
-            env: vec![("FAKE_STATE".into(), state.display().to_string())],
+            env: vec![
+                ("FAKE_STATE".into(), state.display().to_string()),
+                // Never the user's own Claude configuration.
+                (
+                    "CLAUDE_CONFIG_DIR".into(),
+                    dir.join("claude-config").display().to_string(),
+                ),
+            ],
         }
     }
 
@@ -643,5 +726,81 @@ esac
         c.connect_codex().unwrap();
         c.disconnect_codex().unwrap();
         assert!(!c.agents_file().exists());
+    }
+
+    /// Removing Ancilo disconnects what it connected – and touches nothing
+    /// it did not connect.
+    #[test]
+    fn disconnect_all_undoes_only_what_this_home_connected() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = clients(dir.path());
+        assert!(
+            c.disconnect_all().is_empty(),
+            "nothing connected, nothing run"
+        );
+        assert!(!dir.path().join("state/claude.log").exists());
+        let r = c.connect_claude_code().unwrap();
+        c.remember(&r);
+        let done = c.disconnect_all();
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].0, "claude_code");
+        assert!(done[0].1.is_ok());
+        assert!(c.connections().iter().all(|s| !s.connected));
+        assert!(
+            !dir.path().join("state/codex.log").exists(),
+            "Codex was never connected"
+        );
+    }
+
+    /// Ancilo Dev beside the installed app: both connect under the same
+    /// names. Removing one never disconnects the other.
+    #[test]
+    fn disconnect_all_leaves_another_ancilos_connection() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = clients(dir.path());
+        c.env.push(("ANCILO_HOME".into(), "/homes/dev".into()));
+        for client in ["claude_code", "codex"] {
+            c.remember(&ConnectReport {
+                client: client.into(),
+                connected: true,
+                actions: Vec::new(),
+                verified: true,
+                notes: String::new(),
+            });
+        }
+        // Since then the installed app connected both.
+        let plugins = dir.path().join("claude-config/plugins");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::write(
+            plugins.join("known_marketplaces.json"),
+            r#"{"ancilo-local": {"source": {"source": "directory", "path": "/homes/app/clients/claude-plugins"}}}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(&c.codex_home).unwrap();
+        std::fs::write(
+            c.codex_home.join("config.toml"),
+            "[mcp_servers.ancilo]\ncommand = \"ancilo\"\n\n[mcp_servers.ancilo.env]\nANCILO_HOME = \"/homes/app\"\n",
+        )
+        .unwrap();
+        assert!(c.disconnect_all().is_empty());
+        assert!(!dir.path().join("state/claude.log").exists());
+        assert!(!dir.path().join("state/codex.log").exists());
+        assert!(c.connections().iter().all(|s| !s.connected));
+        // This home's own connection is undone.
+        std::fs::write(
+            c.codex_home.join("config.toml"),
+            "[mcp_servers.ancilo.env]\nANCILO_HOME = \"/homes/dev\"\n",
+        )
+        .unwrap();
+        c.remember(&ConnectReport {
+            client: "codex".into(),
+            connected: true,
+            actions: Vec::new(),
+            verified: true,
+            notes: String::new(),
+        });
+        let done = c.disconnect_all();
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].0, "codex");
     }
 }

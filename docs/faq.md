@@ -26,7 +26,9 @@ Yes. Everything is available from the command line (`ancilo …`), the HTTP API,
 
 ## Where are my data, and how do I remove Ancilo?
 
-In `~/Library/Application Support/ancilo` (macOS) or the directory in `ANCILO_HOME`: models Ancilo downloaded, the database, indexes, logs. Stop the daemon (`ancilo daemon stop`), delete that directory and the app; `ancilo disconnect claude|codex` removes the connections first. Model files Ancilo reused from LM Studio, Ollama or the Hugging Face cache stay where they were.
+In `~/Library/Application Support/ancilo` (macOS) or the directory in `ANCILO_HOME`: models Ancilo downloaded, the database, indexes, logs; API keys are in the system keychain.
+
+To remove Ancilo: in the app, *System › Remove Ancilo…* – it removes the app, its login item (the background service), the connections to Claude Code and Codex, and – unless you keep them for a later install – the models Ancilo downloaded, conversations, settings and keys. From the command line: `ancilo uninstall` (`--keep-data` keeps the data directory and the keys); then delete the app, or `brew uninstall ancilo`. A connection another Ancilo made since (Ancilo Dev beside the installed app) is left alone. What is yours stays: files you saved, your projects, model files Ancilo reused from LM Studio, Ollama or the Hugging Face cache.
 
 ## Something does not work
 
