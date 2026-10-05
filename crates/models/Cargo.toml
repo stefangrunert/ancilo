@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 ancilo-core.workspace = true
+ancilo-net.workspace = true
 ancilo-storage.workspace = true
 chrono.workspace = true
 dirs.workspace = true

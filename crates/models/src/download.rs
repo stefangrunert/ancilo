@@ -22,6 +22,8 @@ pub struct DownloadSpec {
     pub sha256: Option<String>,
     /// Bearer token for this URL only (Hugging Face `HF_TOKEN`).
     pub bearer: Option<String>,
+    /// What it is, for the user's log of what left this computer.
+    pub note: ancilo_net::Note,
 }
 
 #[derive(Debug, Clone)]
@@ -106,7 +108,7 @@ impl Progress<'_> {
 }
 
 async fn attempt(
-    http: &reqwest::Client,
+    http: &ancilo_net::Net,
     spec: &DownloadSpec,
     part: &Path,
     hasher: &mut Sha256,
@@ -121,7 +123,7 @@ async fn attempt(
     if *have > 0 {
         req = req.header(reqwest::header::RANGE, format!("bytes={have}-"));
     }
-    let resp = match req.send().await {
+    let resp = match http.send(req, spec.note.clone()).await {
         Ok(r) => r,
         Err(e) => return Ok(Attempt::Retry(format!("connection failed: {e}"))),
     };
@@ -187,7 +189,7 @@ async fn attempt(
 /// Emits `download.started`, `download.progress`, `download.retrying`,
 /// `download.completed` and `download.failed` with `subject`.
 pub async fn download(
-    http: &reqwest::Client,
+    http: &ancilo_net::Net,
     spec: &DownloadSpec,
     bus: &EventBus,
     subject: &str,
@@ -301,6 +303,14 @@ mod tests {
         }
     }
 
+    fn note() -> ancilo_net::Note {
+        ancilo_net::Note::new(
+            ancilo_net::Purpose::ModelDownload,
+            "o/r/m.gguf",
+            ancilo_net::By::You,
+        )
+    }
+
     async fn setup(file: FakeFile) -> (FakeHf, DownloadSpec, tempfile::TempDir) {
         let size = file.content.len() as u64;
         let sha = file.sha256();
@@ -312,6 +322,7 @@ mod tests {
             size: Some(size),
             sha256: Some(sha),
             bearer: None,
+            note: note(),
         };
         (hf, spec, dir)
     }
@@ -322,7 +333,7 @@ mod tests {
         let bus = EventBus::in_memory();
         let mut rx = bus.subscribe();
         download(
-            &reqwest::Client::new(),
+            &ancilo_net::Net::new(reqwest::Client::new(), None),
             &spec,
             &bus,
             "m",
@@ -349,7 +360,7 @@ mod tests {
                 .await;
         let bus = EventBus::in_memory();
         download(
-            &reqwest::Client::new(),
+            &ancilo_net::Net::new(reqwest::Client::new(), None),
             &spec,
             &bus,
             "m",
@@ -378,7 +389,7 @@ mod tests {
         std::fs::create_dir_all(spec.dest.parent().unwrap()).unwrap();
         std::fs::write(part_path(&spec.dest), head).unwrap();
         download(
-            &reqwest::Client::new(),
+            &ancilo_net::Net::new(reqwest::Client::new(), None),
             &spec,
             &EventBus::in_memory(),
             "m",
@@ -396,7 +407,7 @@ mod tests {
         let (_hf, spec, _dir) =
             setup(FakeFile::gguf("m.gguf", "llama", 4096, 100_000).corrupt()).await;
         let err = download(
-            &reqwest::Client::new(),
+            &ancilo_net::Net::new(reqwest::Client::new(), None),
             &spec,
             &EventBus::in_memory(),
             "m",
@@ -419,9 +430,10 @@ mod tests {
             size: None,
             sha256: None,
             bearer: None,
+            note: note(),
         };
         let err = download(
-            &reqwest::Client::new(),
+            &ancilo_net::Net::new(reqwest::Client::new(), None),
             &spec,
             &EventBus::in_memory(),
             "x",
@@ -437,7 +449,7 @@ mod tests {
             ..spec
         };
         let err = download(
-            &reqwest::Client::new(),
+            &ancilo_net::Net::new(reqwest::Client::new(), None),
             &spec,
             &EventBus::in_memory(),
             "x",

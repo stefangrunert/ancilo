@@ -326,6 +326,12 @@ async fn every_operation_is_an_assistant_tool() {
     let mut proposed = 0;
     for op in ops.as_array().unwrap() {
         let name = op["name"].as_str().unwrap();
+        // The user's own (their log of what left this computer): not there for a model.
+        if op["own"] == true {
+            let (_, text) = a.call_as_tool(name, json!({}), false).await.unwrap();
+            assert!(text.contains("unknown operation"), "{name}: {text}");
+            continue;
+        }
         if ancilo_assistant::NOT_FOR_ASSISTANT.contains(&name) {
             continue;
         }

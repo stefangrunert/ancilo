@@ -360,6 +360,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ops/clear_outbound_log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Empty the log of what left this computer
+         * @description Empty the log of what left this computer
+         */
+        post: operations["clear_outbound_log"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ops/close_terminal": {
         parameters: {
             query?: never;
@@ -1463,6 +1483,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ops/outbound_log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What left this computer: web searches, downloads, messages to cloud models – newest first
+         * @description The user's log of every request that left this computer (kept 30 days): when, why, to whom and what was sent. Only for the user – not for models.
+         */
+        post: operations["outbound_log"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ops/outbound_summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * How much left this computer today and this week, by purpose
+         * @description How much left this computer today and this week, by purpose
+         */
+        post: operations["outbound_summary"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ops/pending_actions": {
         parameters: {
             query?: never;
@@ -1577,6 +1637,26 @@ export interface paths {
          * @description Suggested model assignments backed by enough data
          */
         post: operations["recommendations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ops/record_departure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Log what the app itself sent (its update check and download)
+         * @description Log what the app itself sent (its update check and download)
+         */
+        post: operations["record_departure"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2789,6 +2869,8 @@ export interface components {
             /** @default [] */
             warnings: components["schemas"]["Warning"][];
         };
+        /** @description Who started it. */
+        By: "you" | "ancilo";
         CatalogInfo: {
             /** @description Why a newer list could not be fetched (the bundled one is used). */
             error?: string | null;
@@ -2956,6 +3038,41 @@ export interface components {
             percent?: number | null;
             /** Format: uint64 */
             total?: number | null;
+        };
+        /** @description One entry: an id (for paging) and what left. */
+        Entry: {
+            /** Format: date-time */
+            at: string;
+            by: components["schemas"]["By"];
+            error?: string | null;
+            /** @description Where it went: the host alone (simple view) … */
+            host: string;
+            /** Format: int64 */
+            id: number;
+            method: string;
+            purpose: components["schemas"]["Purpose"];
+            /**
+             * Format: uint64
+             * @description What came back (from the answer's length, when it says).
+             */
+            received_bytes?: number | null;
+            /**
+             * @description Where the answer came from, when it was forwarded elsewhere (a
+             *     download's file server).
+             */
+            redirected_to?: string | null;
+            /** @description The body as sent, as text – clipped; `None`: nothing but the address. */
+            sent?: string | null;
+            /** Format: uint64 */
+            sent_bytes: number;
+            /**
+             * Format: uint16
+             * @description The answer's status, or why there was none.
+             */
+            status?: number | null;
+            subject: string;
+            /** @description … and the whole address (details). */
+            url: string;
         };
         Error: {
             error: {
@@ -4777,6 +4894,39 @@ export interface operations {
                         /** @description Load it for one session: `claude --plugin-dir <path>`. */
                         path: string;
                     };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    clear_outbound_log: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Error */
@@ -7439,6 +7589,105 @@ export interface operations {
             };
         };
     };
+    outbound_log: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: int64
+                     * @description Entries older than this id (the next page).
+                     * @default null
+                     */
+                    before?: number | null;
+                    /**
+                     * Format: uint32
+                     * @description How many (default 50, at most 200).
+                     * @default null
+                     */
+                    limit?: number | null;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        entries: components["schemas"]["Entry"][];
+                        /** @description More, older entries exist (ask with `before` = the last id). */
+                        more: boolean;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    outbound_summary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: date-time
+                         * @description The oldest entry kept, and the newest.
+                         */
+                        first?: string | null;
+                        /** Format: int64 */
+                        keep_days: number;
+                        /** Format: date-time */
+                        last?: string | null;
+                        today: {
+                            [key: string]: number;
+                        };
+                        week: {
+                            [key: string]: number;
+                        };
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     pending_actions: {
         parameters: {
             query?: never;
@@ -7742,6 +7991,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Recommendation"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    record_departure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    by: components["schemas"]["By"];
+                    /** @default null */
+                    error?: string | null;
+                    /** @description `update_check` or `update_download`. */
+                    purpose: components["schemas"]["Purpose"];
+                    /**
+                     * Format: uint64
+                     * @default null
+                     */
+                    received_bytes?: number | null;
+                    /**
+                     * Format: uint16
+                     * @default null
+                     */
+                    status?: number | null;
+                    subject: string;
+                    url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Error */

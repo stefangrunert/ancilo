@@ -27,7 +27,7 @@ The left column can be hidden with the button in the header (and overlays the pa
 
 The desktop app lives in the menu bar. It finds the Ancilo daemon – or starts it – and keeps it running after you close the window, so Claude Code and Codex can always reach Ancilo. On macOS it registers the daemon to start at login.
 
-The app's own menu bar is short: *Ancilo* (About, *Settings…* ⌘, – opens System, Hide, Quit), *Edit* (copy and paste in the window), *Window* and *Help* (*Ancilo Manual*). The user manual is on [ancilo.app](https://ancilo.app/en/manual/) (German: [ancilo.app/de/handbuch](https://ancilo.app/de/handbuch/)); the header links to it too. *System › Remove Ancilo…* removes Ancilo from the Mac (see the [FAQ](faq.md#where-are-my-data-and-how-do-i-remove-ancilo)).
+The app's own menu bar is short: *Ancilo* (About, *Settings…* ⌘, – opens System, Hide, Quit), *Edit* (copy and paste in the window), *Window* and *Help* (*Ancilo Manual*). The user manual is on [ancilo.app](https://ancilo.app/en/manual/) (German: [ancilo.app/de/handbuch](https://ancilo.app/de/handbuch/)); the header links to it too. *System › What left this Mac* lists everything Ancilo sent over the internet – web searches, model downloads, messages to cloud models, update checks – simply by default, every request with its address and content on a click (kept 30 days, see [Privacy](../PRIVACY.md)). *System › Remove Ancilo…* removes Ancilo from the Mac (see the [FAQ](faq.md#where-are-my-data-and-how-do-i-remove-ancilo)).
 
 Without the desktop app, the same UI runs in any browser:
 

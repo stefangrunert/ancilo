@@ -31,6 +31,7 @@ ancilo-assistant = { path = "crates/assistant" }
 ancilo-sessions = { path = "crates/sessions" }
 ancilo-web = { path = "crates/web" }
 ancilo-docs = { path = "crates/docs" }
+ancilo-net = { path = "crates/net" }
 
 anyhow = "1"
 async-trait = "0.1"

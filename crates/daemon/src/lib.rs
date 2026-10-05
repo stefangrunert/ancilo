@@ -6,6 +6,7 @@
 
 pub mod docs;
 mod knowledge;
+pub mod outbound;
 pub mod preferences;
 pub mod secrets;
 pub mod system;
@@ -484,6 +485,11 @@ pub async fn start(
     let lock = lock_home(&paths)?;
     let db = Db::open(&paths.db_file())?;
     let bus = EventBus::new(Some(Arc::new(db.clone())), db.last_event_seq()?);
+    // Everything that leaves this computer is written here (System › What
+    // left this Mac): downloads, Hugging Face, cloud models, web searches.
+    let outbound_log = outbound::Log::new(db.clone(), bus.clone());
+    let recorder: Arc<dyn ancilo_net::Recorder> = Arc::new(outbound_log.clone());
+    options.manager.outbound = Some(recorder.clone());
     let hw = ancilo_models::hardware::detect(&config, paths.home())?;
     let llama_build = options
         .llama_build
@@ -550,7 +556,13 @@ pub async fn start(
         )
         .with_ocr(ocr),
     );
-    let web_search = web::WebSearch::new(&config, db.clone(), manager.secrets(), bus.clone());
+    let web_search = web::WebSearch::new(
+        &config,
+        db.clone(),
+        manager.secrets(),
+        bus.clone(),
+        Some(recorder.clone()),
+    );
     let sessions = ancilo_sessions::Sessions::new(
         db.clone(),
         bus.clone(),
@@ -591,6 +603,7 @@ pub async fn start(
     ancilo_compare::ops::register(&mut registry, comparer.clone());
     ancilo_index::ops::register(&mut registry, indexer.clone(), paths.home().join("tmp"));
     knowledge::register(&mut registry, knowledge.clone());
+    outbound::register(&mut registry, outbound_log);
     system::register(
         &mut registry,
         manager.clone(),

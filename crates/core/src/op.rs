@@ -82,6 +82,10 @@ pub struct OpSpec {
     /// Has effects that are expensive or hard to undo (large downloads,
     /// deletion, writing foreign configuration). Requires confirmation.
     pub consequential: bool,
+    /// Only for the user's own surfaces (the app, the CLI) – never for a
+    /// model (MCP clients, the assistant): it shows or touches what the user
+    /// keeps from models, like the log of what left this computer.
+    pub own: bool,
     pub input_schema: Value,
     pub output_schema: Value,
 }
@@ -108,6 +112,7 @@ pub struct OpBuilder {
     description: &'static str,
     permission: Permission,
     consequential: bool,
+    own: bool,
 }
 
 impl OpBuilder {
@@ -118,6 +123,7 @@ impl OpBuilder {
             description: "",
             permission: Permission::Read,
             consequential: false,
+            own: false,
         }
     }
 
@@ -141,6 +147,12 @@ impl OpBuilder {
         self
     }
 
+    /// Only the user's own surfaces may call it – see [`OpSpec::own`].
+    pub fn own(mut self) -> Self {
+        self.own = true;
+        self
+    }
+
     /// Finishes the operation with a typed async handler.
     pub fn handler<I, O, F, Fut>(self, f: F) -> Arc<dyn Operation>
     where
@@ -161,6 +173,7 @@ impl OpBuilder {
                 description,
                 permission: self.permission,
                 consequential: self.consequential,
+                own: self.own,
                 input_schema: schema_of::<I>(),
                 output_schema: schema_of::<O>(),
             },
@@ -270,6 +283,9 @@ impl Registry {
             .get(name)
             .ok_or_else(|| Error::NotFound(format!("unknown operation '{name}'")))?;
         let spec = op.spec();
+        if spec.own && matches!(ctx.surface, Surface::Mcp | Surface::Assistant) {
+            return Err(Error::NotFound(format!("unknown operation '{name}'")));
+        }
         if spec.consequential && !ctx.confirmed && ctx.surface != Surface::Internal {
             return Err(Error::ConfirmationRequired(format!(
                 "'{name}' has consequences ({}); repeat the call with confirmation",
@@ -309,6 +325,34 @@ impl Registry {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // covers: M11-AC-02
+    /// What the user keeps from models is not there for them at all.
+    #[tokio::test]
+    async fn the_users_own_operations_do_not_exist_for_models() {
+        let mut r = Registry::new();
+        r.register(
+            OpBuilder::new("diary")
+                .summary("The user's own")
+                .own()
+                .handler(|_ctx, _i: NoInput| async move { Ok("mine") }),
+        );
+        for surface in [Surface::Mcp, Surface::Assistant] {
+            let e = r
+                .call("diary", OpCtx::new(surface), json!({}))
+                .await
+                .unwrap_err();
+            assert!(e.to_string().contains("unknown operation"), "{e}");
+        }
+        for surface in [Surface::Cli, Surface::Rest, Surface::Internal] {
+            assert_eq!(
+                r.call("diary", OpCtx::new(surface), json!({}))
+                    .await
+                    .unwrap(),
+                "mine"
+            );
+        }
+    }
 
     /// A model never gets a secret – not through MCP, not as the
     /// assistant's tool result; the CLI and the app do.

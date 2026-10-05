@@ -473,7 +473,7 @@ impl RegistryTools {
     ) -> Self {
         let specs: Vec<&OpSpec> = registry
             .specs()
-            .filter(|s| allowed(s.name, cloud))
+            .filter(|s| !s.own && allowed(s.name, cloud))
             .collect();
         let mut offered: Vec<&'static str> = CORE
             .iter()
@@ -498,7 +498,8 @@ impl RegistryTools {
     }
 
     async fn run(&self, operation: &str, input: Value) -> ToolOutput {
-        let Some(op) = self.registry.get(operation) else {
+        // The user's own operations are not there for a model at all.
+        let Some(op) = self.registry.get(operation).filter(|op| !op.spec().own) else {
             return ToolOutput::err(format!(
                 "unknown operation '{operation}' – see the list in `{GENERIC_TOOL}`"
             ));

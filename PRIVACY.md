@@ -13,7 +13,7 @@ Ancilo is built to keep your work on your machine.
 
 | When | To | What |
 |---|---|---|
-| You add a model from Hugging Face | `huggingface.co` | the model's name; the files and its model card (README) are downloaded |
+| You add a model from Hugging Face | `huggingface.co` | the model's name; the files and its model card (README) are downloaded. A download interrupted when Ancilo stopped continues by itself at the next start. |
 | You rebuild the knowledge base (`ancilo knowledge`, `refresh_model_knowledge`) | `huggingface.co` | requests for the model cards of your installed Hugging Face models. Starting Ancilo does not do this – it only re-reads the cards already downloaded. |
 | You open the model choice in the app (or call `recommend_models` with `refresh`) | the Ancilo repository on GitHub | a request for the newest model list; nothing about you, your computer or your data – the comparison with your computer happens locally |
 | You search for a model (`search_models`) | `huggingface.co` | the words you searched for |
@@ -22,6 +22,8 @@ Ancilo is built to keep your work on your machine.
 | You turn on web search with **Google through Serper** (your own key) and a chat or a coding agent searches | `google.serper.dev` (Serper passes the query on to Google) | the short search query and your Serper key. When Google shows no direct answer, **this computer opens up to three result pages** – those websites see your IP address, like when you browse (no cookies, no referrer, nothing loaded from them besides the page). |
 | You set up a cloud model and use it | that provider (e.g. DeepInfra, OpenRouter) | the requests you send to that model. **Code from your projects is never sent to cloud models** – delegation, coding sessions and comparisons only use local models. |
 | You click *Check for Updates…* in the app's menu – or, only if you allowed it in the app, once a day | the release server (GitHub) | a request for the latest version; nothing about you or your data |
+
+**See it for yourself:** *System › What left this Mac* in the app lists every request from the table above as it happened – when, why, to which server and what was sent (a search term, a message to a cloud model), with the full address and content on a click. Every request Ancilo makes to the internet goes through one place that writes this log, and a test checks that nothing goes past it. The log stays on this Mac, is kept 30 days and can be emptied; keys are never in it. It is the user's alone: neither Claude Code, Codex (MCP) nor the assistant can read it. From the command line: `ancilo op outbound_log`.
 
 API keys for cloud providers and the Serper key are stored in the system keychain, never in files or logs. Web search and your documents only ever go to the AI on this computer – never to cloud models.
 

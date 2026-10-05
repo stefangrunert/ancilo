@@ -87,7 +87,7 @@ struct Inner {
     manager: ModelManager,
     db: Db,
     bus: EventBus,
-    http: reqwest::Client,
+    http: ancilo_net::Net,
     scheduler: Scheduler,
     defaults: Mutex<ReliabilityConfig>,
     /// Per-model pipeline settings (e.g. measured with `tune_reliability`).
@@ -171,15 +171,22 @@ impl Gateway {
             .flatten()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
+        let outbound = manager.outbound();
+        let hosts = manager.hosts().clone();
         Self {
             inner: Arc::new(Inner {
                 manager,
                 db,
                 bus,
-                http: reqwest::Client::builder()
-                    .connect_timeout(Duration::from_secs(10))
-                    .build()
-                    .expect("http client"),
+                // A local model's answers stay here; what goes to a cloud
+                // model is logged (System › What left this Mac).
+                http: ancilo_net::Net::new(
+                    ancilo_net::with_hosts(reqwest::Client::builder(), hosts.iter())
+                        .connect_timeout(Duration::from_secs(10))
+                        .build()
+                        .expect("http client"),
+                    outbound,
+                ),
                 scheduler: Scheduler::new(2),
                 defaults: Mutex::new(defaults),
                 per_model: Mutex::new(per_model),
@@ -298,13 +305,18 @@ impl Gateway {
     }
 
     async fn upstream(&self, base: &str, key: &str, body: &Value) -> Result<reqwest::Response> {
+        let note = cloud_note(body);
         let resp = self
             .inner
             .http
-            .post(format!("{base}/chat/completions"))
-            .bearer_auth(key)
-            .json(body)
-            .send()
+            .send(
+                self.inner
+                    .http
+                    .post(format!("{base}/chat/completions"))
+                    .bearer_auth(key)
+                    .json(body),
+                note,
+            )
             .await
             .map_err(|e| {
                 Error::unavailable(ancilo_core::msg("model.no_answer_http", &[("why", &e)]))
@@ -765,13 +777,18 @@ impl Gateway {
             .await?;
         let (base, key) = (ep.base, ep.key);
         req["model"] = json!(ep.model);
+        let note = cloud_note(&req);
         let resp = self
             .inner
             .http
-            .post(format!("{base}/embeddings"))
-            .bearer_auth(key)
-            .json(&req)
-            .send()
+            .send(
+                self.inner
+                    .http
+                    .post(format!("{base}/embeddings"))
+                    .bearer_auth(key)
+                    .json(&req),
+                note,
+            )
             .await
             .map_err(|e| Error::unavailable(format!("the embedding model did not answer: {e}")))?;
         if !resp.status().is_success() {
@@ -837,4 +854,14 @@ pub fn completion_to_sse(resp: &Value) -> String {
     push(last);
     out.push_str("data: [DONE]\n\n");
     out
+}
+
+/// What a request to a model is, should it leave this computer (a cloud
+/// model): the model it is for.
+fn cloud_note(body: &Value) -> ancilo_net::Note {
+    ancilo_net::Note::new(
+        ancilo_net::Purpose::CloudModel,
+        body["model"].as_str().unwrap_or("a model"),
+        ancilo_net::By::You,
+    )
 }

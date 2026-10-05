@@ -530,6 +530,21 @@
         ],
         "type": "object"
       },
+      "By": {
+        "description": "Who started it.",
+        "oneOf": [
+          {
+            "const": "you",
+            "description": "The user (a click, a question, a command).",
+            "type": "string"
+          },
+          {
+            "const": "ancilo",
+            "description": "Ancilo by itself (a download resumed, a description fetched, a daily update check).",
+            "type": "string"
+          }
+        ]
+      },
       "CatalogInfo": {
         "properties": {
           "error": {
@@ -1077,6 +1092,95 @@
         },
         "required": [
           "bytes"
+        ],
+        "type": "object"
+      },
+      "Entry": {
+        "description": "One entry: an id (for paging) and what left.",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "by": {
+            "$ref": "#/components/schemas/By"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "host": {
+            "description": "Where it went: the host alone (simple view) …",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "method": {
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/Purpose"
+          },
+          "received_bytes": {
+            "description": "What came back (from the answer's length, when it says).",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "redirected_to": {
+            "description": "Where the answer came from, when it was forwarded elsewhere (a\ndownload's file server).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sent": {
+            "description": "The body as sent, as text – clipped; `None`: nothing but the address.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sent_bytes": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "description": "The answer's status, or why there was none.",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "subject": {
+            "type": "string"
+          },
+          "url": {
+            "description": "… and the whole address (details).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "purpose",
+          "subject",
+          "by",
+          "method",
+          "host",
+          "url",
+          "sent_bytes"
         ],
         "type": "object"
       },
@@ -5894,6 +5998,50 @@
         },
         "summary": "Write the Ancilo plugin for Claude Code without installing it (for `claude --plugin-dir`)",
         "x-ancilo-consequential": false,
+        "x-ancilo-permission": "manage"
+      }
+    },
+    "/api/v1/ops/clear_outbound_log": {
+      "post": {
+        "description": "Empty the log of what left this computer",
+        "operationId": "clear_outbound_log",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Input type for operations without parameters.",
+                "title": "NoInput",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "AnyValue"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Empty the log of what left this computer",
+        "x-ancilo-consequential": true,
         "x-ancilo-permission": "manage"
       }
     },
@@ -10775,6 +10923,175 @@
         "x-ancilo-permission": "manage"
       }
     },
+    "/api/v1/ops/outbound_log": {
+      "post": {
+        "description": "The user's log of every request that left this computer (kept 30 days): when, why, to whom and what was sent. Only for the user – not for models.",
+        "operationId": "outbound_log",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "before": {
+                    "default": null,
+                    "description": "Entries older than this id (the next page).",
+                    "format": "int64",
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "limit": {
+                    "default": null,
+                    "description": "How many (default 50, at most 200).",
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "title": "PageInput",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "entries": {
+                      "items": {
+                        "$ref": "#/components/schemas/Entry"
+                      },
+                      "type": "array"
+                    },
+                    "more": {
+                      "description": "More, older entries exist (ask with `before` = the last id).",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "entries",
+                    "more"
+                  ],
+                  "title": "Page",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "What left this computer: web searches, downloads, messages to cloud models – newest first",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
+      }
+    },
+    "/api/v1/ops/outbound_summary": {
+      "post": {
+        "description": "How much left this computer today and this week, by purpose",
+        "operationId": "outbound_summary",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Input type for operations without parameters.",
+                "title": "NoInput",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Counts per purpose – today and in the last 7 days.",
+                  "properties": {
+                    "first": {
+                      "description": "The oldest entry kept, and the newest.",
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "keep_days": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "last": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "today": {
+                      "additionalProperties": {
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
+                    "week": {
+                      "additionalProperties": {
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "today",
+                    "week",
+                    "keep_days"
+                  ],
+                  "title": "Summary",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "How much left this computer today and this week, by purpose",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
+      }
+    },
     "/api/v1/ops/pending_actions": {
       "post": {
         "description": "Actions the assistant proposed that wait for confirmation",
@@ -11387,6 +11704,97 @@
         "summary": "Suggested model assignments backed by enough data",
         "x-ancilo-consequential": false,
         "x-ancilo-permission": "read"
+      }
+    },
+    "/api/v1/ops/record_departure": {
+      "post": {
+        "description": "Log what the app itself sent (its update check and download)",
+        "operationId": "record_departure",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "What the app itself sent (its update check and download – the updater\nruns in the app, not in the daemon).",
+                "properties": {
+                  "by": {
+                    "$ref": "#/components/schemas/By"
+                  },
+                  "error": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "purpose": {
+                    "$ref": "#/components/schemas/Purpose",
+                    "description": "`update_check` or `update_download`."
+                  },
+                  "received_bytes": {
+                    "default": null,
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "default": null,
+                    "format": "uint16",
+                    "maximum": 65535,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "subject": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "purpose",
+                  "subject",
+                  "by",
+                  "url"
+                ],
+                "title": "AppDeparture",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "AnyValue"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Log what the app itself sent (its update check and download)",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "manage"
       }
     },
     "/api/v1/ops/refresh_model_knowledge": {

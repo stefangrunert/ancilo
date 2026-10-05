@@ -58,8 +58,9 @@ pub struct Config {
     pub wikipedia_endpoint: String,
     /// Serper (Google results) for the web search.
     pub serper_endpoint: String,
-    /// Host names the web search may reach at these addresses although they
-    /// are not public (tests only – the one way past its address check).
+    /// Host names reached at these addresses (tests only): fakes that look
+    /// like servers out there – for the log of what left this computer, and
+    /// the one way past the web search's address check.
     pub web_hosts: std::collections::BTreeMap<String, std::net::IpAddr>,
 }
 

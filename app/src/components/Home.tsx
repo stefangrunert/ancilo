@@ -8,6 +8,7 @@ import { Cockpit } from "./Cockpit";
 import { CompareSection } from "./Compare";
 import { ModelsSection, PrimaryModels } from "./Models";
 import { Connect, Updates } from "./Settings";
+import { OutboundLog } from "./OutboundLog";
 import { RemoveAncilo } from "./RemoveAncilo";
 import { StatusDot } from "./ui";
 
@@ -100,6 +101,7 @@ export function SystemPage({ models, loaded = true }: { models: Model[]; loaded?
             <CompareSection models={models} />
           </div>
         )}
+        <OutboundLog />
         <RemoveAncilo />
       </div>
     </div>

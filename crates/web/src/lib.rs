@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ancilo_core::{Error, Result};
+use ancilo_net::{Net, Recorder};
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -102,27 +103,35 @@ pub fn user_agent() -> String {
 #[derive(Clone)]
 pub struct Web {
     /// For the providers (fixed addresses; the key goes only here).
-    providers: Client,
+    providers: Net,
     /// For pages (public addresses only).
-    pages: Client,
+    pages: Net,
     resolver: net::PublicResolver,
     endpoints: Endpoints,
     gate: Arc<Semaphore>,
 }
 
 impl Web {
-    /// `hosts`: names the local configuration maps on purpose (tests).
-    pub fn new(endpoints: Endpoints, hosts: HashMap<String, IpAddr>) -> Self {
-        let resolver = net::PublicResolver::new(hosts);
+    /// `hosts`: names the local configuration maps on purpose (tests);
+    /// `log`: the user's log of what left this computer.
+    pub fn new(
+        endpoints: Endpoints,
+        hosts: HashMap<String, IpAddr>,
+        log: Option<Arc<dyn Recorder>>,
+    ) -> Self {
+        let resolver = net::PublicResolver::new(hosts.clone());
         Self {
-            providers: Client::builder()
-                .user_agent(user_agent())
-                .connect_timeout(Duration::from_secs(4))
-                .timeout(Duration::from_secs(8))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .expect("provider client"),
-            pages: net::page_client(resolver.clone(), &user_agent()),
+            providers: Net::new(
+                ancilo_net::with_hosts(Client::builder(), hosts.iter())
+                    .user_agent(user_agent())
+                    .connect_timeout(Duration::from_secs(4))
+                    .timeout(Duration::from_secs(8))
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .expect("provider client"),
+                log.clone(),
+            ),
+            pages: Net::new(net::page_client(resolver.clone(), &user_agent()), log),
             resolver,
             endpoints,
             gate: Arc::new(Semaphore::new(1)),
@@ -157,6 +166,7 @@ impl Web {
                 providers::Wikipedia {
                     client: &self.providers,
                     base: &self.endpoints.wikipedia,
+                    subject: &q.query,
                 }
                 .pages(q)
                 .await?
@@ -178,7 +188,8 @@ impl Web {
                     answer.boxes.into_iter().chain(top).collect()
                 } else {
                     // Side by side (at most MAX_PAGES).
-                    let got = futures::future::join_all(top.iter().map(|p| self.page(p))).await;
+                    let got =
+                        futures::future::join_all(top.iter().map(|p| self.page(p, &q.query))).await;
                     let mut pages = Vec::new();
                     for (hit, page) in top.into_iter().zip(got) {
                         match page {
@@ -197,8 +208,8 @@ impl Web {
     }
 
     /// A result page as readable text, its snippet first (None: not fetched).
-    async fn page(&self, hit: &Page) -> Option<Page> {
-        let f = match net::fetch(&self.pages, &self.resolver, &hit.url).await {
+    async fn page(&self, hit: &Page, subject: &str) -> Option<Page> {
+        let f = match net::fetch(&self.pages, &self.resolver, &hit.url, subject).await {
             Ok(f) => f,
             Err(why) => {
                 tracing::debug!(url = %hit.url, %why, "page not fetched");
@@ -315,6 +326,7 @@ mod tests {
                 serper: "http://127.0.0.1:9".into(),
             },
             HashMap::new(),
+            None,
         );
         let q = Query {
             query: "Oslo".into(),

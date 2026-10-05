@@ -67,7 +67,14 @@ fn tools(state: &AppState) -> Vec<Value> {
             }))
         })
         .collect();
-    let names: Vec<&str> = state.registry.names();
+    // The user's own operations (their log of what left this computer) are
+    // not there for a model.
+    let names: Vec<&str> = state
+        .registry
+        .specs()
+        .filter(|s| !s.own)
+        .map(|s| s.name)
+        .collect();
     out.push(json!({
         "name": "ancilo",
         "description": format!(
@@ -122,6 +129,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Value {
             let help: Vec<Value> = state
                 .registry
                 .specs()
+                .filter(|s| !s.own)
                 .map(|s| json!({"operation": s.name, "summary": s.summary, "consequential": s.consequential, "input": schema(s)}))
                 .collect();
             return tool_result(Ok(Value::Array(help)));

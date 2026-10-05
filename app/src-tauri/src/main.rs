@@ -86,7 +86,7 @@ async fn offer(
     item: &MenuItem<tauri::Wry>,
     asked: bool,
 ) {
-    match update::check(app).await {
+    match update::check(app, asked).await {
         Ok(Some(u)) => {
             let _ = item.set_text(format!("Install Ancilo {} and Restart", u.version));
             *pending.lock().unwrap() = Some(u);
@@ -335,7 +335,7 @@ fn main() {
                             match ready {
                                 Some(u) => {
                                     let _ = item.set_text("Installing update…");
-                                    match update::install(u).await {
+                                    match update::install(&app, u).await {
                                         Ok(()) => app.restart(),
                                         Err(e) => {
                                             let _ = item.set_text(format!("Update failed: {e}"));

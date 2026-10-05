@@ -93,7 +93,13 @@ fn valid_key(k: &str) -> Result<&str> {
 }
 
 impl WebSearch {
-    pub fn new(config: &Config, db: Db, secrets: Arc<dyn SecretStore>, bus: EventBus) -> Self {
+    pub fn new(
+        config: &Config,
+        db: Db,
+        secrets: Arc<dyn SecretStore>,
+        bus: EventBus,
+        log: Option<Arc<dyn ancilo_net::Recorder>>,
+    ) -> Self {
         let endpoints = Endpoints {
             wikipedia: config.wikipedia_endpoint.clone(),
             serper: config.serper_endpoint.clone(),
@@ -104,7 +110,7 @@ impl WebSearch {
             .map(|(h, ip)| (h.to_ascii_lowercase(), *ip))
             .collect();
         Self {
-            web: Web::new(endpoints, hosts),
+            web: Web::new(endpoints, hosts, log),
             db,
             secrets,
             bus,

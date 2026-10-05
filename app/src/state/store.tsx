@@ -52,6 +52,8 @@ export function queriesFor(kind: string): string[][] {
       return [["list_terminals"]];
     case "library":
       return [["folder_documents"]];
+    case "outbound":
+      return [["outbound_summary"], ["outbound_log"]];
     default:
       return [];
   }

@@ -21,7 +21,7 @@ const SUPPORTED: &[&str] = &[
 #[tokio::test]
 #[ignore = "network: checks the catalog against huggingface.co"]
 async fn the_catalog_matches_hugging_face() {
-    let hf = HfClient::new("https://huggingface.co");
+    let hf = HfClient::new("https://huggingface.co", None, &Default::default());
     let mut problems = Vec::new();
     for m in Catalog::bundled().models {
         let repo = m.address.trim_start_matches("hf.co/");

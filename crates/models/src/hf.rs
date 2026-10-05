@@ -1,8 +1,10 @@
 //! A small Hugging Face client: model info, file lists with SHA-256, file URLs.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use ancilo_core::{Error, Result};
+use ancilo_net::{By, Note, Purpose};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -12,7 +14,7 @@ use crate::planner::{ModelShape, RepoFile};
 #[derive(Clone)]
 pub struct HfClient {
     base: String,
-    http: reqwest::Client,
+    http: ancilo_net::Net,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -61,7 +63,13 @@ pub struct SearchHit {
 }
 
 impl HfClient {
-    pub fn new(endpoint: &str) -> Self {
+    /// `log`: the user's log of what left this computer; `hosts`: names
+    /// reached at these addresses (tests).
+    pub fn new(
+        endpoint: &str,
+        log: Option<Arc<dyn ancilo_net::Recorder>>,
+        hosts: &std::collections::BTreeMap<String, std::net::IpAddr>,
+    ) -> Self {
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(t) = token()
             && let Ok(v) = reqwest::header::HeaderValue::from_str(&format!("Bearer {t}"))
@@ -70,7 +78,7 @@ impl HfClient {
             v.set_sensitive(true);
             headers.insert(reqwest::header::AUTHORIZATION, v);
         }
-        let http = reqwest::Client::builder()
+        let http = ancilo_net::with_hosts(reqwest::Client::builder(), hosts)
             .default_headers(headers)
             .user_agent(user_agent())
             .connect_timeout(Duration::from_secs(15))
@@ -79,15 +87,16 @@ impl HfClient {
             .expect("http client");
         Self {
             base: endpoint.trim_end_matches('/').to_string(),
-            http,
+            http: ancilo_net::Net::new(http, log),
         }
     }
 
-    async fn get_json(&self, url: &str, what: &str) -> Result<Value> {
-        let resp =
-            self.http.get(url).send().await.map_err(|e| {
-                Error::unavailable(ancilo_core::msg("hf.unreachable", &[("why", &e)]))
-            })?;
+    async fn get_json(&self, url: &str, what: &str, note: Note) -> Result<Value> {
+        let resp = self
+            .http
+            .send(self.http.get(url), note)
+            .await
+            .map_err(|e| Error::unavailable(ancilo_core::msg("hf.unreachable", &[("why", &e)])))?;
         match resp.status().as_u16() {
             200 => resp
                 .json()
@@ -124,7 +133,13 @@ impl HfClient {
             ],
         )
         .map_err(|e| Error::invalid(format!("search: {e}")))?;
-        let v = self.get_json(url.as_str(), "the search").await?;
+        let v = self
+            .get_json(
+                url.as_str(),
+                "the search",
+                Note::new(Purpose::ModelSearch, query, By::You),
+            )
+            .await?;
         Ok(v.as_array()
             .into_iter()
             .flatten()
@@ -150,6 +165,7 @@ impl HfClient {
             .get_json(
                 &format!("{}/api/models/{repo}", self.base),
                 &format!("repository '{repo}'"),
+                Note::new(Purpose::ModelInfo, repo, By::You),
             )
             .await?;
         Ok(RepoInfo {
@@ -170,6 +186,7 @@ impl HfClient {
                     self.base
                 ),
                 &format!("repository '{repo}'"),
+                Note::new(Purpose::ModelInfo, repo, By::You),
             )
             .await?;
         Ok(v.as_array()
@@ -198,10 +215,13 @@ impl HfClient {
         revision: &str,
         path: &str,
     ) -> Result<Option<String>> {
+        // Fetched by Ancilo itself when a model is added (its description).
         let resp = self
             .http
-            .get(self.file_url(repo, revision, path))
-            .send()
+            .send(
+                self.http.get(self.file_url(repo, revision, path)),
+                Note::new(Purpose::ModelCard, format!("{repo}/{path}"), By::Ancilo),
+            )
             .await
             .map_err(|e| Error::unavailable(ancilo_core::msg("hf.unreachable", &[("why", &e)])))?;
         match resp.status().as_u16() {
@@ -239,7 +259,7 @@ mod tests {
             .with_gguf_meta(json!({"architecture": "qwen3", "context_length": 40960})),
         ])
         .await;
-        let c = HfClient::new(&hf.url());
+        let c = HfClient::new(&hf.url(), None, &Default::default());
         let info = c.model_info("org/M-GGUF").await.unwrap();
         assert_eq!(info.context_length, Some(40960));
         let files = c.files("org/M-GGUF", "main").await.unwrap();
@@ -251,7 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn unreachable_endpoint_is_unavailable() {
-        let c = HfClient::new("http://127.0.0.1:9");
+        let c = HfClient::new("http://127.0.0.1:9", None, &Default::default());
         assert_eq!(c.model_info("a/b").await.unwrap_err().code(), "unavailable");
     }
 }

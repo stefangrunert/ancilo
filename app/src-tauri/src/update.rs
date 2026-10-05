@@ -25,21 +25,75 @@ pub fn configured<R: Runtime>(app: &AppHandle<R>) -> bool {
 }
 
 /// A newer, correctly announced release – `None` if this is the latest.
-pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, String> {
+/// `asked`: the user clicked (else Ancilo's daily check, if allowed).
+pub async fn check<R: Runtime>(app: &AppHandle<R>, asked: bool) -> Result<Option<Update>, String> {
     if !configured(app) {
         return Err("updates are not set up in this build".into());
     }
     let updater = app.updater().map_err(|e| e.to_string())?;
-    updater.check().await.map_err(|e| e.to_string())
+    let result = updater.check().await.map_err(|e| e.to_string());
+    let endpoint = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|u| u["endpoints"][0].as_str())
+        .unwrap_or_default()
+        .to_string();
+    log(
+        app,
+        "update_check",
+        "version",
+        &endpoint,
+        asked,
+        result.as_ref().err().map(String::as_str),
+    );
+    result
 }
 
 /// Downloads, verifies the signature, installs; the app restarts afterwards
 /// (the daemon of the old version is replaced on the next start).
-pub async fn install(update: Update) -> Result<(), String> {
-    update
+pub async fn install<R: Runtime>(app: &AppHandle<R>, update: Update) -> Result<(), String> {
+    let (url, version) = (update.download_url.to_string(), update.version.clone());
+    let result = update
         .download_and_install(|_, _| {}, || {})
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    log(
+        app,
+        "update_download",
+        &format!("Ancilo {version}"),
+        &url,
+        true,
+        result.as_ref().err().map(String::as_str),
+    );
+    result
+}
+
+/// The updater runs here, in the app: what it sent goes into the user's log
+/// of what left this computer (System › What left this Mac).
+fn log<R: Runtime>(
+    app: &AppHandle<R>,
+    purpose: &str,
+    subject: &str,
+    url: &str,
+    asked: bool,
+    error: Option<&str>,
+) {
+    use tauri::Manager;
+    if let Some(d) = app.try_state::<crate::daemon::Daemon>() {
+        let _ = crate::daemon::op_with(
+            &d,
+            "record_departure",
+            &serde_json::json!({
+                "purpose": purpose,
+                "subject": subject,
+                "by": if asked { "you" } else { "ancilo" },
+                "url": url,
+                "error": error,
+            }),
+        );
+    }
 }
 
 #[cfg(test)]

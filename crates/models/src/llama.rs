@@ -117,7 +117,7 @@ fn installed(paths: &Paths, build: &PinnedBuild) -> Result<Option<PathBuf>> {
 pub async fn ensure_binary(
     paths: &Paths,
     config: &Config,
-    http: &reqwest::Client,
+    http: &ancilo_net::Net,
     bus: &EventBus,
     build: Option<PinnedBuild>,
 ) -> Result<PathBuf> {
@@ -153,16 +153,18 @@ pub async fn ensure_binary(
             "llama.cpp is not installed – this Ancilo package should contain it; install it with `ancilo llama install`".into(),
         ));
     }
-    install(paths, config, http, bus, build).await
+    // Fetched by Ancilo itself, to start a model.
+    install(paths, config, http, bus, build, ancilo_net::By::Ancilo).await
 }
 
 /// Downloads the pinned llama.cpp build (size and SHA-256 checked) into the home.
 pub async fn install(
     paths: &Paths,
     config: &Config,
-    http: &reqwest::Client,
+    http: &ancilo_net::Net,
     bus: &EventBus,
     build: PinnedBuild,
+    by: ancilo_net::By,
 ) -> Result<PathBuf> {
     let target = paths.bin_dir().join(format!("llama-{}", build.tag));
     let archive = paths.bin_dir().join(build.asset);
@@ -177,6 +179,11 @@ pub async fn install(
         size: Some(build.size),
         sha256: Some(build.sha256.to_string()),
         bearer: None,
+        note: ancilo_net::Note::new(
+            ancilo_net::Purpose::LlamaDownload,
+            format!("llama.cpp {}", build.tag),
+            by,
+        ),
     };
     download::download(
         http,
@@ -880,7 +887,7 @@ mod tests {
             ..home.config()
         };
         let bus = EventBus::in_memory();
-        let http = reqwest::Client::new();
+        let http = ancilo_net::Net::new(reqwest::Client::new(), None);
         // Downloads only when allowed.
         let err = ensure_binary(
             &home.paths,
@@ -921,9 +928,16 @@ mod tests {
             err.message()
         );
         // Reinstalling repairs it.
-        install(&home.paths, &config, &http, &bus, build.clone())
-            .await
-            .unwrap();
+        install(
+            &home.paths,
+            &config,
+            &http,
+            &bus,
+            build.clone(),
+            ancilo_net::By::You,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             ensure_binary(&home.paths, &config, &http, &bus, Some(build.clone()))
                 .await

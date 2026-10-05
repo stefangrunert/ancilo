@@ -50,11 +50,16 @@ fn running(paths: &Paths) -> Option<(Daemon, serde_json::Value)> {
 
 /// Calls a daemon operation without input; its answer, if any.
 pub fn op(d: &Daemon, name: &str) -> Option<serde_json::Value> {
+    op_with(d, name, &serde_json::json!({}))
+}
+
+/// Calls a daemon operation with `input`; its answer, if any.
+pub fn op_with(d: &Daemon, name: &str, input: &serde_json::Value) -> Option<serde_json::Value> {
     let host = d.url.strip_prefix("http://")?;
     let addr = host.parse().ok()?;
     let mut s = TcpStream::connect_timeout(&addr, Duration::from_millis(500)).ok()?;
     let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
-    let body = "{}";
+    let body = input.to_string();
     write!(
         s,
         "POST /api/v1/ops/{name} HTTP/1.0\r\nHost: {host}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",

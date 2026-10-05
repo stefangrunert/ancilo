@@ -74,35 +74,50 @@ fn resolver() -> PublicResolver {
 async fn pages_come_only_from_where_they_may() {
     let port = serve().await;
     let r = resolver();
-    let client = net::page_client(r.clone(), "test");
+    let client = ancilo_net::Net::new(net::page_client(r.clone(), "test"), None);
     let url = |p: &str| format!("http://pages.test:{port}{p}");
 
-    let ok = net::fetch(&client, &r, &url("/page")).await.unwrap();
+    let ok = net::fetch(&client, &r, &url("/page"), "test")
+        .await
+        .unwrap();
     assert!(ok.html && ok.body.contains("Hello from the page."));
     // A redirect to another name the configuration maps is followed …
-    let moved = net::fetch(&client, &r, &url("/to-mapped")).await.unwrap();
+    let moved = net::fetch(&client, &r, &url("/to-mapped"), "test")
+        .await
+        .unwrap();
     assert_eq!(moved.url.host_str(), Some("other.test"));
     // … one inside (an address or "localhost") is not.
     for inside in ["/to-loopback", "/to-localhost"] {
-        let err = net::fetch(&client, &r, &url(inside)).await.unwrap_err();
+        let err = net::fetch(&client, &r, &url(inside), "test")
+            .await
+            .unwrap_err();
         assert!(
             err.contains("redirect") || err.contains("local") || err.contains("public"),
             "{inside}: {err}"
         );
     }
     // The same server under its address is refused before anything is sent.
-    let err = net::fetch(&client, &r, &format!("http://127.0.0.1:{port}/page"))
-        .await
-        .unwrap_err();
+    let err = net::fetch(
+        &client,
+        &r,
+        &format!("http://127.0.0.1:{port}/page"),
+        "test",
+    )
+    .await
+    .unwrap_err();
     assert!(err.contains("not a public address"), "{err}");
     assert!(
-        net::fetch(&client, &r, &url("/loop")).await.is_err(),
+        net::fetch(&client, &r, &url("/loop"), "test")
+            .await
+            .is_err(),
         "redirect loop"
     );
-    let err = net::fetch(&client, &r, &url("/pdf")).await.unwrap_err();
+    let err = net::fetch(&client, &r, &url("/pdf"), "test")
+        .await
+        .unwrap_err();
     assert!(err.contains("not a web page"), "{err}");
     // Reading stops at the limit.
-    let big = net::fetch(&client, &r, &url("/big")).await.unwrap();
+    let big = net::fetch(&client, &r, &url("/big"), "test").await.unwrap();
     assert_eq!(big.body.len(), MAX_PAGE_BYTES);
 }
 
@@ -112,15 +127,25 @@ async fn names_not_mapped_never_reach_this_computer() {
     let port = serve().await;
     // Without the mapping, "pages.test" does not exist, and "localhost" is refused.
     let r = PublicResolver::default();
-    let client = net::page_client(r.clone(), "test");
+    let client = ancilo_net::Net::new(net::page_client(r.clone(), "test"), None);
     assert!(
-        net::fetch(&client, &r, &format!("http://localhost:{port}/page"))
-            .await
-            .is_err()
+        net::fetch(
+            &client,
+            &r,
+            &format!("http://localhost:{port}/page"),
+            "test"
+        )
+        .await
+        .is_err()
     );
     assert!(
-        net::fetch(&client, &r, &format!("http://pages.test:{port}/page"))
-            .await
-            .is_err()
+        net::fetch(
+            &client,
+            &r,
+            &format!("http://pages.test:{port}/page"),
+            "test"
+        )
+        .await
+        .is_err()
     );
 }

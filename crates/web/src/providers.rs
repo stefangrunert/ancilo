@@ -2,7 +2,8 @@
 //! (Google results, the user's key). Each turns a planned lookup into pages.
 
 use ancilo_core::{Error, Result};
-use reqwest::{Client, StatusCode, Url};
+use ancilo_net::{By, Net, Note, Purpose};
+use reqwest::{StatusCode, Url};
 use serde_json::{Value, json};
 
 /// Answers from providers are read up to this size.
@@ -60,8 +61,10 @@ fn offline(e: reqwest::Error) -> Error {
 
 /// Wikipedia through its official API. `base`: `https://{lang}.wikipedia.org`.
 pub struct Wikipedia<'a> {
-    pub client: &'a Client,
+    pub client: &'a Net,
     pub base: &'a str,
+    /// What the search is for (the user's log of what left this computer).
+    pub subject: &'a str,
 }
 
 impl Wikipedia<'_> {
@@ -76,7 +79,14 @@ impl Wikipedia<'_> {
             .extend_pairs(params)
             .append_pair("format", "json")
             .append_pair("formatversion", "2");
-        let res = self.client.get(url).send().await.map_err(offline)?;
+        let res = self
+            .client
+            .send(
+                self.client.get(url),
+                Note::new(Purpose::WebSearch, self.subject, By::You),
+            )
+            .await
+            .map_err(offline)?;
         if !res.status().is_success() {
             return Err(Error::unavailable(format!(
                 "Wikipedia answered HTTP {}",
@@ -208,7 +218,7 @@ pub struct SerperAnswer {
 
 /// Google results through Serper (`POST {base}/search`, key in `X-API-KEY`).
 pub struct Serper<'a> {
-    pub client: &'a Client,
+    pub client: &'a Net,
     pub base: &'a str,
     pub key: &'a str,
 }
@@ -218,10 +228,13 @@ impl Serper<'_> {
         let lang = language(&q.lang);
         let res = self
             .client
-            .post(format!("{}/search", self.base.trim_end_matches('/')))
-            .header("X-API-KEY", self.key)
-            .json(&json!({"q": q.query, "hl": lang, "num": 8}))
-            .send()
+            .send(
+                self.client
+                    .post(format!("{}/search", self.base.trim_end_matches('/')))
+                    .header("X-API-KEY", self.key)
+                    .json(&json!({"q": q.query, "hl": lang, "num": 8})),
+                Note::new(Purpose::WebSearch, &q.query, By::You),
+            )
             .await
             .map_err(offline)?;
         match res.status() {

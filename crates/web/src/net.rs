@@ -183,18 +183,22 @@ pub struct Fetched {
 
 /// Fetches a page – HTML or plain text, at most [`MAX_PAGE_BYTES`].
 pub async fn fetch(
-    client: &Client,
+    client: &ancilo_net::Net,
     resolver: &PublicResolver,
     url: &str,
+    subject: &str,
 ) -> Result<Fetched, String> {
     let url = Url::parse(url).map_err(|e| format!("not an address: {e}"))?;
     if let Some(why) = refuse(&url, resolver) {
         return Err(why);
     }
     let mut res = client
-        .get(url)
-        .header(reqwest::header::ACCEPT, "text/html,text/plain;q=0.9")
-        .send()
+        .send(
+            client
+                .get(url)
+                .header(reqwest::header::ACCEPT, "text/html,text/plain;q=0.9"),
+            ancilo_net::Note::new(ancilo_net::Purpose::WebPage, subject, ancilo_net::By::You),
+        )
         .await
         .map_err(|e| e.to_string())?;
     if !res.status().is_success() {

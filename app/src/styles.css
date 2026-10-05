@@ -537,3 +537,15 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .task-change.deleted .badge { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
 .task-change.renamed .badge, .task-change.modified .badge { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .thinking-time{font-variant-numeric:tabular-nums}
+
+/* System › What left this Mac */
+.outbound-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.outbound-day { margin: 8px 0 2px; text-transform: none; }
+.outbound-row { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; background: transparent; color: var(--fg); border: 0; border-radius: 8px; padding: 6px 8px; font-weight: 400; }
+.outbound-row:hover, .outbound-row[aria-expanded="true"] { background: var(--hover); }
+.outbound-time { flex: none; min-width: 44px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.outbound-what { min-width: 0; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.outbound-details { margin: 4px 0 8px 16px; display: flex; flex-direction: column; gap: 10px; }
+.outbound-request { display: flex; flex-direction: column; gap: 3px; border-left: 2px solid var(--line); padding-left: 10px; }
+.outbound-url { font-size: 12px; overflow-wrap: anywhere; }
+.outbound-sent { font-size: 12px; max-height: 260px; overflow: auto; background: var(--hover); border-radius: 8px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }

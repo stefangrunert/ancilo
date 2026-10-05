@@ -216,6 +216,16 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE projects ADD COLUMN area TEXT;
     "#,
+    // 13: the user's log of what left this computer (kept 30 days)
+    r#"
+    CREATE TABLE outbound (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        at        TEXT NOT NULL,
+        purpose   TEXT NOT NULL,
+        departure TEXT NOT NULL
+    );
+    CREATE INDEX outbound_at ON outbound(at);
+    "#,
 ];
 
 #[cfg(test)]

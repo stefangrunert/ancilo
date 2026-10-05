@@ -432,12 +432,22 @@ async fn mcp_over_stdio_delegates_and_reaches_every_operation() {
         .json()
         .await
         .unwrap();
+    // Every operation – except the user's own (their log of what left this
+    // computer), which a model never reaches (checked last).
     let op_names: Vec<String> = ops
         .as_array()
         .unwrap()
         .iter()
+        .filter(|o| o["own"] != true)
         .map(|o| o["name"].as_str().unwrap().to_string())
         .collect();
+    assert!(
+        ops.as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["name"] == "outbound_log" && o["own"] == true),
+        "the log is the user's own"
+    );
     let dir2 = dir.clone();
     let replies = tokio::task::spawn_blocking(move || {
         let mut msgs = vec![
@@ -449,6 +459,7 @@ async fn mcp_over_stdio_delegates_and_reaches_every_operation() {
         for (i, op) in op_names.iter().filter(|o| *o != "daemon_shutdown").enumerate() {
             msgs.push(json!({"jsonrpc": "2.0", "id": 100 + i, "method": "tools/call", "params": {"name": "ancilo", "arguments": {"operation": op, "input": {}}}}));
         }
+        msgs.push(json!({"jsonrpc": "2.0", "id": 99, "method": "tools/call", "params": {"name": "ancilo", "arguments": {"operation": "outbound_log", "input": {}}}}));
         mcp_session(&home, &msgs)
     })
     .await
@@ -469,12 +480,20 @@ async fn mcp_over_stdio_delegates_and_reaches_every_operation() {
         "{}",
         replies[2]
     );
-    for r in &replies[3..] {
+    let (own, others) = replies[3..].split_last().unwrap();
+    for r in others {
         let text = r["result"]["content"][0]["text"]
             .as_str()
             .unwrap_or_default();
         assert!(!text.contains("unknown operation"), "{r}");
     }
+    assert!(
+        own["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("unknown operation"),
+        "the log of what left this computer is not for a model: {own}"
+    );
     env.stop().await;
 }
 

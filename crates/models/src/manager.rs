@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ancilo_core::{Config, Error, EventBus, Paths, Result};
+use ancilo_net::{By, Note, Purpose as NetPurpose};
 use ancilo_storage::Db;
 use ancilo_storage::rusqlite::{OptionalExtension, params};
 use chrono::{DateTime, Utc};
@@ -214,6 +215,9 @@ pub struct ManagerOptions {
     pub secrets: Arc<dyn ancilo_core::secrets::SecretStore>,
     /// How often the resource guard looks at the computer.
     pub guard_interval: Duration,
+    /// The user's log of what left this computer (downloads, Hugging Face,
+    /// the catalog, cloud models).
+    pub outbound: Option<Arc<dyn ancilo_net::Recorder>>,
 }
 
 impl Default for ManagerOptions {
@@ -224,6 +228,7 @@ impl Default for ManagerOptions {
             measure_speed: true,
             secrets: Arc::new(ancilo_core::secrets::MemorySecrets::default()),
             guard_interval: Duration::from_secs(10),
+            outbound: None,
         }
     }
 }
@@ -235,7 +240,7 @@ struct Inner {
     bus: EventBus,
     hw: HardwareProfile,
     hf: HfClient,
-    http: reqwest::Client,
+    http: ancilo_net::Net,
     llama_build: Option<PinnedBuild>,
     options: ManagerOptions,
     instances: tokio::sync::Mutex<HashMap<String, Arc<Instance>>>,
@@ -396,12 +401,19 @@ impl ModelManager {
         llama_build: Option<PinnedBuild>,
         options: ManagerOptions,
     ) -> Self {
-        let hf = HfClient::new(&config.hf_endpoint);
-        let http = reqwest::Client::builder()
-            .user_agent(crate::hf::user_agent())
-            .connect_timeout(Duration::from_secs(15))
-            .build()
-            .expect("http client");
+        let hf = HfClient::new(
+            &config.hf_endpoint,
+            options.outbound.clone(),
+            &config.web_hosts,
+        );
+        let http = ancilo_net::Net::new(
+            ancilo_net::with_hosts(reqwest::Client::builder(), &config.web_hosts)
+                .user_agent(crate::hf::user_agent())
+                .connect_timeout(Duration::from_secs(15))
+                .build()
+                .expect("http client"),
+            options.outbound.clone(),
+        );
         Self {
             inner: Arc::new(Inner {
                 paths,
@@ -449,6 +461,16 @@ impl ModelManager {
     // ---- resources ----------------------------------------------------------
 
     /// Where API keys are kept (the system keychain in the daemon).
+    /// The user's log of what left this computer (shared with the gateway and the web search).
+    pub fn outbound(&self) -> Option<Arc<dyn ancilo_net::Recorder>> {
+        self.inner.options.outbound.clone()
+    }
+
+    /// Host names reached at these addresses (tests: fakes out there).
+    pub fn hosts(&self) -> &std::collections::BTreeMap<String, std::net::IpAddr> {
+        &self.inner.config.web_hosts
+    }
+
     pub fn secrets(&self) -> Arc<dyn ancilo_core::secrets::SecretStore> {
         self.inner.options.secrets.clone()
     }
@@ -905,9 +927,10 @@ impl ModelManager {
         let resp = self
             .inner
             .http
-            .get(url)
-            .timeout(Duration::from_secs(10))
-            .send()
+            .send(
+                self.inner.http.get(url).timeout(Duration::from_secs(10)),
+                Note::new(NetPurpose::Catalog, "recommended models", By::You),
+            )
             .await
             .map_err(|e| Error::unavailable(format!("cannot fetch the model list: {e}")))?;
         if !resp.status().is_success() {
@@ -1521,14 +1544,14 @@ impl ModelManager {
             json!({"name": record.name, "quant": record.quant, "downloading": downloading, "existing": preview.existing}),
         );
         if downloading {
-            self.spawn_download(record.clone(), start);
+            self.spawn_download(record.clone(), start, By::You);
         } else if start {
             return self.start(&id, None).await;
         }
         self.view(&record).await
     }
 
-    fn spawn_download(&self, record: ModelRecord, start: bool) {
+    fn spawn_download(&self, record: ModelRecord, start: bool, by: By) {
         let cancel = CancellationToken::new();
         // A resumed download shows its real progress right away (the partial
         // file is re-hashed before new progress events arrive).
@@ -1558,7 +1581,7 @@ impl ModelManager {
         let me = self.clone();
         tokio::spawn(async move {
             let id = record.id.clone();
-            let result = me.run_download(&record, &cancel).await;
+            let result = me.run_download(&record, &cancel, by).await;
             me.inner.downloads.lock().unwrap().remove(&id);
             match result {
                 Ok(()) => {
@@ -1580,7 +1603,12 @@ impl ModelManager {
         });
     }
 
-    async fn run_download(&self, record: &ModelRecord, cancel: &CancellationToken) -> Result<()> {
+    async fn run_download(
+        &self,
+        record: &ModelRecord,
+        cancel: &CancellationToken,
+        by: By,
+    ) -> Result<()> {
         let ModelSource::HuggingFace { repo, revision } = &record.source else {
             return Err(Error::internal("only Hugging Face models are downloaded"));
         };
@@ -1632,6 +1660,11 @@ impl ModelManager {
                 size: Some(file.size),
                 sha256: file.sha256.clone(),
                 bearer: crate::hf::token(),
+                note: Note::new(
+                    NetPurpose::ModelDownload,
+                    format!("{repo}/{}", file.path),
+                    by,
+                ),
             };
             result = download::download(
                 &self.inner.http,
@@ -1685,6 +1718,7 @@ impl ModelManager {
             &self.inner.http,
             &self.inner.bus,
             build,
+            By::You,
         )
         .await?;
         *self.inner.binary.lock().await = None;
@@ -1839,19 +1873,24 @@ impl ModelManager {
     async fn measure_speed(&self, instance: &Instance, id: &str) -> Option<f64> {
         let url = format!("{}/v1/chat/completions", instance.base_url()?);
         let started = Instant::now();
+        // To the local model: stays on this computer (not logged).
         let resp: Value = self
             .inner
             .http
-            .post(url)
-            .bearer_auth(&instance.api_key)
-            .timeout(Duration::from_secs(60))
-            .json(&json!({
-                "model": id,
-                "messages": [{"role": "user", "content": "Count from 1 to 40, separated by spaces."}],
-                "max_tokens": 64,
-                "temperature": 0,
-            }))
-            .send()
+            .send(
+                self.inner
+                    .http
+                    .post(url)
+                    .bearer_auth(&instance.api_key)
+                    .timeout(Duration::from_secs(60))
+                    .json(&json!({
+                        "model": id,
+                        "messages": [{"role": "user", "content": "Count from 1 to 40, separated by spaces."}],
+                        "max_tokens": 64,
+                        "temperature": 0,
+                    })),
+                Note::new(NetPurpose::CloudModel, id, By::Ancilo),
+            )
             .await
             .ok()?
             .json()
@@ -2187,7 +2226,7 @@ impl ModelManager {
         self.inner
             .bus
             .emit("download.retrying", Some(&r.id), json!({"manual": true}));
-        self.spawn_download(r.clone(), false);
+        self.spawn_download(r.clone(), false, By::You);
         self.status(&r.id).await
     }
 
@@ -2327,7 +2366,15 @@ impl ModelManager {
             if let Some(k) = api_key {
                 req = req.bearer_auth(k);
             }
-            match req.timeout(Duration::from_secs(20)).send().await {
+            match self
+                .inner
+                .http
+                .send(
+                    req.timeout(Duration::from_secs(20)),
+                    Note::new(NetPurpose::CloudSetup, base.clone(), By::You),
+                )
+                .await
+            {
                 Ok(resp) if resp.status().is_success() => {
                     let v: Value = resp.json().await.unwrap_or(Value::Null);
                     let names = v["data"]
@@ -2459,7 +2506,8 @@ impl ModelManager {
         }
         for r in self.records()? {
             match r.state {
-                FileState::Downloading => self.spawn_download(r.clone(), r.autostart),
+                // Resumed after a restart: Ancilo's own doing.
+                FileState::Downloading => self.spawn_download(r.clone(), r.autostart, By::Ancilo),
                 FileState::Ready if r.autostart && self.resource_settings().preload() => {
                     if let Err(e) = self.start(&r.id, None).await {
                         tracing::warn!(model = %r.id, error = %e, "could not restart model");

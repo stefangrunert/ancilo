@@ -1473,4 +1473,72 @@ mod tests {
         let sign = std::fs::read_to_string(repo_root().join("packaging/sign.sh")).unwrap();
         assert!(sign.contains("not releasing unsigned") && sign.contains("exit 1"));
     }
+
+    // covers: M11-AC-01
+    /// Nothing sends past the one door (`ancilo-net`, which logs what leaves
+    /// this computer): a request elsewhere in the product's code is a
+    /// failure – except the clients that only ever talk to this computer.
+    #[test]
+    fn nothing_sends_past_the_log_of_what_left() {
+        // Only this computer: the daemon (CLI, evals) and the local model's health.
+        const LOOPBACK: &[&str] = &[
+            "crates/cli/src/client.rs",
+            "crates/eval/src/coding.rs",
+            "crates/eval/src/delegation.rs",
+            "crates/eval/src/lib.rs",
+            "crates/models/src/llama.rs",
+        ];
+        // Build a client and hand it to `ancilo_net::Net` at once.
+        const WRAPPED: &[&str] = &[
+            "crates/gateway/src/lib.rs",
+            "crates/models/src/hf.rs",
+            "crates/models/src/manager.rs",
+            "crates/web/src/lib.rs",
+            "crates/web/src/net.rs",
+        ];
+        let root = repo_root();
+        let mut found = Vec::new();
+        let mut stack = vec![root.join("crates")];
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(&dir).unwrap().flatten() {
+                let p = e.path();
+                let rel = p
+                    .strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if p.is_dir() {
+                    let skip = ["crates/net", "crates/testkit", "crates/e2e", "crates/xtask"]
+                        .contains(&rel.as_str())
+                        || rel.ends_with("/tests")
+                        || rel.ends_with("/target");
+                    if !skip {
+                        stack.push(p);
+                    }
+                    continue;
+                }
+                if !rel.ends_with(".rs") || !rel.contains("/src/") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&p).unwrap();
+                // The product's code – not its tests.
+                let code = text.split("#[cfg(test)]").next().unwrap_or_default();
+                for (n, line) in code.lines().enumerate() {
+                    let sends = line.contains(".send()") || line.contains(".execute(req");
+                    let builds =
+                        line.contains("Client::new()") || line.contains("Client::builder()");
+                    let ok = LOOPBACK.contains(&rel.as_str())
+                        || (builds && !sends && WRAPPED.contains(&rel.as_str()));
+                    if (sends || builds) && !ok {
+                        found.push(format!("{rel}:{}: {}", n + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "requests past ancilo-net (the user's log of what left this computer):\n{}",
+            found.join("\n")
+        );
+    }
 }

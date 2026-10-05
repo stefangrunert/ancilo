@@ -194,6 +194,7 @@ dependencies = [
  "ancilo-index",
  "ancilo-mcp",
  "ancilo-models",
+ "ancilo-net",
  "ancilo-server",
  "ancilo-sessions",
  "ancilo-storage",
@@ -282,6 +283,7 @@ dependencies = [
  "ancilo-core",
  "ancilo-eval",
  "ancilo-models",
+ "ancilo-net",
  "ancilo-server",
  "ancilo-storage",
  "ancilo-testkit",
@@ -351,6 +353,7 @@ name = "ancilo-models"
 version = "0.4.3"
 dependencies = [
  "ancilo-core",
+ "ancilo-net",
  "ancilo-storage",
  "ancilo-testkit",
  "chrono",
@@ -372,6 +375,21 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "ancilo-net"
+version = "0.4.3"
+dependencies = [
+ "axum",
+ "chrono",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -482,6 +500,7 @@ name = "ancilo-web"
 version = "0.4.3"
 dependencies = [
  "ancilo-core",
+ "ancilo-net",
  "axum",
  "dom_smoothie",
  "futures",

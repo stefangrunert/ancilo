@@ -515,3 +515,68 @@ describe("RemoveAncilo", () => {
     }
   });
 });
+
+describe("OutboundLog", () => {
+  const entry = (id: number, over: Record<string, unknown> = {}) => ({
+    id,
+    at: "2026-10-05T12:00:00Z",
+    purpose: "web_search",
+    subject: "Gaustatoppen Höhe",
+    by: "you",
+    method: "GET",
+    host: "de.wikipedia.org",
+    url: `https://de.wikipedia.org/w/api.php?srsearch=Gaustatoppen&n=${id}`,
+    sent: null,
+    sent_bytes: 0,
+    received_bytes: 1200,
+    status: 200,
+    error: null,
+    ...over,
+  });
+
+  // covers: M11-AC-03
+  it("says simply what left, and every request in detail on a click", async () => {
+    const { OutboundLog, group } = await import("./OutboundLog");
+    const entries = [
+      entry(5, { purpose: "cloud_model", subject: "gpt-4o", host: "api.openai.com", method: "POST", url: "https://api.openai.com/v1/chat/completions", sent: '{"messages":[{"role":"user","content":"Hallo"}]}', sent_bytes: 48 }),
+      entry(4),
+      entry(3),
+      entry(2, { purpose: "model_card", subject: "unsloth/Qwen3.5-4B-GGUF/README.md", by: "ancilo", host: "huggingface.co" }),
+    ];
+    // A search's several requests are one line.
+    expect(group(entries as never).map((g) => g.entries.length)).toEqual([1, 2, 1]);
+    const { calls } = renderWithDaemon(<OutboundLog />, {
+      outbound_summary: () => ({ today: { web_search: 2, cloud_model: 1 }, week: { web_search: 2, cloud_model: 1, model_card: 1 }, first: null, last: null, keep_days: 30 }),
+      outbound_log: () => ({ entries, more: false }),
+      clear_outbound_log: () => ({ removed: 4 }),
+    });
+    expect(await screen.findByText("Today: 3 requests · last 7 days: 4")).toBeInTheDocument();
+    expect(screen.getByText(/Message to the cloud model gpt-4o/)).toBeInTheDocument();
+    expect(screen.getByText(/Web search “Gaustatoppen Höhe”/)).toBeInTheDocument();
+    expect(screen.getByText("2 requests", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("by Ancilo itself")).toBeInTheDocument();
+    // Details only on request: the address and what was sent.
+    expect(screen.queryByTestId("outbound-details")).toBeNull();
+    await userEvent.click(screen.getByText(/Message to the cloud model gpt-4o/));
+    const details = await screen.findByTestId("outbound-details");
+    expect(within(details).getByText(/POST https:\/\/api.openai.com\/v1\/chat\/completions/)).toBeInTheDocument();
+    await userEvent.click(within(details).getByText("What was sent"));
+    expect(within(details).getByText(/"content": "Hallo"/)).toBeInTheDocument();
+    // Emptying asks first.
+    await userEvent.click(screen.getByRole("button", { name: "Empty the log" }));
+    expect(calls.find((c) => c.op === "clear_outbound_log")).toBeUndefined();
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Empty the log" }));
+    await waitFor(() => expect(calls.find((c) => c.op === "clear_outbound_log")).toBeDefined());
+  });
+
+  it("says when nothing left", async () => {
+    const { OutboundLog } = await import("./OutboundLog");
+    renderWithDaemon(<OutboundLog />, {
+      outbound_summary: () => ({ today: {}, week: {}, first: null, last: null, keep_days: 30 }),
+      outbound_log: () => ({ entries: [], more: false }),
+    });
+    expect(await screen.findByText("Nothing has left this Mac in the last 7 days.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Empty the log" })).toBeNull();
+  });
+});

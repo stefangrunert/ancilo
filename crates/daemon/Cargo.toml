@@ -25,6 +25,7 @@ ancilo-models.workspace = true
 ancilo-server.workspace = true
 ancilo-storage.workspace = true
 ancilo-web.workspace = true
+ancilo-net.workspace = true
 axum.workspace = true
 chrono.workspace = true
 schemars.workspace = true
