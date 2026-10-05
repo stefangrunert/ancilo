@@ -499,14 +499,7 @@ pub async fn start(
     );
     let token = ensure_token(&paths)?;
 
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", config.port))
-        .await
-        .map_err(|e| {
-            Error::Conflict(format!(
-                "cannot listen on 127.0.0.1:{} ({e}) – is another Ancilo daemon running?",
-                config.port
-            ))
-        })?;
+    let listener = listen(config.port).await?;
     let port = listener.local_addr()?.port();
     let info = DaemonInfo {
         pid: std::process::id(),
@@ -769,6 +762,42 @@ pub async fn start(
     })
 }
 
+/// Ports tried when the default one is taken – 7425 is Ancilo Dev's.
+const FALLBACK_PORTS: std::ops::RangeInclusive<u16> = 7426..=7449;
+
+/// The daemon's loopback listener. The default port may be taken – by
+/// Ancilo of another user on this Mac (each user has an own daemon), or by
+/// another program: then the next free port is used. Clients find it in
+/// `daemon.json`. A port set on purpose (`ANCILO_PORT`, tests) is never
+/// replaced.
+async fn listen(port: u16) -> Result<tokio::net::TcpListener> {
+    let taken = |port: u16, e: std::io::Error| {
+        Error::Conflict(format!(
+            "cannot listen on 127.0.0.1:{port} ({e}) – is another Ancilo daemon running?"
+        ))
+    };
+    match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+        Ok(l) => Ok(l),
+        Err(e)
+            if port == ancilo_core::config::DEFAULT_PORT
+                && e.kind() == std::io::ErrorKind::AddrInUse =>
+        {
+            for next in FALLBACK_PORTS {
+                if let Ok(l) = tokio::net::TcpListener::bind(("127.0.0.1", next)).await {
+                    tracing::warn!(
+                        port,
+                        next,
+                        "the default port is taken – using the next free one"
+                    );
+                    return Ok(l);
+                }
+            }
+            Err(taken(port, e))
+        }
+        Err(e) => Err(taken(port, e)),
+    }
+}
+
 /// Runs the daemon until SIGINT/SIGTERM or a `daemon_shutdown` request.
 pub async fn run(paths: Paths, config: Config) -> Result<()> {
     let options = DaemonOptions {
@@ -791,4 +820,25 @@ pub async fn run(paths: Paths, config: Config) -> Result<()> {
     tracing::info!("Ancilo daemon stopping");
     handle.stop().await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A second user on the same Mac: the default port is taken by their
+    /// Ancilo – this one takes the next free port instead of not starting.
+    /// A port set on purpose is never replaced.
+    #[tokio::test]
+    async fn a_taken_default_port_falls_back_but_a_chosen_one_does_not() {
+        let default = ancilo_core::config::DEFAULT_PORT;
+        // Taken – by this test, or already by an Ancilo running here.
+        let _other = tokio::net::TcpListener::bind(("127.0.0.1", default)).await;
+        let l = listen(default).await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        assert!(FALLBACK_PORTS.contains(&port), "{port}");
+        let chosen = l.local_addr().unwrap().port();
+        let e = listen(chosen).await.unwrap_err();
+        assert!(e.to_string().contains("cannot listen"), "{e}");
+    }
 }

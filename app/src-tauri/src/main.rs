@@ -4,6 +4,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod alert;
 mod daemon;
 mod links;
 mod monitor;
@@ -162,21 +163,7 @@ fn layout() -> [(&'static str, &'static [Entry]); 4] {
 
 /// The user manual on ancilo.app – German on a Mac in German, else English.
 fn manual_url() -> &'static str {
-    #[cfg(target_os = "macos")]
-    let german = std::process::Command::new("/usr/bin/defaults")
-        .args(["read", "-g", "AppleLanguages"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|langs| {
-            langs
-                .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
-                .find(|l| !l.is_empty())
-                .map(|first| first.starts_with("de"))
-        })
-        .unwrap_or(false);
-    #[cfg(not(target_os = "macos"))]
-    let german = std::env::var("LANG").is_ok_and(|l| l.starts_with("de"));
+    let german = alert::german();
     if german {
         "https://ancilo.app/de/handbuch/"
     } else {
@@ -286,8 +273,24 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
-            let d = daemon::ensure(&paths)
-                .map_err(|e| Box::new(anyhow_like(e)) as Box<dyn std::error::Error>)?;
+            // From the disk image: the login item would point at a place that
+            // is gone after ejecting – install first.
+            if let Some(bundle) = std::env::current_exe()
+                .ok()
+                .and_then(|e| remove::bundle_of(&e))
+                && !remove::installed(&bundle)
+            {
+                alert::show(alert::not_in_applications());
+                std::process::exit(1);
+            }
+            // No background service: say why instead of vanishing.
+            let d = match daemon::ensure(&paths) {
+                Ok(d) => d,
+                Err(e) => {
+                    alert::show(alert::no_daemon(&e, &paths.logs_dir().join("daemon.log")));
+                    std::process::exit(1);
+                }
+            };
             // For the menu bar (Settings…).
             app.manage(d.clone());
             #[cfg(target_os = "macos")]

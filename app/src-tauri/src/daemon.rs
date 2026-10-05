@@ -41,7 +41,11 @@ fn running(paths: &Paths) -> Option<(Daemon, serde_json::Value)> {
         .ok()?
         .trim()
         .to_string();
-    Some((Daemon { url, token }, h))
+    let d = Daemon { url, token };
+    // Where this home's daemon once listened, another one may listen now –
+    // another user's Ancilo on this Mac: only ours accepts our token.
+    op(&d, "daemon_info")?;
+    Some((d, h))
 }
 
 /// Calls a daemon operation without input; its answer, if any.

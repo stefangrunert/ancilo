@@ -92,7 +92,8 @@ async fn an_older_daemon_is_replaced_by_the_updated_version() {
         .unwrap();
     assert_eq!(code, 0, "{err}");
     assert!(err.contains("0.0.1 → "), "{err}");
-    assert_eq!(*calls.lock().unwrap(), ["daemon_shutdown"]);
+    // Asked who it is (only this home's daemon accepts its token), then stopped.
+    assert_eq!(*calls.lock().unwrap(), ["daemon_info", "daemon_shutdown"]);
     let _: Value = serde_json::from_str(&out).unwrap();
     // The new daemon runs the version of this CLI.
     let info: Value =
@@ -118,8 +119,10 @@ async fn a_newer_daemon_is_never_downgraded() {
         err.contains("older than the running Ancilo (99.0.0)"),
         "{err}"
     );
-    assert!(
-        calls.lock().unwrap().is_empty(),
+    // Only asked who it is – nothing else.
+    assert_eq!(
+        *calls.lock().unwrap(),
+        ["daemon_info"],
         "the newer daemon was left alone"
     );
 }

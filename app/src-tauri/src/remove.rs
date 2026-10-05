@@ -47,7 +47,7 @@ pub fn remove(paths: &Paths, bundle_id: &str, keep_data: bool) -> Result<Outcome
     let bundle = std::env::current_exe().ok().and_then(|e| bundle_of(&e));
     if let Some(bundle) = &bundle {
         remove_commands(bundle);
-        if removable(bundle) {
+        if installed(bundle) {
             if let Err(e) = std::fs::remove_dir_all(bundle) {
                 problems.push(msg(
                     "remove.app_left",
@@ -84,15 +84,15 @@ fn uid() -> Option<String> {
 }
 
 /// The `.app` a binary belongs to.
-fn bundle_of(exe: &Path) -> Option<PathBuf> {
+pub fn bundle_of(exe: &Path) -> Option<PathBuf> {
     exe.ancestors()
         .find(|p| p.extension().is_some_and(|e| e == "app"))
         .map(Path::to_path_buf)
 }
 
-/// Not the disk image it was opened from, not a copy macOS runs from a
-/// hidden place (App Translocation).
-fn removable(bundle: &Path) -> bool {
+/// Installed where it stays: not the disk image it was opened from, not a
+/// copy macOS runs from a hidden place (App Translocation).
+pub fn installed(bundle: &Path) -> bool {
     let s = bundle.to_string_lossy();
     !s.starts_with("/Volumes/") && !s.contains("/AppTranslocation/")
 }
@@ -170,9 +170,9 @@ mod tests {
 
     #[test]
     fn an_app_on_its_disk_image_is_left_alone() {
-        assert!(removable(Path::new("/Applications/Ancilo.app")));
-        assert!(!removable(Path::new("/Volumes/Ancilo/Ancilo.app")));
-        assert!(!removable(Path::new(
+        assert!(installed(Path::new("/Applications/Ancilo.app")));
+        assert!(!installed(Path::new("/Volumes/Ancilo/Ancilo.app")));
+        assert!(!installed(Path::new(
             "/private/var/folders/x/AppTranslocation/1/d/Ancilo.app"
         )));
     }

@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+- **Two people, one Mac**: when someone else on the Mac runs Ancilo too, Ancilo no longer fails to start – it takes the next free port (the other one's stays untouched), and never mistakes the other person's Ancilo for its own.
+- **No silent quitting**: if Ancilo's background service cannot start, the app says why (in the Mac's language) instead of disappearing.
+- **Run from the download?** Opened straight from the disk image, Ancilo asks to be dragged into Applications first – otherwise its background service would point at a place that is gone after ejecting.
+
 ## 0.4.2 – 2026-10-05
 
 - **Security fixes** from an independent review:

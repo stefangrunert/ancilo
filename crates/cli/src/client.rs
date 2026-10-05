@@ -66,8 +66,14 @@ impl Client {
         let find = || -> Option<String> { DaemonInfo::read(paths).map(|i| i.url) };
         if let Some(url) = find()
             && let Some(h) = health(&http, &url).await
+            && let Ok(client) = Self::with_token(http.clone(), url, paths)
+            // Where this home's daemon once listened, another one may listen
+            // now – another user's Ancilo on this Mac: only ours accepts our token.
+            && client
+                .call("daemon_info", serde_json::json!({}), false)
+                .await
+                .is_ok()
         {
-            let client = Self::with_token(http.clone(), url, paths)?;
             if !autostart {
                 return Ok(client);
             }
