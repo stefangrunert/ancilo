@@ -108,7 +108,7 @@ th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line
 .app-header { display: flex; align-items: center; gap: 6px; height: var(--header-h); flex: none; padding: 0 14px; background: var(--sidebar); border-bottom: 1px solid var(--line); user-select: none; -webkit-user-select: none; }
 .app-header.in-app { padding-left: 84px; }
 .app-header .spacer { flex: 1; align-self: stretch; }
-.header-link { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 7px; background: none; border: none; color: var(--muted); font-size: 13px; cursor: pointer; }
+.header-link { text-decoration: none; display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 7px; background: none; border: none; color: var(--muted); font-size: 13px; cursor: pointer; }
 .header-link:hover { color: var(--fg); background: var(--hover); }
 .header-link[aria-current="page"] { color: var(--fg); background: var(--surface-2); }
 .app-settings { display: inline-flex; align-items: center; gap: 12px; font-size: 13px; }

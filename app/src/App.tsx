@@ -117,6 +117,11 @@ function AppHeader({ route, collapsed, onToggle }: { route: Route; collapsed: bo
         <Icon name="pulse" />
         <span>{t("nav.system")}</span>
       </button>
+      {/* The user manual on ancilo.app – opens in the browser. */}
+      <a className="header-link" href={t("nav.manualUrl")} target="_blank" rel="noreferrer" data-testid="manual-link">
+        <Icon name="help" />
+        <span>{t("nav.manual")}</span>
+      </a>
       <span className="spacer" data-tauri-drag-region />
       <AppSettings />
     </header>

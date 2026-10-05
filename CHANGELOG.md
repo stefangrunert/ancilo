@@ -4,6 +4,8 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **Settings… (⌘,)** in the Ancilo menu opens System; **Help › Ancilo Manual** and *Manual* in the header open the new user manual on ancilo.app (German or English).
+
 - **Ancilo's messages in German**: errors and failed answers – memory, loading and downloading models, web search, documents, tasks, connecting Claude Code and Codex – appear in the app's language, also in conversations from before. Ancilo keeps them in English for itself (the history a model reads stays as it was).
 
 ## 0.4.0 – 2026-10-05

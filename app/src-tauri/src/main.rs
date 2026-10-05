@@ -19,12 +19,24 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 const WINDOW: &str = "main";
 
 fn show_window(app: &AppHandle, d: &daemon::Daemon) -> tauri::Result<()> {
+    show_window_at(app, d, None)
+}
+
+/// Shows the window – on `route` (the app's hash route, e.g. `#/system`)
+/// when given.
+fn show_window_at(app: &AppHandle, d: &daemon::Daemon, route: Option<&str>) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window(WINDOW) {
+        if let Some(route) = route {
+            w.eval(format!(
+                "window.location.hash = {}",
+                serde_json::to_string(route).unwrap_or_default()
+            ))?;
+        }
         w.show()?;
         w.set_focus()?;
         return Ok(());
     }
-    let url = format!("{}/app/", d.url)
+    let url = format!("{}/app/{}", d.url, route.unwrap_or_default())
         .parse()
         .map_err(|e| tauri::Error::Io(anyhow_like(format!("{e}"))))?;
     let token = serde_json::to_string(&d.token).unwrap_or_default();
@@ -100,6 +112,10 @@ async fn tokio_sleep(d: std::time::Duration) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Entry {
     About,
+    /// Settings… (⌘,): the window, on System.
+    Settings,
+    /// The user manual on ancilo.app, in the Mac's language.
+    Manual,
     Separator,
     Hide,
     HideOthers,
@@ -118,16 +134,18 @@ enum Entry {
 }
 
 /// The app's own menu bar – only what Ancilo uses. Tauri's default would
-/// add an empty File menu, Help and the system's Services submenu (the
+/// add an empty File menu, an empty Help and the system's Services submenu (the
 /// services of every other app on the Mac – nothing of Ancilo's). Edit stays:
 /// without it, copy and paste (⌘C, ⌘V) do not reach the window. The first
 /// menu is the app's own (its title: the app's name).
-fn layout() -> [(&'static str, &'static [Entry]); 3] {
+fn layout() -> [(&'static str, &'static [Entry]); 4] {
     use Entry::*;
     [
         (
             variant::NAME,
-            &[About, Separator, Hide, HideOthers, ShowAll, Separator, Quit],
+            &[
+                About, Separator, Settings, Separator, Hide, HideOthers, ShowAll, Separator, Quit,
+            ],
         ),
         (
             "Edit",
@@ -137,7 +155,32 @@ fn layout() -> [(&'static str, &'static [Entry]); 3] {
             "Window",
             &[Minimize, Zoom, FullScreen, Separator, CloseWindow],
         ),
+        ("Help", &[Manual]),
     ]
+}
+
+/// The user manual on ancilo.app – German on a Mac in German, else English.
+fn manual_url() -> &'static str {
+    #[cfg(target_os = "macos")]
+    let german = std::process::Command::new("/usr/bin/defaults")
+        .args(["read", "-g", "AppleLanguages"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|langs| {
+            langs
+                .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+                .find(|l| !l.is_empty())
+                .map(|first| first.starts_with("de"))
+        })
+        .unwrap_or(false);
+    #[cfg(not(target_os = "macos"))]
+    let german = std::env::var("LANG").is_ok_and(|l| l.starts_with("de"));
+    if german {
+        "https://ancilo.app/de/handbuch/"
+    } else {
+        "https://ancilo.app/en/manual/"
+    }
 }
 
 fn app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
@@ -152,6 +195,29 @@ fn app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     for (title, entries) in layout() {
         let sub = Submenu::new(app, title, true)?;
         for e in entries {
+            match e {
+                Entry::Settings => {
+                    sub.append(&MenuItem::with_id(
+                        app,
+                        "settings",
+                        "Settings…",
+                        true,
+                        Some("CmdOrCtrl+,"),
+                    )?)?;
+                    continue;
+                }
+                Entry::Manual => {
+                    sub.append(&MenuItem::with_id(
+                        app,
+                        "manual",
+                        format!("{} Manual", variant::NAME),
+                        true,
+                        None::<&str>,
+                    )?)?;
+                    continue;
+                }
+                _ => {}
+            }
             let item = match e {
                 Entry::About => PredefinedMenuItem::about(app, None, Some(about.clone()))?,
                 Entry::Separator => PredefinedMenuItem::separator(app)?,
@@ -169,6 +235,7 @@ fn app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 Entry::Zoom => PredefinedMenuItem::maximize(app, None)?,
                 Entry::FullScreen => PredefinedMenuItem::fullscreen(app, None)?,
                 Entry::CloseWindow => PredefinedMenuItem::close_window(app, None)?,
+                Entry::Settings | Entry::Manual => unreachable!("menu items of Ancilo's own"),
             };
             sub.append(&item)?;
         }
@@ -186,11 +253,26 @@ fn main() {
     let smoke = std::env::var_os("ANCILO_SMOKE").is_some();
     tauri::Builder::default()
         .menu(app_menu)
+        .on_menu_event(|app, e| match e.id().as_ref() {
+            "settings" => {
+                if let Some(d) = app.try_state::<daemon::Daemon>() {
+                    let _ = show_window_at(app, &d, Some("#/system"));
+                }
+            }
+            "manual" => {
+                if let Ok(url) = tauri::Url::parse(manual_url()) {
+                    links::open(&url);
+                }
+            }
+            _ => {}
+        })
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             let d = daemon::ensure(&paths)
                 .map_err(|e| Box::new(anyhow_like(e)) as Box<dyn std::error::Error>)?;
+            // For the menu bar (Settings…).
+            app.manage(d.clone());
             #[cfg(target_os = "macos")]
             if std::env::var_os("ANCILO_NO_LAUNCH_AGENT").is_none()
                 && !smoke
@@ -308,9 +390,9 @@ mod tests {
     fn the_menu_bar_has_only_what_ancilo_uses() {
         let layout = super::layout();
         let titles: Vec<&str> = layout.iter().map(|(t, _)| *t).collect();
-        assert_eq!(titles, [super::variant::NAME, "Edit", "Window"]);
+        assert_eq!(titles, [super::variant::NAME, "Edit", "Window", "Help"]);
         let all: Vec<_> = layout.iter().flat_map(|(_, e)| e.iter()).collect();
-        for needed in [Quit, Copy, Paste, SelectAll, CloseWindow] {
+        for needed in [Settings, Manual, Quit, Copy, Paste, SelectAll, CloseWindow] {
             assert!(all.contains(&&needed), "{needed:?} missing");
         }
     }
