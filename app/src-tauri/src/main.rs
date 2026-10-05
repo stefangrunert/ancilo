@@ -12,7 +12,7 @@ mod variant;
 
 use std::sync::{Arc, Mutex};
 
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -96,6 +96,87 @@ async fn tokio_sleep(d: std::time::Duration) {
     let _ = tauri::async_runtime::spawn_blocking(move || rx.recv()).await;
 }
 
+/// One entry of the menu bar (a system item – macOS labels and runs it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Entry {
+    About,
+    Separator,
+    Hide,
+    HideOthers,
+    ShowAll,
+    Quit,
+    Undo,
+    Redo,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+    Minimize,
+    Zoom,
+    FullScreen,
+    CloseWindow,
+}
+
+/// The app's own menu bar – only what Ancilo uses. Tauri's default would
+/// add an empty File menu, Help and the system's Services submenu (the
+/// services of every other app on the Mac – nothing of Ancilo's). Edit stays:
+/// without it, copy and paste (⌘C, ⌘V) do not reach the window. The first
+/// menu is the app's own (its title: the app's name).
+fn layout() -> [(&'static str, &'static [Entry]); 3] {
+    use Entry::*;
+    [
+        (
+            variant::NAME,
+            &[About, Separator, Hide, HideOthers, ShowAll, Separator, Quit],
+        ),
+        (
+            "Edit",
+            &[Undo, Redo, Separator, Cut, Copy, Paste, SelectAll],
+        ),
+        (
+            "Window",
+            &[Minimize, Zoom, FullScreen, Separator, CloseWindow],
+        ),
+    ]
+}
+
+fn app_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let about = AboutMetadata {
+        name: Some(variant::NAME.into()),
+        version: Some(app.package_info().version.to_string()),
+        website: Some("https://ancilo.app".into()),
+        website_label: Some("ancilo.app".into()),
+        ..Default::default()
+    };
+    let menu = Menu::new(app)?;
+    for (title, entries) in layout() {
+        let sub = Submenu::new(app, title, true)?;
+        for e in entries {
+            let item = match e {
+                Entry::About => PredefinedMenuItem::about(app, None, Some(about.clone()))?,
+                Entry::Separator => PredefinedMenuItem::separator(app)?,
+                Entry::Hide => PredefinedMenuItem::hide(app, None)?,
+                Entry::HideOthers => PredefinedMenuItem::hide_others(app, None)?,
+                Entry::ShowAll => PredefinedMenuItem::show_all(app, None)?,
+                Entry::Quit => PredefinedMenuItem::quit(app, None)?,
+                Entry::Undo => PredefinedMenuItem::undo(app, None)?,
+                Entry::Redo => PredefinedMenuItem::redo(app, None)?,
+                Entry::Cut => PredefinedMenuItem::cut(app, None)?,
+                Entry::Copy => PredefinedMenuItem::copy(app, None)?,
+                Entry::Paste => PredefinedMenuItem::paste(app, None)?,
+                Entry::SelectAll => PredefinedMenuItem::select_all(app, None)?,
+                Entry::Minimize => PredefinedMenuItem::minimize(app, None)?,
+                Entry::Zoom => PredefinedMenuItem::maximize(app, None)?,
+                Entry::FullScreen => PredefinedMenuItem::fullscreen(app, None)?,
+                Entry::CloseWindow => PredefinedMenuItem::close_window(app, None)?,
+            };
+            sub.append(&item)?;
+        }
+        menu.append(&sub)?;
+    }
+    Ok(menu)
+}
+
 fn anyhow_like(msg: String) -> std::io::Error {
     std::io::Error::other(msg)
 }
@@ -104,6 +185,7 @@ fn main() {
     let paths = variant::paths();
     let smoke = std::env::var_os("ANCILO_SMOKE").is_some();
     tauri::Builder::default()
+        .menu(app_menu)
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
@@ -214,4 +296,22 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("Ancilo app");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Entry::*;
+
+    /// The menu bar holds only Ancilo's own menus – no Services, no empty
+    /// File or Help – and Edit, so copy and paste reach the window.
+    #[test]
+    fn the_menu_bar_has_only_what_ancilo_uses() {
+        let layout = super::layout();
+        let titles: Vec<&str> = layout.iter().map(|(t, _)| *t).collect();
+        assert_eq!(titles, [super::variant::NAME, "Edit", "Window"]);
+        let all: Vec<_> = layout.iter().flat_map(|(_, e)| e.iter()).collect();
+        for needed in [Quit, Copy, Paste, SelectAll, CloseWindow] {
+            assert!(all.contains(&&needed), "{needed:?} missing");
+        }
+    }
 }

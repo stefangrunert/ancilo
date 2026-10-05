@@ -4,6 +4,8 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **A tidy menu bar**: only Ancilo, Edit and Window. The system's Services submenu (the services of every other app on the Mac), the empty File menu and Help are gone.
+
 ## 0.3.1 – 2026-10-04
 
 - **Fixed: a loaded model was lost when its conversation grew** – "needs about 41.6 GB, but only about 33 GB are free" on a Mac with 128 GB. Ancilo counted only "free" memory, not the file cache macOS hands back at once (where a stopped model's memory lands, too). It now counts what macOS gives a program, and a model whose larger context does not start always comes back as it ran (unless memory is critically short).
