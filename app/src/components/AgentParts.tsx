@@ -168,7 +168,10 @@ export function LiveWork({ id, label }: { id: string; label: string }) {
           <Markdown text={n} />
         </div>
       ))}
-      <Thinking label={steps > 0 ? `${label} · ${t("code.steps", { n: steps })}` : label} lines={pro ? activity : []} />
+      <Thinking
+        label={Object.keys(live.loading).length > 0 ? t("assistant.loadingModel") : steps > 0 ? `${label} · ${t("code.steps", { n: steps })}` : label}
+        lines={pro ? activity : []}
+      />
     </>
   );
 }

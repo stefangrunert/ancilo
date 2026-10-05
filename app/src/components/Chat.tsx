@@ -189,10 +189,23 @@ export function UserBubble({ text, files }: { text: string; files?: ReactNode })
   );
 }
 
+/** Ancilo is at work: what it does, for how long (after a few seconds – the
+ * clock shows it has not got stuck), and in the expert view its last steps. */
 export function Thinking({ label, lines = [] }: { label: string; lines?: string[] }) {
+  const { t } = useI18n();
+  const [started] = useState(() => Date.now());
+  const [now, setNow] = useState(started);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const secs = Math.floor((now - started) / 1000);
   return (
     <div className="thinking" role="status">
-      <span className="dots">{label}</span>
+      <span className="dots">
+        {label}
+        {secs >= 3 && <span className="small thinking-time">{t("progress.seconds", { n: secs })}</span>}
+      </span>
       {lines.map((l, i) => (
         <code key={i} className="activity">
           {l}

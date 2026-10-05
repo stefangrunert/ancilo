@@ -3,7 +3,7 @@ import type { OpOutput } from "../api/client";
 import { useI18n, type Key } from "../i18n";
 import { usePro } from "../state/prefs";
 import { navigate, type ChatKind } from "../state/route";
-import { useClient, useLive, useOp, useRefresh } from "../state/store";
+import { type Live, useClient, useLive, useOp, useRefresh } from "../state/store";
 import { ChatLayout, Composer, Thinking, UserBubble } from "./Chat";
 import { Markdown } from "./Markdown";
 import { BackToChat, greetingOf, QuickActions } from "./QuickActions";
@@ -272,6 +272,16 @@ function Replies({ replies, onPick }: { replies: string[]; onPick: (text: string
  * action begin with Ancilo's greeting and answers to click; Ancilo's own
  * ("set up Ancilo") can change Ancilo, after asking.
  */
+/** What a chat does right now, in words: loading the model, searching the
+ * web, writing the answer – or thinking. */
+function chatProgress(t: ReturnType<typeof useI18n>["t"], live: Live, id: string | null | undefined): string {
+  if (Object.keys(live.loading).length > 0) return t("assistant.loadingModel");
+  const phase = id ? live.phase[id] : undefined;
+  if (phase?.step === "web") return t("assistant.searchingWeb", { query: phase.query });
+  if (phase?.step === "answer") return t("assistant.answering");
+  return t("assistant.thinking");
+}
+
 export function ConversationView({ id, kind = "chat" }: { id: string | null; kind?: ChatKind }) {
   const { t } = useI18n();
   const client = useClient();
@@ -401,7 +411,7 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
       {inflight && !messages.some((m, i) => i === messages.length - 1 && m.role === "user" && m.text === inflight) && <UserBubble text={inflight} />}
       {last?.web?.state === "proposed" && !inflight && <WebProposal key={messages.length} web={last.web} busy={searching} onDecide={(s, q) => void decide(s, q)} />}
       {searching && <Thinking label={t("web.chat.searching")} lines={pro ? activity : []} />}
-      {inflight && <Thinking label={t("assistant.thinking")} lines={pro ? activity : []} />}
+      {inflight && <Thinking label={chatProgress(t, live, id)} lines={pro ? activity : []} />}
       <ErrorNote error={error} onDismiss={() => setError(null)} />
     </ChatLayout>
   );

@@ -4,6 +4,9 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **Fixed: "the model ended without an answer"** on small reasoning models (Qwen3.5 2B on a MacBook Air: 8,192 tokens of thinking, 136 s, no answer). Chats now ask for the answer at once – seconds instead of half a minute – and any model that only thought is asked once more without thinking (chats, tasks and coding alike).
+- **You see what a chat is doing**: loading the model, searching the web for “…”, writing the answer – with a clock after a few seconds, so a long wait never looks stuck. Tasks and coding show model loading and the clock too.
+
 - **Fixed: Ancilo Dev asked for the installed app's keys** (a keychain dialog "ancilo wants to use your confidential information"). Each data directory now keeps its keys under a keychain entry of its own; the installed app keeps 'ancilo', so saved keys stay where they are.
 
 - **A tidy menu bar**: only Ancilo, Edit and Window. The system's Services submenu (the services of every other app on the Mac), the empty File menu and Help are gone.

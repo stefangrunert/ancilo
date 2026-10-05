@@ -1,4 +1,4 @@
-import { nextActivity, nextTurn, queriesFor, type LiveTurn } from "./store";
+import { nextActivity, nextProgress, nextTurn, queriesFor, type LiveTurn } from "./store";
 
 describe("events refresh the right views", () => {
   it.each([
@@ -60,5 +60,25 @@ describe("what the agent says on the way", () => {
     expect(nextTurn(t, ev("agent.step"))).toBeNull();
     step("session.turn_started");
     expect(t["s-1"]).toEqual({ notes: [], steps: 0 });
+  });
+});
+
+describe("what a chat does right now", () => {
+  const ev = (kind: string, subject: string, data: Record<string, unknown> = {}) => ({ seq: 1, ts: "", kind, subject, data });
+  it("says when a model loads, the web is searched and the answer is written", () => {
+    let l = { loading: {}, phase: {} } as Parameters<typeof nextProgress>[0];
+    const step = (kind: string, subject: string, data: Record<string, unknown> = {}) => {
+      l = nextProgress(l, ev(kind, subject, data)) ?? l;
+    };
+    step("instance.starting", "qwen");
+    expect(l.loading).toEqual({ qwen: true });
+    step("instance.ready", "qwen");
+    expect(l.loading).toEqual({});
+    step("assistant.web_search", "c-1", { query: "forests in Europe" });
+    expect(l.phase["c-1"]).toEqual({ step: "web", query: "forests in Europe" });
+    step("assistant.answering", "c-1");
+    expect(l.phase["c-1"]).toEqual({ step: "answer" });
+    step("assistant.answer", "c-1");
+    expect(l.phase["c-1"]).toBeUndefined();
   });
 });

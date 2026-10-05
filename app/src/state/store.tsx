@@ -66,14 +66,20 @@ export interface Live {
   /** The current turn per subject: what the agent said on the way, and how
    * many steps it took so far – shown while it works. */
   turns: Record<string, LiveTurn>;
+  /** Models being loaded right now (a request waits for them). */
+  loading: Record<string, true>;
+  /** What a chat does right now: searching the web, writing the answer. */
+  phase: Record<string, ChatPhase>;
 }
+
+export type ChatPhase = { step: "web"; query: string } | { step: "answer" };
 
 export interface LiveTurn {
   notes: string[];
   steps: number;
 }
 
-const LiveCtx = createContext<Live>({ online: true, downloads: {}, activity: {}, turns: {} });
+const LiveCtx = createContext<Live>({ online: true, downloads: {}, activity: {}, turns: {}, loading: {}, phase: {} });
 export const useLive = () => useContext(LiveCtx);
 
 function activityLine(e: AncEvent): string | null {
@@ -99,6 +105,29 @@ function activityLine(e: AncEvent): string | null {
 /** Events that start a new turn: what was shown of the previous one goes. */
 const TURN_STARTS = ["assistant.thinking", "session.turn_started"];
 
+/** Models loading and chat phases after an event (`null`: nothing changed). */
+export function nextProgress(l: Pick<Live, "loading" | "phase">, e: AncEvent): Pick<Live, "loading" | "phase"> | null {
+  const s = e.subject;
+  if (!s) return null;
+  if (e.kind === "instance.starting") return { ...l, loading: { ...l.loading, [s]: true } };
+  if (["instance.ready", "instance.failed", "instance.stopped"].includes(e.kind) && l.loading[s]) {
+    const loading = { ...l.loading };
+    delete loading[s];
+    return { ...l, loading };
+  }
+  if (e.kind === "assistant.web_search") {
+    const query = String((e.data as { query?: unknown }).query ?? "");
+    return { ...l, phase: { ...l.phase, [s]: { step: "web", query } } };
+  }
+  if (e.kind === "assistant.answering") return { ...l, phase: { ...l.phase, [s]: { step: "answer" } } };
+  if ((e.kind === "assistant.answer" || TURN_STARTS.includes(e.kind)) && l.phase[s]) {
+    const phase = { ...l.phase };
+    delete phase[s];
+    return { ...l, phase };
+  }
+  return null;
+}
+
 /** The current turn per subject after an event (`null`: the event is not about it). */
 export function nextTurn(turns: Record<string, LiveTurn>, e: AncEvent): Record<string, LiveTurn> | null {
   if (!e.subject) return null;
@@ -122,7 +151,7 @@ export function nextActivity(activity: Record<string, string[]>, e: AncEvent): R
 }
 
 export function ClientProvider({ client, queryClient, children }: { client: Client; queryClient: QueryClient; children: ReactNode }) {
-  const [live, setLive] = useState<Live>({ online: true, downloads: {}, activity: {}, turns: {} });
+  const [live, setLive] = useState<Live>({ online: true, downloads: {}, activity: {}, turns: {}, loading: {}, phase: {} });
   const qc = queryClient;
   const pending = useRef(new Set<string>());
   const timer = useRef<number | undefined>(undefined);
@@ -150,6 +179,12 @@ export function ClientProvider({ client, queryClient, children }: { client: Clie
         }
         if (e.subject && (TURN_STARTS.includes(e.kind) || activityLine(e))) {
           setLive((l) => ({ ...l, activity: nextActivity(l.activity, e) }));
+        }
+        if (e.subject && (e.kind.startsWith("instance.") || TURN_STARTS.includes(e.kind) || e.kind.startsWith("assistant."))) {
+          setLive((l) => {
+            const next = nextProgress(l, e);
+            return next ? { ...l, ...next } : l;
+          });
         }
         if (e.subject && (TURN_STARTS.includes(e.kind) || e.kind === "agent.note" || e.kind === "agent.tool_called")) {
           setLive((l) => {
