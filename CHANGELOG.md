@@ -2,10 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 0.4.3 – 2026-10-05
 
 - **Two people, one Mac**: when someone else on the Mac runs Ancilo too, Ancilo no longer fails to start – it takes the next free port (the other one's stays untouched), and never mistakes the other person's Ancilo for its own.
 - **No silent quitting**: if Ancilo's background service cannot start, the app says why (in the Mac's language) instead of disappearing.
+- **Tables that open right in Excel**: a CSV a task writes is checked before it is saved – amounts like 312,50 between comma-separated columns used to split into two columns. The model is told how to write it right (quotes, or ';' between the columns). Found on a MacBook Air with Qwen3.5 4B; now 3 of 3 runs give a correct table.
 - **Run from the download?** Opened straight from the disk image, Ancilo asks to be dragged into Applications first – otherwise its background service would point at a place that is gone after ejecting.
 
 ## 0.4.2 – 2026-10-05

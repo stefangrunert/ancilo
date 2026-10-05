@@ -343,8 +343,14 @@ impl DocTools {
             ));
         }
         let content = args["content"].as_str().unwrap_or_default();
+        let table = lower.ends_with(".csv") || lower.ends_with(".tsv");
+        // A table whose rows do not line up opens wrong in Excel – the
+        // model hears it at once and writes it again.
+        if table && let Err(e) = columns_line_up(content, lower.ends_with(".tsv")) {
+            return ToolOutput::err(format!("{rel} not written: {e}"));
+        }
         // A table never carries formulas that run when it is opened.
-        let content = if lower.ends_with(".csv") || lower.ends_with(".tsv") {
+        let content = if table {
             no_formulas(content)
         } else {
             content.to_string()
@@ -452,6 +458,80 @@ impl DocTools {
     }
 }
 
+/// Every row of a CSV/TSV has as many columns as its header. The separator
+/// is the one the header uses (`,` `;` or tab; tab for .tsv); quoted values
+/// may contain it. A small model often writes `312,50` with a comma between
+/// columns – Excel then splits the amount.
+fn columns_line_up(text: &str, tsv: bool) -> std::result::Result<(), String> {
+    let header = text
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or_default();
+    let sep = if tsv {
+        '\t'
+    } else {
+        let outside = |c: char| {
+            let mut quoted = false;
+            header
+                .chars()
+                .filter(|&x| {
+                    if x == '"' {
+                        quoted = !quoted;
+                    }
+                    !quoted && x == c
+                })
+                .count()
+        };
+        match [',', ';', '\t'].into_iter().max_by_key(|&c| outside(c)) {
+            Some(c) if outside(c) > 0 => c,
+            _ => return Ok(()), // one column
+        }
+    };
+    // Records: a quoted value may hold the separator, quotes ("") and line breaks.
+    let mut rows: Vec<usize> = Vec::new();
+    let (mut fields, mut quoted, mut empty_line) = (1, false, true);
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                chars.next();
+            }
+            '"' => quoted = !quoted,
+            '\n' if !quoted => {
+                if !empty_line {
+                    rows.push(fields);
+                }
+                (fields, empty_line) = (1, true);
+                continue;
+            }
+            '\r' if !quoted => continue,
+            c if c == sep && !quoted => fields += 1,
+            _ => {}
+        }
+        empty_line = false;
+    }
+    if !empty_line {
+        rows.push(fields);
+    }
+    let Some(&want) = rows.first() else {
+        return Ok(());
+    };
+    let shown = if sep == '\t' {
+        "tab".to_string()
+    } else {
+        format!("'{sep}'")
+    };
+    for (i, &n) in rows.iter().enumerate().skip(1) {
+        if n != want {
+            return Err(format!(
+                "row {} has {n} columns, the header {want}. A value contains the separator {shown} (like 312,50): put such values in double quotes (\"312,50\"), or separate the columns with ';'",
+                i + 1
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// CSV/TSV with every field a spreadsheet would run as a formula (`=`, `+`,
 /// `-`, `@` first) made text with a leading `'` – after any of `,` `;` tab,
 /// whichever the file uses (no guessing). Plain numbers like `-12.5` stay
@@ -527,7 +607,7 @@ impl Toolbox for DocTools {
             ),
             def(
                 "write_file",
-                "Write a text file (.txt, .md, .csv, …). New files only, unless overwrite is true.",
+                "Write a text file (.txt, .md, .csv, …). New files only, unless overwrite is true. CSV: every row as many columns as the header – with decimal commas (312,50) separate the columns with ';'.",
                 json!({"path": path, "content": {"type": "string"}, "overwrite": {"type": "boolean"}}),
                 &["path", "content"],
             ),
@@ -624,6 +704,45 @@ mod tests {
 
     async fn run(d: &DocTools, name: &str, args: Value) -> ToolOutput {
         d.execute(name, &args).await
+    }
+
+    /// The table from the MacBook Air test: amounts with a decimal comma
+    /// between comma-separated columns. It is not written – the model hears
+    /// why and how to write it right; quoted or ';'-separated it is fine.
+    #[tokio::test]
+    async fn a_table_whose_rows_do_not_line_up_is_sent_back() {
+        let (_t, d) = tools();
+        let broken = "Datum,Firma,Betrag\n12.09.2026,Klempner Hansen GmbH,312,50\n";
+        let out = run(
+            &d,
+            "write_file",
+            json!({"path": "rechnungen.csv", "content": broken}),
+        )
+        .await;
+        assert!(out.is_error, "{}", out.content);
+        assert!(
+            out.content.contains("row 2 has 4 columns, the header 3"),
+            "{}",
+            out.content
+        );
+        assert!(out.content.contains("';'"), "{}", out.content);
+        assert!(!d.copy.work().join("rechnungen.csv").exists());
+        for good in [
+            "Datum;Firma;Betrag\n12.09.2026;Klempner Hansen GmbH;312,50\n",
+            "Datum,Firma,Betrag\n12.09.2026,\"Hansen, Klempner\",\"312,50\"\n\n",
+            "Notiz,Text\n1,\"zwei\nZeilen, mit Komma\"\n",
+            "nur eine Spalte\nWert\n",
+        ] {
+            assert!(columns_line_up(good, false).is_ok(), "{good:?}");
+        }
+        assert!(columns_line_up("a\tb\n1\t2\t3\n", true).is_err());
+        let ok = run(
+            &d,
+            "write_file",
+            json!({"path": "ok.csv", "content": "Datum;Betrag\n03.09.2026;84,20\n"}),
+        )
+        .await;
+        assert!(!ok.is_error, "{}", ok.content);
     }
 
     // covers: M10-AC-05
