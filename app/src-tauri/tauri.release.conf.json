@@ -3,6 +3,7 @@
   "bundle": {
     "externalBin": ["binaries/ancilo", "binaries/llama-server", "binaries/ancilo-ocr"],
     "createUpdaterArtifacts": true,
+    "resources": { "licenses/*": "licenses/" },
     "macOS": {
       "minimumSystemVersion": "13.0",
       "hardenedRuntime": true

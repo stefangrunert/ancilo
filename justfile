@@ -21,6 +21,14 @@ fmt-check:
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
 
+# Known vulnerabilities in the dependencies (needs network and `cargo-audit`):
+# RustSec for the workspace and the native app, npm for the web UI. A
+# vulnerability fails; unmaintained crates are warnings to keep an eye on.
+audit:
+    cargo audit
+    cargo audit --file app/src-tauri/Cargo.lock
+    cd app && npm audit --audit-level=moderate
+
 # Node packages for the SDK contract tests (official OpenAI/Anthropic SDKs).
 deps:
     @test -d tests/contract/node_modules/openai || npm ci --prefix tests/contract --no-audit --no-fund

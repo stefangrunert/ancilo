@@ -752,11 +752,18 @@ fn license_texts(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Rust crates `ancilo` is built from (normal and build dependencies, no dev ones).
-fn rust_components(root: &Path) -> Result<Vec<Component>> {
+/// Rust crates the `start` package is built from (normal and build
+/// dependencies, no dev ones) – of the workspace at `manifest`, for
+/// `platform` only if given.
+fn rust_components(manifest: &Path, start: &str, platform: Option<&str>) -> Result<Vec<Component>> {
+    let mut args = vec!["metadata", "--format-version", "1", "--locked"];
+    if let Some(p) = platform {
+        args.extend(["--filter-platform", p]);
+    }
     let out = std::process::Command::new("cargo")
-        .args(["metadata", "--format-version", "1", "--locked"])
-        .current_dir(root)
+        .args(&args)
+        .arg("--manifest-path")
+        .arg(manifest)
         .output()
         .context("cargo metadata")?;
     if !out.status.success() {
@@ -777,9 +784,9 @@ fn rust_components(root: &Path) -> Result<Vec<Component>> {
         .collect();
     let start = packages
         .values()
-        .find(|p| p["name"] == "ancilo")
+        .find(|p| p["name"] == start)
         .and_then(|p| p["id"].as_str())
-        .context("package ancilo")?;
+        .with_context(|| format!("package {start}"))?;
     let mut seen = BTreeSet::new();
     let mut todo = vec![start];
     while let Some(id) = todo.pop() {
@@ -847,9 +854,20 @@ fn npm_components(root: &Path) -> Result<Vec<Component>> {
 }
 
 /// THIRD_PARTY_NOTICES for the release packages.
+///
+/// Everything shipped: the CLI and daemon (`ancilo`), the native app
+/// (`app/src-tauri`, macOS only – its own workspace: Tauri, WebKit glue,
+/// plugins) and the web UI's npm packages. A crate in both is listed once.
 fn notices(root: &Path) -> Result<String> {
-    let mut all = rust_components(root)?;
+    let mut all = rust_components(&root.join("Cargo.toml"), "ancilo", None)?;
+    all.extend(rust_components(
+        &root.join("app/src-tauri/Cargo.toml"),
+        "ancilo-app",
+        Some("aarch64-apple-darwin"),
+    )?);
     all.extend(npm_components(root)?);
+    let mut seen = BTreeSet::new();
+    all.retain(|c| seen.insert((c.name.clone(), c.version.clone())));
     let missing: Vec<String> = all
         .iter()
         .filter(|c| c.license.is_empty())
@@ -1236,12 +1254,29 @@ mod tests {
             return; // needs `just app-deps`
         }
         let text = notices(&root).unwrap();
-        for name in ["axum ", "rusqlite ", "tokio ", "react ", "@xterm/xterm "] {
+        // The native app's own crates too (its own workspace).
+        for name in [
+            "axum ",
+            "rusqlite ",
+            "tokio ",
+            "react ",
+            "@xterm/xterm ",
+            "tauri ",
+            "wry ",
+            "tao ",
+            "tauri-plugin-updater ",
+            "tauri-plugin-notification ",
+        ] {
             assert!(text.contains(&format!("\n{name}")), "{name} missing");
         }
         // Dev-only packages are not shipped.
         assert!(!text.contains("\nvitest "));
         assert!(!text.contains("\ninsta "));
+        // A crate both workspaces use is listed once.
+        let list = text.split("License texts").next().unwrap();
+        let lines: Vec<&str> = list.lines().filter(|l| l.contains(" – ")).collect();
+        let unique: BTreeSet<&&str> = lines.iter().collect();
+        assert_eq!(unique.len(), lines.len(), "a component listed twice");
         assert!(text.contains("Apache License"));
     }
 

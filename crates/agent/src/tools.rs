@@ -205,6 +205,20 @@ const MAX_LINE_CHARS: usize = 500;
 const MAX_MATCHES: usize = 100;
 const MAX_OUTPUT_CHARS: usize = 20_000;
 
+/// Writes a file the path resolved to – never through a link put there
+/// since (`O_NOFOLLOW`: a link at the path makes the write fail).
+fn write_no_follow(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?
+        .write_all(text.as_bytes())
+}
+
 fn sha(text: &str) -> String {
     hex::encode(Sha256::digest(text.as_bytes()))
 }
@@ -385,10 +399,12 @@ impl Workspace {
                 other => normal.push(other.as_os_str()),
             }
         }
-        // Resolve symlinks of the existing part of the path.
+        // Resolve symlinks of the existing part of the path – a link counts
+        // as existing even when broken (`exists()` follows it): a broken link
+        // must never pass as a new file, writing would follow it outside.
         let mut existing = normal.clone();
         let mut rest = Vec::new();
-        while !existing.exists() {
+        while existing.symlink_metadata().is_err() {
             match (
                 existing.file_name().map(|n| n.to_os_string()),
                 existing.parent(),
@@ -400,7 +416,11 @@ impl Workspace {
                 _ => break,
             }
         }
-        let mut real = std::fs::canonicalize(&existing).unwrap_or(existing);
+        let Ok(mut real) = std::fs::canonicalize(&existing) else {
+            return Err(format!(
+                "'{path}' leads through a link to something that does not exist – access denied"
+            ));
+        };
         for name in rest.into_iter().rev() {
             real.push(name);
         }
@@ -587,7 +607,8 @@ impl Workspace {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("cannot create directory: {e}"))?;
         }
-        std::fs::write(path, after).map_err(|e| format!("cannot write {}: {e}", self.rel(path)))?;
+        write_no_follow(path, after)
+            .map_err(|e| format!("cannot write {}: {e}", self.rel(path)))?;
         let created = before.is_none();
         self.originals
             .lock()
@@ -677,6 +698,19 @@ impl Workspace {
         }
     }
 
+    /// A file the walk found, as the path to read – a link only if it leads
+    /// to a file inside the project (like `read_file`).
+    fn inside(&self, entry: &ignore::DirEntry) -> Option<PathBuf> {
+        if !entry.path_is_symlink() {
+            return entry
+                .file_type()
+                .is_some_and(|t| t.is_file())
+                .then(|| entry.path().to_path_buf());
+        }
+        let real = self.resolve(&entry.path().to_string_lossy()).ok()?;
+        real.is_file().then_some(real)
+    }
+
     fn walker(&self, start: &Path) -> ignore::Walk {
         ignore::WalkBuilder::new(start)
             .hidden(true)
@@ -717,10 +751,10 @@ impl Workspace {
         let mut hits = Vec::new();
         let mut truncated = false;
         'files: for entry in self.walker(&start).flatten() {
-            let p = entry.path();
-            if !p.is_file() {
+            let Some(real) = self.inside(&entry) else {
                 continue;
-            }
+            };
+            let p = entry.path();
             let rel = self.rel(p);
             if let Some(f) = &filter
                 && !f.is_match(&rel)
@@ -728,7 +762,7 @@ impl Workspace {
             {
                 continue;
             }
-            let Ok(bytes) = std::fs::read(p) else {
+            let Ok(bytes) = std::fs::read(&real) else {
                 continue;
             };
             if bytes.iter().take(8000).any(|b| *b == 0) {
@@ -772,7 +806,7 @@ impl Workspace {
         let mut found: Vec<String> = self
             .walker(&self.root)
             .flatten()
-            .filter(|e| e.path().is_file())
+            .filter(|e| self.inside(e).is_some())
             .map(|e| self.rel(e.path()))
             .filter(|rel| {
                 glob.is_match(rel) || Path::new(rel).file_name().is_some_and(|n| glob.is_match(n))
@@ -1085,6 +1119,57 @@ mod tests {
                 .await
                 .is_error
         );
+    }
+
+    /// Links never lead the file tools outside the project – broken ones
+    /// (the target does not exist yet) included, for writing and reading
+    /// alike (due diligence 2026-10-05).
+    #[tokio::test]
+    async fn links_never_lead_outside_the_project() {
+        use std::os::unix::fs::symlink;
+        let (_d, w) = ws(Access::Edit);
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.txt");
+        std::fs::write(&secret, "READ_CANARY\n").unwrap();
+        // Broken link: its target does not exist, its folder does.
+        let missing = outside.path().join("created.txt");
+        symlink(&missing, w.root().join("dangling.txt")).unwrap();
+        // A broken link as a folder on the way.
+        symlink(outside.path().join("nodir"), w.root().join("gone")).unwrap();
+        // A link to an existing file outside.
+        symlink(&secret, w.root().join("existing.txt")).unwrap();
+        for path in ["dangling.txt", "gone/new.txt", "existing.txt"] {
+            let out = w
+                .execute("write_file", &json!({"path": path, "content": "pwned"}))
+                .await;
+            assert!(out.is_error, "{path}: {}", out.content);
+        }
+        assert!(!missing.exists(), "nothing created outside");
+        assert!(!outside.path().join("nodir").exists());
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "READ_CANARY\n");
+        // Reading: no tool shows what lies outside.
+        assert!(
+            w.execute("read_file", &json!({"path": "existing.txt"}))
+                .await
+                .is_error
+        );
+        let grep = w.execute("grep", &json!({"pattern": "READ_CANARY"})).await;
+        assert!(grep.content.starts_with("no matches"), "{}", grep.content);
+        let glob = w.execute("glob", &json!({"pattern": "*.txt"})).await;
+        assert!(!glob.content.contains("existing.txt"), "{}", glob.content);
+        // A link inside the project works as before.
+        symlink(w.root().join("README.md"), w.root().join("readme-link.md")).unwrap();
+        let grep = w.execute("grep", &json!({"pattern": "Hello world"})).await;
+        assert!(
+            grep.content.contains("readme-link.md:2"),
+            "{}",
+            grep.content
+        );
+        // A link put at a checked path is not followed when writing.
+        let late = w.root().join("late.txt");
+        symlink(outside.path().join("late.txt"), &late).unwrap();
+        assert!(write_no_follow(&late, "x").is_err());
+        assert!(!outside.path().join("late.txt").exists());
     }
 
     // covers: M3-AC-06

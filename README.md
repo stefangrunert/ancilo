@@ -25,7 +25,11 @@ Ancilo runs open models (e.g. Qwen) on your Mac with llama.cpp. It picks a model
 - **Search** – a hybrid code index and a knowledge base the agents and the assistant use.
 - **API first** – every function is an operation, available over REST, the CLI and MCP alike.
 
-> **Status: early.** There are no signed downloads yet – build Ancilo from source (below). macOS on Apple Silicon first; the CLI and daemon also run on Linux.
+> **Status: early, released.** Signed and notarized downloads for macOS on Apple Silicon; the app updates itself (with your click). The CLI and daemon also run on Linux – build them from source.
+
+## Install
+
+Download **[Ancilo.dmg](https://github.com/stefangrunert/ancilo/releases/latest/download/Ancilo.dmg)** (macOS 13 or later, Apple Silicon), open it and drag Ancilo into Applications. Open Ancilo – the setup takes it from there. All versions: [Releases](https://github.com/stefangrunert/ancilo/releases) · [Changelog](CHANGELOG.md).
 
 ## Install from source
 

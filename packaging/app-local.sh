@@ -35,10 +35,7 @@ app="$root/app/src-tauri/target/release/bundle/macos/$name.app"
 # This version's package – older ones may still lie next to it.
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)
 pkg="$out/ancilo-$version-$target"
-mkdir -p "$root/app/src-tauri/binaries"
-cp "$pkg/bin/ancilo" "$root/app/src-tauri/binaries/ancilo-$target"
-cp "$pkg/libexec/ancilo/llama-server" "$root/app/src-tauri/binaries/llama-server-$target"
-cp "$pkg/libexec/ancilo/ancilo-ocr" "$root/app/src-tauri/binaries/ancilo-ocr-$target"
+"$root/packaging/app-inputs.sh" "$pkg" "$target"
 
 if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
     APPLE_SIGNING_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null |

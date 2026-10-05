@@ -591,6 +591,8 @@ pub async fn start(
         cards_dir: paths.home().join("knowledge").join("model-cards"),
     });
     let mut registry = Registry::new();
+    // MCP clients and the assistant (models, maybe in the cloud) never see it.
+    registry.hide(token.clone());
     ancilo_models::ops::register(&mut registry, manager.clone());
     ancilo_models::routing::register(&mut registry, manager.clone());
     ancilo_compare::ops::register(&mut registry, comparer.clone());

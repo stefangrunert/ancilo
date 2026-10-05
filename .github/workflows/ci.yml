@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly as well: new advisories appear without a push (job `audit`).
+  schedule:
+    - cron: "17 5 * * 1"
   workflow_dispatch:
     inputs:
       macos:
@@ -36,6 +39,21 @@ jobs:
           # Ubuntu blocks unprivileged user namespaces by default; bwrap needs them.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - run: just verify
+
+  # Known vulnerabilities in the dependencies (RustSec for both lockfiles,
+  # npm): a vulnerability fails, unmaintained crates are listed as warnings.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-audit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: just audit
 
   # The app: end-to-end tests in Chromium and WebKit against a real daemon.
   app-e2e:

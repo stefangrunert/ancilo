@@ -18,6 +18,7 @@ dist/
 
 # Release (packaging/): sidecar binaries staged for `tauri build`
 app/src-tauri/binaries/
+app/src-tauri/licenses/
 
 # Self-hosted GitHub Actions runner (lives here on the owner's Mac; never commit – it holds credentials)
 /actions-runner/

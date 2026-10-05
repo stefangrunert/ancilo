@@ -12,6 +12,7 @@ ancilo-gateway.workspace = true
 globset.workspace = true
 hex.workspace = true
 ignore.workspace = true
+libc.workspace = true
 regex.workspace = true
 schemars.workspace = true
 serde.workspace = true

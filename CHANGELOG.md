@@ -4,6 +4,11 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **Security fixes** from an independent review:
+  - The coding agent's file tools no longer follow links out of the project. A broken link (to a file that does not exist yet) let `write_file` create a file outside it; `grep` and the file list read and listed files outside through links. Links inside the project work as before.
+  - Ancilo's access token never reaches a model: Claude Code, Codex (MCP) and the assistant see it hidden – a cloud assistant asking for the model API settings got it. The app and the CLI still show it.
+- **License notices complete**: the list now covers the native app too (Tauri and its components were missing), and Ancilo.app carries the notices itself (`Contents/Resources/licenses`).
+- **Dependencies are checked** for known vulnerabilities on every change and weekly (`just audit`); the test runner is updated (vitest 4).
 - **Remove Ancilo** (*System › Remove Ancilo…*, or `ancilo uninstall`): one click removes the app, its background service, the connections to Claude Code and Codex and – unless you keep them for a later install – the models Ancilo downloaded, conversations, settings and keys. Your own files, projects and the models of LM Studio or Ollama stay. Removing Ancilo Dev leaves the installed app's connection to Claude Code and Codex alone (both connect under the same names).
 
 ## 0.4.1 – 2026-10-05

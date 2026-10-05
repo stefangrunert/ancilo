@@ -74,10 +74,7 @@ build() {
     echo
   fi
   say "Ancilo.app and DMG"
-  mkdir -p app/src-tauri/binaries
-  cp "$pkg/bin/ancilo" app/src-tauri/binaries/ancilo-aarch64-apple-darwin
-  cp "$pkg/libexec/ancilo/llama-server" app/src-tauri/binaries/llama-server-aarch64-apple-darwin
-  cp "$pkg/libexec/ancilo/ancilo-ocr" app/src-tauri/binaries/ancilo-ocr-aarch64-apple-darwin
+  packaging/app-inputs.sh "$pkg" aarch64-apple-darwin
   (cd app && npm ci --no-audit --no-fund --silent \
     && TAURI_SIGNING_PRIVATE_KEY="$(cat "$key")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
        npx tauri build --bundles app --config src-tauri/tauri.release.conf.json)

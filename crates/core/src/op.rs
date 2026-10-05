@@ -216,7 +216,14 @@ where
 #[derive(Clone, Default)]
 pub struct Registry {
     ops: BTreeMap<&'static str, Arc<dyn Operation>>,
+    /// Values no model ever gets (the daemon's access token): hidden in
+    /// every result for MCP clients and the assistant – their models may run
+    /// in the cloud.
+    secrets: Vec<String>,
 }
+
+/// What a model sees instead of a secret.
+pub const HIDDEN: &str = "<hidden: Ancilo's access token stays on this computer>";
 
 impl Registry {
     pub fn new() -> Self {
@@ -235,6 +242,14 @@ impl Registry {
             "operation '{name}' needs a summary"
         );
         self.ops.insert(name, op);
+    }
+
+    /// A value results never show to a model (MCP, the assistant).
+    pub fn hide(&mut self, secret: impl Into<String>) {
+        let secret = secret.into();
+        if !secret.is_empty() {
+            self.secrets.push(secret);
+        }
     }
 
     pub fn get(&self, name: &str) -> Option<&Arc<dyn Operation>> {
@@ -261,7 +276,32 @@ impl Registry {
                 spec.summary
             )));
         }
-        op.call(ctx, input).await
+        let to_model = matches!(ctx.surface, Surface::Mcp | Surface::Assistant);
+        let out = op.call(ctx, input).await?;
+        Ok(if to_model {
+            self.without_secrets(out)
+        } else {
+            out
+        })
+    }
+
+    fn without_secrets(&self, v: Value) -> Value {
+        match v {
+            Value::String(s) => Value::String(
+                self.secrets
+                    .iter()
+                    .fold(s, |s, secret| s.replace(secret.as_str(), HIDDEN)),
+            ),
+            Value::Array(a) => {
+                Value::Array(a.into_iter().map(|v| self.without_secrets(v)).collect())
+            }
+            Value::Object(o) => Value::Object(
+                o.into_iter()
+                    .map(|(k, v)| (k, self.without_secrets(v)))
+                    .collect(),
+            ),
+            other => other,
+        }
     }
 }
 
@@ -269,6 +309,36 @@ impl Registry {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A model never gets a secret – not through MCP, not as the
+    /// assistant's tool result; the CLI and the app do.
+    #[tokio::test]
+    async fn secrets_never_reach_a_model() {
+        let mut r = Registry::new();
+        r.register(
+            OpBuilder::new("config")
+                .summary("Settings with the token")
+                .handler(|_ctx, _i: NoInput| async move {
+                    Ok(json!({"env": {"KEY": "tok-123"}, "list": ["x tok-123 y"]}))
+                }),
+        );
+        r.hide("tok-123");
+        for surface in [Surface::Mcp, Surface::Assistant] {
+            let v = r
+                .call("config", OpCtx::new(surface), json!({}))
+                .await
+                .unwrap();
+            assert!(!v.to_string().contains("tok-123"), "{surface:?}: {v}");
+            assert_eq!(v["env"]["KEY"], HIDDEN);
+        }
+        for surface in [Surface::Cli, Surface::Rest, Surface::Internal] {
+            let v = r
+                .call("config", OpCtx::new(surface), json!({}))
+                .await
+                .unwrap();
+            assert_eq!(v["env"]["KEY"], "tok-123");
+        }
+    }
 
     #[derive(Deserialize, JsonSchema)]
     struct Add {
