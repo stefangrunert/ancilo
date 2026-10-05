@@ -79,6 +79,7 @@ fn opts(headers: &HeaderMap, api: &'static str) -> Result<CallOpts, Error> {
         api,
         // Clients choose their model themselves.
         local_only: false,
+        think: true,
     })
 }
 

@@ -957,6 +957,8 @@ impl Assistant {
             seed: None,
             history,
             local_only: false,
+            // Chats answer at once: thinking would take minutes on a small model.
+            think: false,
         };
         let outcome = ancilo_agent::run(
             &self.inner.gateway,
@@ -1119,6 +1121,8 @@ impl Assistant {
         let opts = ancilo_gateway::CallOpts {
             priority: Priority::Interactive,
             local_only: true,
+            // A short classification: no thinking needed.
+            think: false,
             ..Default::default()
         };
         let reply = match self.inner.gateway.chat(req, opts).await {
@@ -1252,7 +1256,15 @@ impl Assistant {
             seed: None,
             history,
             local_only: found.is_some() || used_documents,
+            // Chats answer at once: thinking would take minutes on a small model.
+            think: false,
         };
+        // The app shows what happens now: the answer is being written.
+        bus.emit(
+            "assistant.answering",
+            Some(subject),
+            json!({"model": model}),
+        );
         let outcome = ancilo_agent::run(
             &self.inner.gateway,
             &NoTools,

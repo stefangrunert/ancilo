@@ -54,6 +54,8 @@ pub struct AgentSpec {
     /// Work on code: only a local model, resolved strictly (an unknown model
     /// is an error, never a fallback that might be a cloud model).
     pub local_only: bool,
+    /// Let the model think before it answers (see `CallOpts::think`).
+    pub think: bool,
 }
 
 /// Default sampling temperature for agent work.
@@ -219,6 +221,7 @@ pub async fn run(
             reliability: spec.reliability.clone(),
             api: "agent",
             local_only: spec.local_only,
+            think: spec.think,
         };
         let reply = tokio::select! {
             _ = cancel.cancelled() => return finish(Status::Cancelled, "cancelled".into(), steps, calls, ptok, ctok, &messages),

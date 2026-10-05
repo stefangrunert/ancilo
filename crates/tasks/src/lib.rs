@@ -604,6 +604,7 @@ impl TaskRunner {
             seed: None,
             history: Vec::new(),
             local_only: true,
+            think: true,
         };
         let limit = cancel.child_token();
         let timer = {

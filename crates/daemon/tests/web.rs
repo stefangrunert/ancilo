@@ -610,3 +610,39 @@ steps:
     assert!(!ok, "the text is gone");
     env.stop().await;
 }
+
+// covers: M7-AC-16
+/// A chat answers at once: with web search sources too, the model is asked
+/// not to think first – a small reasoning model otherwise thinks until no
+/// room is left for the answer (observed: 8,192 tokens of thinking, 136 s,
+/// "the model ended without an answer").
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_chat_answers_at_once_without_thinking_first() {
+    let script = r#"
+steps:
+  - expect: { any_message_contains: "Classify the user's last message", thinking: false }
+    respond: { text: '{"type": "facts", "query": "types of forests in Europe", "topic": "forest", "lang": "en"}' }
+  - expect: { last_user_contains: "kinds of forests", thinking: false }
+    respond: { text: "Europe has boreal, temperate and Mediterranean forests [1]." }
+"#;
+    let env = Env::start(script).await;
+    env.op(
+        "set_web_search",
+        json!({"provider": "wikipedia", "mode": "auto"}),
+    )
+    .await;
+    let r = env
+        .op(
+            "ask",
+            json!({"prompt": "What kinds of forests do we have in Europe?", "kind": "chat"}),
+        )
+        .await;
+    assert_eq!(r["web"]["state"], "searched", "{r}");
+    assert!(
+        r["answer"]
+            .as_str()
+            .unwrap()
+            .starts_with("Europe has boreal"),
+        "{r}"
+    );
+}

@@ -1215,6 +1215,7 @@ impl Comparer {
             seed: Some(seed),
             history: Vec::new(),
             local_only: true,
+            think: true,
         };
         let limit = cancel.child_token();
         let timer = {
@@ -1343,6 +1344,7 @@ impl Comparer {
                 api: "internal",
                 // The judge reads the results' code.
                 local_only: true,
+                think: true,
             };
             let (score, reason) = match self.inner.gateway.chat(req, opts).await {
                 Ok((ChatReply::Complete(v), _)) => parse_judge(

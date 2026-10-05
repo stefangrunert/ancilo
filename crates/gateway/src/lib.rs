@@ -38,6 +38,10 @@ pub struct CallOpts {
     /// Only a local model, resolved strictly: code must never reach a cloud
     /// model – not even through a fallback when a model was removed meanwhile.
     pub local_only: bool,
+    /// Let a local model think before it answers (reasoning models such as
+    /// Qwen3). `false`: the answer at once – a chat on a small model
+    /// otherwise thinks for minutes, or until no room is left for the answer.
+    pub think: bool,
 }
 
 impl Default for CallOpts {
@@ -47,6 +51,7 @@ impl Default for CallOpts {
             reliability: None,
             api: "internal",
             local_only: false,
+            think: true,
         }
     }
 }
@@ -318,7 +323,37 @@ impl Gateway {
         Ok(resp)
     }
 
-    async fn upstream_json(&self, base: &str, key: &str, body: &Value) -> Result<Value> {
+    /// One answer of the model. A local model that only thought – until its
+    /// token limit, no answer, no tool call – is asked once more with
+    /// thinking switched off, and `req` keeps it off for the calls after
+    /// (observed: a 2B model thinking 8,192 tokens, then "no answer").
+    async fn upstream_json(&self, base: &str, key: &str, req: &mut Value) -> Result<Value> {
+        let resp = self.upstream_json_once(base, key, req).await?;
+        let message = &resp["choices"][0]["message"];
+        let no_answer = message["content"]
+            .as_str()
+            .is_none_or(|c| c.trim().is_empty())
+            && message["tool_calls"]
+                .as_array()
+                .is_none_or(|t| t.is_empty());
+        let thought = message["reasoning_content"]
+            .as_str()
+            .is_some_and(|r| !r.trim().is_empty())
+            || resp["choices"][0]["finish_reason"] == "length";
+        let local = base.starts_with("http://127.0.0.1") || base.starts_with("http://localhost");
+        if no_answer
+            && thought
+            && local
+            && req["chat_template_kwargs"]["enable_thinking"] != json!(false)
+        {
+            tracing::info!(model = %req["model"], "only thinking, no answer – asked again without thinking");
+            req["chat_template_kwargs"]["enable_thinking"] = json!(false);
+            return self.upstream_json_once(base, key, req).await;
+        }
+        Ok(resp)
+    }
+
+    async fn upstream_json_once(&self, base: &str, key: &str, body: &Value) -> Result<Value> {
         let mut body = body.clone();
         body["stream"] = json!(false);
         let resp: Value = self
@@ -440,6 +475,11 @@ impl Gateway {
         let (base, key) = (ep.base.clone(), ep.key.clone());
         rec.load_ms = load_started.elapsed().as_millis() as u64;
         req["model"] = json!(ep.model);
+        // No thinking asked: a local model's chat template is told so (cloud
+        // APIs would not know the field).
+        if !opts.think && !self.inner.manager.is_cloud(&model) {
+            req["chat_template_kwargs"]["enable_thinking"] = json!(false);
+        }
         // Without a limit, a looping model generates until the context is full
         // (observed: 32k tokens, 4 minutes). Clients that need more say so.
         if req["max_tokens"].is_null() && req["max_completion_tokens"].is_null() {
@@ -529,7 +569,7 @@ impl Gateway {
             self.pipeline(&base, &key, req, &tools, &cfg, &mut rec)
                 .await
         } else {
-            let r = self.upstream_json(&base, &key, &req).await;
+            let r = self.upstream_json(&base, &key, &mut req).await;
             if r.is_ok() {
                 rec.outcome = "ok".into();
             }
@@ -576,7 +616,7 @@ impl Gateway {
         let mut before_nudge: Option<Value> = None;
         let mut last_resp;
         loop {
-            let resp = self.upstream_json(base, key, &req).await?;
+            let resp = self.upstream_json(base, key, &mut req).await?;
             // A nudged answer that ran into its length limit without a tool
             // call is no improvement: the original answer stands.
             if let Some(before) = before_nudge.take()

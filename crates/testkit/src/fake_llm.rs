@@ -68,6 +68,9 @@ pub struct Expect {
     pub offers_tool: Option<String>,
     /// No tool of this name is offered.
     pub lacks_tool: Option<String>,
+    /// Thinking asked for (`true`) or switched off (`false`, through
+    /// `chat_template_kwargs.enable_thinking`).
+    pub thinking: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -85,6 +88,8 @@ pub struct Respond {
     pub http_error: Option<HttpError>,
     /// Close the connection without a response.
     pub drop: bool,
+    /// What a reasoning model thought (`reasoning_content`).
+    pub reasoning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -322,6 +327,12 @@ fn check(expect: &Expect, body: &Value) -> Result<(), String> {
     {
         return Err(format!("expected no tool {name:?}"));
     }
+    if let Some(want) = expect.thinking {
+        let thinking = body["chat_template_kwargs"]["enable_thinking"] != json!(false);
+        if thinking != want {
+            return Err(format!("expected thinking={want}, got {thinking}"));
+        }
+    }
     Ok(())
 }
 
@@ -425,6 +436,9 @@ async fn chat(
         let mut message = json!({"role": "assistant", "content": content});
         if !tool_calls.is_empty() {
             message["tool_calls"] = Value::Array(tool_calls);
+        }
+        if let Some(r) = &respond.reasoning {
+            message["reasoning_content"] = json!(r);
         }
         return axum::Json(json!({
             "id": "chatcmpl-fake",

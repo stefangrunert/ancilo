@@ -1235,6 +1235,7 @@ impl Sessions {
             seed: None,
             history,
             local_only: true,
+            think: true,
         };
         Ok(ancilo_agent::run(
             &self.inner.gateway,

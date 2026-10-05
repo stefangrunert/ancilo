@@ -1472,3 +1472,35 @@ async fn a_task_never_works_in_the_home_folder_or_system_folders() {
     }
     env.stop().await;
 }
+
+// covers: M10-AC-05
+/// An agent's model that only thinks – until its token limit, no answer –
+/// is asked once more for the answer at once (instead of "the model ended
+/// without an answer").
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_model_that_only_thinks_is_asked_for_the_answer() {
+    let script = r#"
+steps:
+  - expect: { thinking: true }
+    respond: { reasoning: "Hmm, let me think about this for a very long time …", finish_reason: "length" }
+  - expect: { thinking: false }
+    respond: { text: "Fertig: nichts zu tun." }
+# (Asked whether something is to be done after all: the same answer.)
+fallback: { text: "Fertig: nichts zu tun." }
+"#;
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
+    let folder = env.home.scratch("Leer");
+    let folder = folder.canonicalize().unwrap();
+    let s = env
+        .op("create_task", json!({"folder": folder, "title": "Nichts"}))
+        .await;
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": s["id"], "text": "Schau dir den Ordner an", "wait": true}),
+        )
+        .await;
+    let last = s["messages"].as_array().unwrap().last().unwrap()["text"].clone();
+    assert_eq!(last, "Fertig: nichts zu tun.", "{s}");
+    env.stop().await;
+}
