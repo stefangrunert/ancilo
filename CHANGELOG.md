@@ -2,7 +2,7 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 0.4.4 – 2026-10-05
 
 - **What left this Mac** (*System*): everything Ancilo sent over the internet – web searches and the pages they read, model searches and downloads, the model list, messages to cloud models, update checks – in plain words: what, to whom, when, started by you or by Ancilo itself. A click shows each request in detail: the full address, what was sent, the answer. Kept 30 days on this Mac only, can be emptied; keys are never in it, and models (Claude Code, Codex, the assistant) cannot read it. Every request to the internet goes through one place that writes this log – a test makes sure nothing goes past it.
 - **Fixed: photos and scans had no text in the app.** Text recognition worked from the command line, but inside Ancilo.app its sandbox kept macOS from reading the app itself – every picture came back empty. Found on a MacBook Air; now a receipt photo (JPEG, HEIC) and a scanned letter are read in half a second.
