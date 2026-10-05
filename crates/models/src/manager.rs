@@ -810,19 +810,25 @@ impl ModelManager {
                 .map(|(m, _, _)| m.id)
                 .filter(|m| m != id)
                 .collect();
-            let loaded = if loaded.is_empty() {
-                String::new()
-            } else {
-                format!(" ({} loaded)", loaded.join(", "))
-            };
-            return Err(Error::InsufficientResources(match admitted {
-                Err(why) => format!("'{id}': {why}{loaded}"),
-                Ok(()) => format!(
-                    "'{id}' needs about {}, but only {} of {} are free{loaded}. Stop another model first.",
-                    mem(need),
-                    mem(budget.saturating_sub(used)),
-                    mem(budget)
+            let message = match admitted {
+                Err(why) => ancilo_core::msg("model.no_room", &[("model", &id), ("why", &why)]),
+                Ok(()) => ancilo_core::msg(
+                    "model.over_budget",
+                    &[
+                        ("model", &id),
+                        ("need", &mem(need)),
+                        ("free", &mem(budget.saturating_sub(used))),
+                        ("budget", &mem(budget)),
+                    ],
                 ),
+            };
+            return Err(Error::InsufficientResources(if loaded.is_empty() {
+                message
+            } else {
+                ancilo_core::msg(
+                    "model.others_loaded",
+                    &[("message", &message), ("models", &loaded.join(", "))],
+                )
             }));
         }
     }
@@ -1377,9 +1383,9 @@ impl ModelManager {
         }
         let preview = self.plan(address, wish).await?;
         if preview.plan.fit == Fit::DoesNotFit {
-            return Err(Error::InsufficientResources(format!(
-                "This model does not fit on this machine: {}",
-                preview.plan.reason
+            return Err(Error::InsufficientResources(ancilo_core::msg(
+                "model.does_not_fit",
+                &[("reason", &preview.plan.reason)],
             )));
         }
         let (source, name) = match &preview.address {
@@ -1456,10 +1462,12 @@ impl ModelManager {
         if downloading {
             let free = self.inner.hw.free_disk_bytes;
             if free > 0 && preview.download_bytes + 1_000_000_000 > free {
-                return Err(Error::InsufficientResources(format!(
-                    "not enough disk space: the download needs {}, {} are free",
-                    disk(preview.download_bytes),
-                    disk(free)
+                return Err(Error::InsufficientResources(ancilo_core::msg(
+                    "download.no_space",
+                    &[
+                        ("need", &disk(preview.download_bytes)),
+                        ("free", &disk(free)),
+                    ],
                 )));
             }
         }

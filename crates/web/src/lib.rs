@@ -132,9 +132,7 @@ impl Web {
     /// Looks something up with `provider` (`key`: Serper's).
     pub async fn lookup(&self, provider: Provider, key: Option<&str>, q: &Query) -> Result<Lookup> {
         if provider == Provider::Off {
-            return Err(Error::PermissionDenied(
-                "web search is off – turn it on under System › Web search".into(),
-            ));
+            return Err(Error::PermissionDenied(ancilo_core::msg("web.off", &[])));
         }
         if q.query.trim().is_empty() {
             return Err(Error::invalid("the search query is empty"));
@@ -146,7 +144,7 @@ impl Web {
         };
         let mut found = tokio::time::timeout(TOTAL_TIMEOUT, work)
             .await
-            .map_err(|_| Error::unavailable("the web search took too long"))??;
+            .map_err(|_| Error::unavailable(ancilo_core::msg("web.too_long", &[])))??;
         found.took_ms = started.elapsed().as_millis() as u64;
         Ok(found)
     }
@@ -164,9 +162,9 @@ impl Web {
                 .await?
             }
             Provider::Serper => {
-                let key = key.filter(|k| !k.trim().is_empty()).ok_or_else(|| {
-                    Error::invalid("Serper needs a key – add it under System › Web search")
-                })?;
+                let key = key
+                    .filter(|k| !k.trim().is_empty())
+                    .ok_or_else(|| Error::invalid(ancilo_core::msg("web.serper_key", &[])))?;
                 let answer = providers::Serper {
                     client: &self.providers,
                     base: &self.endpoints.serper,

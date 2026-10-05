@@ -514,7 +514,7 @@ impl Instance {
         };
         tokio::time::timeout(timeout, wait)
             .await
-            .map_err(|_| Error::unavailable("timed out waiting for the model to load"))?
+            .map_err(|_| Error::unavailable(ancilo_core::msg("model.load_timeout", &[])))?
     }
 
     /// Stops the process and waits for the supervisor to finish.
@@ -593,9 +593,9 @@ async fn supervise(
             }
             StartOutcome::TimedOut(mut child) => {
                 terminate(&mut child).await;
-                let msg = format!(
-                    "model did not finish loading within {:?}",
-                    spec.load_timeout
+                let msg = ancilo_core::msg(
+                    "model.load_too_long",
+                    &[("time", &format!("{:?}", spec.load_timeout))],
                 );
                 info.lock().unwrap().last_error = Some(msg.clone());
                 bus.emit("instance.failed", Some(subject), json!({"reason": msg}));
@@ -640,10 +640,15 @@ async fn supervise(
                 return;
             }
             status = child.wait() => {
-                let reason = format!(
-                    "llama-server exited unexpectedly ({}): {}",
-                    status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string()),
-                    log_tail(&spec.log_file)
+                let reason = ancilo_core::msg(
+                    "model.exited",
+                    &[
+                        (
+                            "status",
+                            &status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string()),
+                        ),
+                        ("log", &log_tail(&spec.log_file)),
+                    ],
                 );
                 crashes.retain(|t| t.elapsed() < spec.restart_window);
                 crashes.push(Instant::now());

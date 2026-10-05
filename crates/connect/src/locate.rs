@@ -145,14 +145,12 @@ pub fn not_installed(bin: &Path) -> String {
     let (product, site) = match name.as_str() {
         "claude" => ("Claude Code", "https://claude.com/product/claude-code"),
         "codex" => ("Codex", "https://developers.openai.com/codex/cli"),
-        _ => (name.as_str(), ""),
+        _ => (name.as_str(), "its website"),
     };
-    let mut msg =
-        format!("{product} is not installed on this computer – the `{name}` command was not found");
-    if !site.is_empty() {
-        msg.push_str(&format!(". Install it ({site}), then connect again"));
-    }
-    msg
+    ancilo_core::msg(
+        "connect.not_installed",
+        &[("product", &product), ("command", &name), ("site", &site)],
+    )
 }
 
 #[cfg(test)]

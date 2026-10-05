@@ -149,9 +149,7 @@ impl Extractor {
         let child = cmd.spawn().map_err(Error::internal)?;
         let out = match tokio::time::timeout(READ_TIMEOUT, child.wait_with_output()).await {
             Err(_) => {
-                return Err(Error::invalid(
-                    "reading this file took too long – it may be damaged",
-                ));
+                return Err(Error::invalid(ancilo_core::msg("doc.too_long", &[])));
             }
             Ok(r) => r.map_err(Error::internal)?,
         };
@@ -295,9 +293,9 @@ impl Attachments {
             extract::extract(&name, b"")?;
         }
         if bytes.len() as u64 > extract::MAX_BYTES {
-            return Err(Error::invalid(format!(
-                "{name} is larger than {} MB – Ancilo does not read files this large",
-                extract::MAX_BYTES / 1024 / 1024
+            return Err(Error::invalid(ancilo_core::msg(
+                "doc.too_large",
+                &[("name", &name), ("mb", &(extract::MAX_BYTES / 1024 / 1024))],
             )));
         }
         // The file goes to the reading process's own place and is gone after.

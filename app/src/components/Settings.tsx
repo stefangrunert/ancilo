@@ -47,7 +47,7 @@ const CLIENTS = [
 
 /** Let Claude Code and Codex delegate to Ancilo – a line each, like the models: state and one click. */
 export function Connect() {
-  const { t } = useI18n();
+  const { t, says } = useI18n();
   const client = useClient();
   const refresh = useRefresh();
   const state = useOp("connections");
@@ -92,7 +92,7 @@ export function Connect() {
       })}
       {error && (
         <ErrorNote
-          error={new Error(t("connect.failed", { client: t(`connect.${error.client}` as "connect.codex"), message: (error.e as Error).message }))}
+          error={new Error(t("connect.failed", { client: t(`connect.${error.client}` as "connect.codex"), message: says((error.e as Error).message) }))}
           onDismiss={() => setError(null)}
         />
       )}

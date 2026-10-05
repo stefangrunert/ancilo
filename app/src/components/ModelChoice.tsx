@@ -82,7 +82,7 @@ function Facts({ s }: { s: Suggestion }) {
 
 /** The model being downloaded and started – in plain words. */
 function Progress({ id, onDone }: { id: string; onDone: () => void }) {
-  const { t } = useI18n();
+  const { t, says } = useI18n();
   const client = useClient();
   const refresh = useRefresh();
   const live = useLive();
@@ -97,7 +97,7 @@ function Progress({ id, onDone }: { id: string; onDone: () => void }) {
   if (status === "download_failed" || status === "failed" || status === "crashed") {
     return (
       <ErrorNote
-        error={new Error(t("choose.failed", { name: m.name, reason: m.failure ?? "" }))}
+        error={new Error(t("choose.failed", { name: m.name, reason: says(m.failure ?? "") }))}
         action={
           <button type="button" onClick={() => void client.op("retry_download", { model: id }).then(() => refresh("list_models"))}>
             {t("model.retry")}

@@ -371,7 +371,7 @@ async fn the_memory_budget_is_never_exceeded() {
     let (code, _, err) = env.cli(&["start", "b-q8_0"]).await;
     assert_eq!(code, 1);
     assert!(err.contains("Stop another model first"), "{err}");
-    assert!(err.contains("a-q8_0 loaded"), "{err}");
+    assert!(err.contains("loaded now: a-q8_0"), "{err}");
     let hw = env.json(&["hardware"]).await;
     assert!(hw["used_bytes"].as_u64().unwrap() <= hw["model_budget_bytes"].as_u64().unwrap());
     // After stopping A, B fits.

@@ -275,7 +275,7 @@ pub async fn run(
                 }
                 return finish(
                     Status::Failed,
-                    format!("model call failed: {}", e.message()),
+                    ancilo_core::msg("agent.call_failed", &[("why", &e.message())]),
                     steps,
                     calls,
                     ptok,
@@ -286,7 +286,7 @@ pub async fn run(
             Err(e) => {
                 return finish(
                     Status::Failed,
-                    format!("model call failed: {}", e.message()),
+                    ancilo_core::msg("agent.call_failed", &[("why", &e.message())]),
                     steps,
                     calls,
                     ptok,
@@ -320,7 +320,7 @@ pub async fn run(
                 Status::Done
             };
             let summary = if text.is_empty() {
-                "the model ended without an answer".into()
+                ancilo_core::msg("agent.no_answer", &[])
             } else {
                 text
             };
@@ -374,7 +374,7 @@ pub async fn run(
             if warned_repeat {
                 return finish(
                     Status::Failed,
-                    "the model kept repeating the same tool call".into(),
+                    ancilo_core::msg("agent.repeating", &[]),
                     steps,
                     calls,
                     ptok,

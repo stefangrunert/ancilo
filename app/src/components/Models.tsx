@@ -9,7 +9,7 @@ type Model = OpOutput<"list_models">[number];
 const ROLES = ["default", "delegation", "coding", "assistant"] as const;
 
 function ModelLine({ m }: { m: Model }) {
-  const { t } = useI18n();
+  const { t, says } = useI18n();
   const client = useClient();
   const refresh = useRefresh();
   const [error, setError] = useState<unknown>(null);
@@ -56,7 +56,7 @@ function ModelLine({ m }: { m: Model }) {
       )}
       {m.status === "download_failed" && (
         <ErrorNote
-          error={new Error(`${t("model.status.download_failed")}: ${m.failure ?? ""}`)}
+          error={new Error(`${t("model.status.download_failed")}: ${says(m.failure ?? "")}`)}
           action={
             <button type="button" onClick={() => void run(() => client.op("retry_download", { model: m.id }))}>
               {t("model.retry")}
@@ -64,7 +64,7 @@ function ModelLine({ m }: { m: Model }) {
           }
         />
       )}
-      {(m.status === "crashed" || m.status === "failed") && m.failure && <ErrorNote error={new Error(m.failure)} />}
+      {(m.status === "crashed" || m.status === "failed") && m.failure && <ErrorNote error={new Error(says(m.failure))} />}
       <ErrorNote error={error} onDismiss={() => setError(null)} />
     </div>
   );

@@ -763,7 +763,7 @@ impl Assistant {
             },
             Err(e) => ConversationMessage {
                 role: "assistant".into(),
-                text: format!("(failed: {})", e.message()),
+                text: ancilo_core::msg("failed", &[("why", &e.message())]),
                 at: Utc::now(),
                 model: None,
                 operations: Vec::new(),
@@ -857,9 +857,10 @@ impl Assistant {
             || folder.is_some()
             || earlier.is_some_and(Conversation::has_documents);
         if has_documents && cloud {
-            return Err(Error::PermissionDenied(
-                "this conversation holds your documents – they stay with the AI on this computer; choose a local model".into(),
-            ));
+            return Err(Error::PermissionDenied(ancilo_core::msg(
+                "chat.documents_local",
+                &[],
+            )));
         }
         // Ancilo's tools only where Ancilo is the topic: its own
         // conversations, a single `ask`, or a request about it – or a

@@ -154,7 +154,7 @@ async fn attempt(
         tokio::select! {
             _ = cancel.cancelled() => {
                 file.flush().await?;
-                return Err(Error::Conflict("download cancelled".into()));
+                return Err(Error::Conflict(ancilo_core::msg("download.cancelled", &[])));
             }
             chunk = stream.next() => match chunk {
                 None => break,
@@ -236,13 +236,14 @@ pub async fn download(
                     json!({"reason": reason, "attempt": attempts, "bytes": have, "wait_ms": wait.as_millis() as u64}),
                 );
                 tokio::select! {
-                    _ = cancel.cancelled() => return Err(Error::Conflict("download cancelled".into())),
+                    _ = cancel.cancelled() => return Err(Error::Conflict(ancilo_core::msg("download.cancelled", &[]))),
                     _ = tokio::time::sleep(wait) => {}
                 }
             }
             Ok(Attempt::Retry(reason)) => {
-                let err = Error::unavailable(format!(
-                    "download failed after {attempts} attempts: {reason}"
+                let err = Error::unavailable(ancilo_core::msg(
+                    "download.failed",
+                    &[("attempts", &attempts), ("reason", &reason)],
                 ));
                 bus.emit(
                     "download.failed",
@@ -267,9 +268,9 @@ pub async fn download(
         && !expected.eq_ignore_ascii_case(&actual)
     {
         tokio::fs::remove_file(&part).await.ok();
-        let err = Error::Conflict(format!(
-            "downloaded file is corrupt (checksum mismatch) and was discarded: {}",
-            spec.dest.display()
+        let err = Error::Conflict(ancilo_core::msg(
+            "download.corrupt",
+            &[("path", &spec.dest.display())],
         ));
         bus.emit(
             "download.failed",

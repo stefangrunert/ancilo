@@ -138,7 +138,7 @@ function Changes({ s, onError }: { s: Session; onError: (e: unknown) => void }) 
 }
 
 function Variants({ s, models, onError }: { s: Session; models: Model[]; onError: (e: unknown) => void }) {
-  const { t } = useI18n();
+  const { t, says } = useI18n();
   const client = useClient();
   const act = useAct(onError);
   const others = models.filter((m) => m.id !== s.model);
@@ -180,7 +180,7 @@ function Variants({ s, models, onError }: { s: Session; models: Model[]; onError
                 </p>
               ) : (
                 <>
-                  {v.summary && <Markdown text={v.summary} />}
+                  {v.summary && <Markdown text={says(v.summary)} />}
                   <DiffOf session={s.id} variant={v.id} />
                   <div className="row">
                     <button type="button" onClick={() => void act(() => client.op("apply_changes", { session: s.id, variant: v.id }, true))}>
@@ -325,7 +325,7 @@ const wide = () => typeof window === "undefined" || window.innerWidth > 1100;
 
 /** A coding session: the conversation with the agent, and its changes and terminals beside it. */
 export function SessionView({ id, models }: { id: string; models: Model[] }) {
-  const { t } = useI18n();
+  const { t, says } = useI18n();
   const client = useClient();
   const refresh = useRefresh();
   const live = useLive();
@@ -423,7 +423,7 @@ export function SessionView({ id, models }: { id: string; models: Model[] }) {
               p.kind === "user" ? (
                 <UserBubble key={i} text={p.text} />
               ) : p.kind === "say" ? (
-                <Markdown key={i} text={p.text} />
+                <Markdown key={i} text={says(p.text)} />
               ) : (
                 pro ? (
                   <Steps key={i} steps={p.steps} open={running && i === lastSteps} />

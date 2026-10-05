@@ -1,4 +1,9 @@
+import { messagesEn } from "./messages.gen";
+
 export const en = {
+  // The messages Ancilo itself says (errors, failed answers): English as it
+  // says them – the templates come from the daemon (crates/core/src/messages.rs).
+  ...messagesEn,
   "app.title": "Ancilo",
   "status.connected": "connected",
   "status.offline": "Ancilo is not running",

@@ -34,6 +34,7 @@ One command, about 20–30 minutes (most of it Apple's notarization): it checks 
 - Rust: `cargo fmt`, `clippy -D warnings`; tests with `cargo nextest`.
 - App: React + TypeScript in `app/`; API types are generated from the daemon (`just app-api`).
 - Behaviour that depends on model output is tested with the scriptable fake model (`crates/testkit`), so tests stay deterministic.
+- Messages people see (errors, failed answers) come from templates with a key: `ancilo_core::msg("memory.need", &[...])`, listed in `crates/core/src/messages.rs`. `just app-api` copies them into the app, which shows them in the user's language – add the German text to `app/src/i18n/de.ts` (a missing one fails the type check).
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`feat(m8): …`, `fix: …`).
 
 ## Guidelines

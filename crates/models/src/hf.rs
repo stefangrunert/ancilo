@@ -84,12 +84,10 @@ impl HfClient {
     }
 
     async fn get_json(&self, url: &str, what: &str) -> Result<Value> {
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| Error::unavailable(format!("cannot reach Hugging Face: {e}")))?;
+        let resp =
+            self.http.get(url).send().await.map_err(|e| {
+                Error::unavailable(ancilo_core::msg("hf.unreachable", &[("why", &e)]))
+            })?;
         match resp.status().as_u16() {
             200 => resp
                 .json()
@@ -103,8 +101,9 @@ impl HfClient {
                     ""
                 }
             ))),
-            404 => Err(Error::not_found(format!(
-                "{what} was not found on Hugging Face"
+            404 => Err(Error::not_found(ancilo_core::msg(
+                "hf.not_found",
+                &[("what", &what)],
             ))),
             s => Err(Error::unavailable(format!(
                 "Hugging Face answered HTTP {s} for {what}"
@@ -204,7 +203,7 @@ impl HfClient {
             .get(self.file_url(repo, revision, path))
             .send()
             .await
-            .map_err(|e| Error::unavailable(format!("cannot reach Hugging Face: {e}")))?;
+            .map_err(|e| Error::unavailable(ancilo_core::msg("hf.unreachable", &[("why", &e)])))?;
         match resp.status().as_u16() {
             200 => Ok(Some(resp.text().await.map_err(|e| {
                 Error::unavailable(format!("invalid answer from Hugging Face: {e}"))

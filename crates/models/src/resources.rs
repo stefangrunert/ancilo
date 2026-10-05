@@ -330,18 +330,14 @@ pub fn admit(
         return Ok(());
     }
     if state.pressure == Pressure::Critical {
-        return Err(
-            "your computer is short of memory right now – close some programs, then try again"
-                .into(),
-        );
+        return Err(ancilo_core::msg("memory.short", &[]));
     }
     if let Some(free) = state.available_bytes {
         let room = (free + reclaimable).saturating_sub(SAFETY_BYTES);
         if need > room {
-            return Err(format!(
-                "this model needs about {} of memory, but only about {} are free right now – close some programs or choose a smaller model",
-                gb(need),
-                gb(room)
+            return Err(ancilo_core::msg(
+                "memory.need",
+                &[("need", &gb(need)), ("room", &gb(room))],
             ));
         }
     }

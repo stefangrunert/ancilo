@@ -9,6 +9,7 @@
 pub mod config;
 pub mod error;
 pub mod event;
+pub mod messages;
 pub mod op;
 pub mod paths;
 pub mod secrets;
@@ -18,6 +19,7 @@ pub mod version;
 pub use config::Config;
 pub use error::{Error, Result};
 pub use event::{Event, EventBus, EventSink};
+pub use messages::msg;
 pub use op::{
     BoxFuture, NoInput, OpBuilder, OpCtx, OpSpec, Operation, Permission, Registry, Surface,
     schema_of,

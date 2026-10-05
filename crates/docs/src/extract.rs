@@ -114,9 +114,9 @@ pub fn extract_file(path: &Path) -> Result<Extracted> {
 }
 
 fn too_large(name: &str) -> Error {
-    Error::invalid(format!(
-        "{name} is larger than {} MB – Ancilo does not read files this large",
-        MAX_BYTES / 1024 / 1024
+    Error::invalid(ancilo_core::msg(
+        "doc.too_large",
+        &[("name", &name), ("mb", &(MAX_BYTES / 1024 / 1024))],
     ))
 }
 
@@ -126,13 +126,13 @@ pub fn extract(name: &str, bytes: &[u8]) -> Result<Extracted> {
         return Err(too_large(name));
     }
     let kind = kind_of(name).ok_or_else(|| {
-        Error::invalid(format!(
-            "Ancilo cannot read {name} – it reads PDF, Word (.docx), Excel, CSV and text files{}",
+        Error::invalid(ancilo_core::msg(
             if cfg!(target_os = "macos") {
-                ", and pictures (JPEG, PNG, HEIC)"
+                "doc.unsupported_mac"
             } else {
-                ""
-            }
+                "doc.unsupported"
+            },
+            &[("name", &name)],
         ))
     })?;
     let mut doc = match kind {
@@ -182,8 +182,9 @@ pub(crate) fn limit(doc: &mut Extracted) {
 
 fn pdf(name: &str, bytes: &[u8]) -> Result<Extracted> {
     let pages = pdf_extract::extract_text_from_mem_by_pages(bytes).map_err(|e| {
-        Error::invalid(format!(
-            "cannot read the PDF {name} ({e}) – it may be damaged or protected by a password"
+        Error::invalid(ancilo_core::msg(
+            "doc.pdf_unreadable",
+            &[("name", &name), ("why", &e)],
         ))
     })?;
     let parts: Vec<Part> = pages

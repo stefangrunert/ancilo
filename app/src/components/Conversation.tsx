@@ -144,9 +144,9 @@ function providerName(p: WebNote["provider"], t: T): string {
 
 /** What the web search behind an answer was, and its sources. */
 function WebSources({ web }: { web: WebNote }) {
-  const { t } = useI18n();
+  const { t, says } = useI18n();
   if (web.state === "failed") {
-    return <p className="reply-meta web-failed">{t("web.chat.failed", { why: web.error ?? "" })}</p>;
+    return <p className="reply-meta web-failed">{t("web.chat.failed", { why: says(web.error ?? "") })}</p>;
   }
   if (web.state === "offer") {
     return (
@@ -219,7 +219,7 @@ function WebProposal({ web, onDecide, busy }: { web: WebNote; onDecide: (search:
 }
 
 function Reply({ m, live, onAsk }: { m: Message; live: Set<string>; onAsk: (text: string) => void }) {
-  const { t } = useI18n();
+  const { t, says } = useI18n();
   const pro = usePro();
   const ran = (m.operations ?? []).filter((o) => o.outcome !== "proposed");
   const failed = m.text.startsWith("(failed:");
@@ -228,7 +228,7 @@ function Reply({ m, live, onAsk }: { m: Message; live: Set<string>; onAsk: (text
   return (
     <div className={failed ? "reply failed" : "reply"}>
       <div data-testid="assistant-answer">
-        <Markdown text={m.web?.state === "searched" ? linkCitations(m.text, m.web.sources ?? []) : m.text} />
+        <Markdown text={m.web?.state === "searched" ? linkCitations(m.text, m.web.sources ?? []) : says(m.text)} />
       </div>
       {m.web && <WebSources web={m.web} />}
       {(m.pending ?? []).length > 0 && <Proposals pending={m.pending ?? []} live={live} onAsk={onAsk} />}

@@ -142,6 +142,11 @@ fn fake_cli(dir: &std::path::Path, name: &str, fails: bool) -> std::path::PathBu
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let flag = |f: &str| args.iter().any(|a| a == f);
+    // The message templates for the app's translations (`just app-api`).
+    if flag("--messages") {
+        print!("{}", ancilo_core::messages::typescript());
+        return;
+    }
     let value = |f: &str| {
         args.iter()
             .position(|a| a == f)

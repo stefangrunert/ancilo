@@ -55,9 +55,7 @@ async fn read_json(res: reqwest::Response) -> Result<Value> {
 }
 
 fn offline(e: reqwest::Error) -> Error {
-    Error::unavailable(format!(
-        "the search service is not reachable – is this computer online? ({e})"
-    ))
+    Error::unavailable(ancilo_core::msg("web.unreachable", &[("why", &e)]))
 }
 
 /// Wikipedia through its official API. `base`: `https://{lang}.wikipedia.org`.
@@ -229,21 +227,22 @@ impl Serper<'_> {
         match res.status() {
             s if s.is_success() => {}
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-                return Err(Error::Unauthorized(
-                    "Serper does not accept this key – copy it again from serper.dev (API key)"
-                        .into(),
-                ));
+                return Err(Error::Unauthorized(ancilo_core::msg(
+                    "web.serper_rejected",
+                    &[],
+                )));
             }
             StatusCode::TOO_MANY_REQUESTS => {
-                return Err(Error::unavailable(
-                    "Serper is getting too many searches right now – try again in a moment",
-                ));
+                return Err(Error::unavailable(ancilo_core::msg("web.serper_busy", &[])));
             }
             s => {
                 let body = read_json(res).await.unwrap_or(Value::Null);
                 let msg = body["message"].as_str().unwrap_or_default().to_string();
                 if msg.to_lowercase().contains("credit") {
-                    return Err(Error::InsufficientResources("your Serper searches are used up – top up at serper.dev or switch to Wikipedia".into()));
+                    return Err(Error::InsufficientResources(ancilo_core::msg(
+                        "web.serper_used_up",
+                        &[],
+                    )));
                 }
                 return Err(Error::unavailable(format!(
                     "Serper answered HTTP {}: {msg}",

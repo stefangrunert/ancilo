@@ -306,7 +306,9 @@ impl Gateway {
             .json(body)
             .send()
             .await
-            .map_err(|e| Error::unavailable(format!("the model did not answer: {e}")))?;
+            .map_err(|e| {
+                Error::unavailable(ancilo_core::msg("model.no_answer_http", &[("why", &e)]))
+            })?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
@@ -315,9 +317,12 @@ impl Gateway {
                 .and_then(|v| v["error"]["message"].as_str().map(str::to_string))
                 .unwrap_or(text);
             return Err(if status.as_u16() == 400 {
-                Error::invalid(format!("the model rejected the request: {msg}"))
+                Error::invalid(ancilo_core::msg("model.rejected", &[("why", &msg)]))
             } else {
-                Error::unavailable(format!("the model failed (HTTP {status}): {msg}"))
+                Error::unavailable(ancilo_core::msg(
+                    "model.failed_http",
+                    &[("status", &status), ("why", &msg)],
+                ))
             });
         }
         Ok(resp)

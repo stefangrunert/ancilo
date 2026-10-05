@@ -430,13 +430,14 @@ impl Sessions {
         }
         let (meta, _) = self.load(id)?;
         if meta.status == SessionStatus::Running {
-            return Err(Error::Conflict(
-                "a turn is still running – wait or cancel it".into(),
-            ));
+            return Err(Error::Conflict(ancilo_core::msg(
+                "session.turn_running",
+                &[],
+            )));
         }
         tokio::time::timeout(std::time::Duration::from_secs(10), lock.lock_owned())
             .await
-            .map_err(|_| Error::Conflict("the session is busy – try again".into()))
+            .map_err(|_| Error::Conflict(ancilo_core::msg("session.busy", &[])))
     }
 
     fn permission(&self, meta: &Meta) -> Arc<Mutex<Access>> {
@@ -870,9 +871,9 @@ impl Sessions {
                 .parent()
                 .is_some_and(|own| canon(own).starts_with(folder));
         if wide {
-            return Err(Error::invalid(format!(
-                "{} is too wide for a task – choose a folder of your documents, like Documents or a folder in it (not the home folder, Library or a system folder)",
-                folder.display()
+            return Err(Error::invalid(ancilo_core::msg(
+                "task.too_wide",
+                &[("folder", &folder.display())],
             )));
         }
         Ok(())
@@ -1132,7 +1133,7 @@ impl Sessions {
                         history.push(json!({"role": "user", "content": text}));
                     }
                     history.push(
-                        json!({"role": "assistant", "content": format!("(failed: {})", o.summary)}),
+                        json!({"role": "assistant", "content": ancilo_core::msg("failed", &[("why", &o.summary)])}),
                     );
                 }
                 // Stopped by the user or the daemon: whatever the agent saw
@@ -1147,7 +1148,7 @@ impl Sessions {
             Err(e) => {
                 history.push(json!({"role": "user", "content": text}));
                 history.push(
-                    json!({"role": "assistant", "content": format!("(failed: {})", e.message())}),
+                    json!({"role": "assistant", "content": ancilo_core::msg("failed", &[("why", &e.message())])}),
                 );
                 SessionStatus::Idle
             }
@@ -1623,7 +1624,9 @@ impl Sessions {
                             .map(<[Value]>::to_vec)
                             .unwrap_or_default();
                     }
-                    Err(e) => v.summary = Some(format!("(failed: {})", e.message())),
+                    Err(e) => {
+                        v.summary = Some(ancilo_core::msg("failed", &[("why", &e.message())]))
+                    }
                 }
                 meta.web_used |=
                     matches!(&outcome, Ok(o) if crate::tools::searched_web(&o.messages));

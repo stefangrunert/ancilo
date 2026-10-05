@@ -4,6 +4,8 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## Unreleased
 
+- **Ancilo's messages in German**: errors and failed answers – memory, loading and downloading models, web search, documents, tasks, connecting Claude Code and Codex – appear in the app's language, also in conversations from before. Ancilo keeps them in English for itself (the history a model reads stays as it was).
+
 ## 0.4.0 – 2026-10-05
 
 - **Fixed: "the model ended without an answer"** on small reasoning models (Qwen3.5 2B on a MacBook Air: 8,192 tokens of thinking, 136 s, no answer). Chats now ask for the answer at once – seconds instead of half a minute – and any model that only thought is asked once more without thinking (chats, tasks and coding alike).

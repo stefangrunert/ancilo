@@ -405,7 +405,7 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
 
 /** A task: the conversation with the agent, what it changed, keep or drop. */
 export function TaskView({ id }: { id: string }) {
-  const { t } = useI18n();
+  const { t, says } = useI18n();
   const client = useClient();
   const refresh = useRefresh();
   const live = useLive();
@@ -476,7 +476,7 @@ export function TaskView({ id }: { id: string }) {
                   return <UserBubble key={i} text={g.text} files={<GivenFiles files={g.files} />} />;
                 })()
               ) : p.kind === "say" ? (
-                <Markdown key={i} text={p.text} />
+                <Markdown key={i} text={says(p.text)} />
               ) : pro ? (
                 <Steps key={i} steps={p.steps} open={running && i === lastSteps} />
               ) : (

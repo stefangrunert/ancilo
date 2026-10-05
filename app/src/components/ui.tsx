@@ -26,14 +26,14 @@ export function errorText(e: unknown): string {
 }
 
 export function ErrorNote({ error, onDismiss, action }: { error: unknown; onDismiss?: () => void; action?: ReactNode }) {
-  const { t } = useI18n();
+  const { t, says } = useI18n();
   if (!error) return null;
   // Not enough memory: said plainly, with the way out; the details below.
   const memory = error instanceof ApiError && error.code === "insufficient_resources";
   return (
     <div role="alert" className="note error">
       {memory && <strong>{t("error.memory")}</strong>}
-      <span className={memory ? "small" : undefined}>{errorText(error)}</span>
+      <span className={memory ? "small" : undefined}>{error instanceof OfflineError ? t("status.offline") : says(errorText(error))}</span>
       {action}
       {onDismiss && (
         <button type="button" className="link" onClick={onDismiss}>
