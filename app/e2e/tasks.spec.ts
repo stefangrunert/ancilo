@@ -35,6 +35,15 @@ test("a task in a folder works in a copy: the changes are shown, kept – and un
   expect(existsSync(join(dir, "Overview.xlsx"))).toBe(false);
   // The folder is listed in the Tasks area from now on.
   await expect(page.getByRole("list", { name: "Folders" })).toContainText(dir.split("/").pop()!);
+  // covers: FPL-03 – checked and looked at before keeping.
+  const sheet = changes.getByTestId("task-change").filter({ hasText: "Overview.xlsx" });
+  await expect(sheet.getByTestId("check-badge")).toContainText("checked", { timeout: 20_000 });
+  await sheet.getByRole("button", { name: "Look at it" }).click();
+  const preview = page.getByTestId("result-preview");
+  await expect(preview.locator("table")).toContainText("Power");
+  await expect(preview.getByTestId("check-findings")).toContainText("the file opens and can be read");
+  await expect(preview.getByTestId("preview-limits")).toContainText("Fonts, colours");
+  await preview.getByRole("button", { name: "Close" }).click();
   await changes.getByRole("button", { name: "Keep" }).click();
   const applied = page.getByTestId("task-applied");
   await expect(applied).toContainText("Kept: 2 change(s)");

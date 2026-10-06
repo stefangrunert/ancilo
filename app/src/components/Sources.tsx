@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { OpOutput } from "../api/client";
 import { useI18n, type Key } from "../i18n";
-import { useOp } from "../state/store";
+import { useOp, useRefresh } from "../state/store";
 import { Icon } from "./Icon";
 import { Dialog, ErrorNote } from "./ui";
 
@@ -71,6 +71,11 @@ export function DocSources({ evidence, dropped, onOpen }: { evidence: Evidence[]
 export function SourceDialog({ conversation, mark, onClose }: { conversation: string; mark: string | null; onClose: () => void }) {
   const { t } = useI18n();
   const opened = useOp("open_evidence", mark ? { conversation, mark } : undefined, Boolean(mark));
+  const refresh = useRefresh();
+  // Opened again: how the document stands now, not how it stood last time.
+  useEffect(() => {
+    if (mark) void refresh("open_evidence");
+  }, [mark, refresh]);
   const o = opened.data;
   const e = o?.evidence;
   const title = e ? `${t("sources.one", { n: num(e.id) })} · ${e.document}` : t("sources.title");

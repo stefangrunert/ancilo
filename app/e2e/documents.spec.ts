@@ -61,3 +61,47 @@ test("a folder becomes a chat project: read, with what could not be read, and it
   const [c] = await daemon.op("list_conversations");
   expect(c.folder).toBe(dir);
 });
+
+test.describe("sources", () => {
+  test.use({ daemonArgs: ["--with-models", "--docs"] });
+
+  // covers: FPL-01
+  test("an answer from a folder names its source: it opens the passage; a made-up one is taken out", async ({ page, daemon }) => {
+    const { mkdtempSync, writeFileSync, realpathSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "ancilo-sources-")));
+    writeFileSync(join(dir, "Mietvertrag.md"), "# Mietvertrag\n\n§ 9 Kündigung: Die Kündigungsfrist beträgt drei Monate zum Monatsende.");
+    await daemon.open(page);
+    await page.getByRole("button", { name: "Add a folder" }).click();
+    await page.getByText("For experts: type a folder path").click();
+    await page.getByRole("textbox", { name: "Folder" }).fill(dir);
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByTestId("folder-status")).toContainText("1 documents read", { timeout: 20_000 });
+    const ask = page.getByRole("textbox", { name: "Ask about these documents" });
+    await ask.fill("Wie lang ist die Kündigungsfrist?");
+    await ask.press("Enter");
+    const answer = page.getByTestId("assistant-answer");
+    await expect(answer).toContainText("Die Kündigungsfrist beträgt drei Monate", { timeout: 20_000 });
+    // The made-up source is gone from the text, and that is said.
+    await expect(answer).not.toContainText("D9");
+    await expect(page.getByTestId("dropped-marks")).toContainText("removed 1 source");
+    await expect(page.getByTestId("doc-sources")).toContainText("Mietvertrag.md");
+    // The mark opens the passage the answer had.
+    await answer.getByRole("button", { name: "Open source 1" }).click();
+    const view = page.getByTestId("source-view");
+    await expect(view.getByTestId("source-excerpt")).toContainText("drei Monate zum Monatsende");
+    await expect(view.getByTestId("source-changed")).toHaveCount(0);
+    await view.getByRole("button", { name: "Close" }).click();
+    // The file changes: the old source says so – and still shows what the answer had.
+    writeFileSync(join(dir, "Mietvertrag.md"), "# Mietvertrag\n\n§ 9 Kündigung: sechs Monate.");
+    const [c] = await daemon.op("list_conversations");
+    await daemon.op("read_folder", { folder: dir });
+    await expect
+      .poll(async () => (await daemon.op("open_evidence", { conversation: c.id, mark: "D1" })).now, { timeout: 20_000 })
+      .toBe("changed");
+    await page.getByTestId("source-D1").click();
+    await expect(view.getByTestId("source-changed")).toContainText("has changed since the answer");
+    await expect(view.getByTestId("source-excerpt")).toContainText("drei Monate zum Monatsende");
+  });
+});

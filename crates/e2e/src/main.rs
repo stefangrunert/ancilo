@@ -78,6 +78,15 @@ steps:
     respond: { text: "Oslo hat **728.714** Einwohner [1]." }
 "#;
 
+/// The chat model answering from documents (`--docs`): names the passage it
+/// was given ([D1]) – and one it was not ([D9]), which Ancilo takes out.
+const CHAT_DOCS: &str = r#"
+cycle: true
+steps:
+  - expect: { any_message_contains: "[D1]" }
+    respond: { text: "Die Kündigungsfrist beträgt drei Monate [D1]. Laut Anhang gilt das auch für Garagen [D9]." }
+"#;
+
 const CODER: &str = r##"
 cycle: true
 steps:
@@ -190,6 +199,8 @@ async fn main() {
             "Chat-Q8_0",
             if flag("--web") {
                 CHAT_WEB
+            } else if flag("--docs") {
+                CHAT_DOCS
             } else if flag("--tasks") {
                 CHAT_TASK
             } else {

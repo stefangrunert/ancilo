@@ -1471,17 +1471,31 @@ impl Sessions {
         Option<ancilo_docs::preview::Layout>,
         Vec<ancilo_docs::preview::Finding>,
     ) {
-        let file = work.join(rel);
-        let hash = std::fs::read(&file)
-            .map(|b| hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&b)[..8]))
-            .unwrap_or_default();
+        // Read once: what is hashed is what is shown and checked.
+        let bytes = match std::fs::read(work.join(rel)) {
+            Ok(b) => b,
+            Err(e) => {
+                return (
+                    String::new(),
+                    None,
+                    ancilo_docs::preview::unreadable(&e.to_string()),
+                );
+            }
+        };
+        let hash = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&bytes)[..8]);
+        let name = Path::new(rel).file_name().unwrap_or_default().to_os_string();
         let extractor = self.inner.extractor.lock().unwrap().clone();
         let layout = match extractor {
+            // The reader sees only its own place: the result goes there (the
+            // task's copy is inside Ancilo's own data, which it never reads).
             Some(ex) => match ex.workdir() {
-                Ok(dir) => ex.layout(&file, &dir).await,
+                Ok(dir) => match std::fs::write(dir.join(&name), &bytes) {
+                    Ok(()) => ex.layout(&dir.join(&name), &dir).await,
+                    Err(e) => Err(Error::internal(e)),
+                },
                 Err(e) => Err(e),
             },
-            None => ancilo_docs::preview::layout_file(&file),
+            None => ancilo_docs::preview::layout(&name.to_string_lossy(), &bytes),
         };
         match layout {
             Ok(l) => {
