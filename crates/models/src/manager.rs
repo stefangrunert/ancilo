@@ -982,21 +982,23 @@ impl ModelManager {
         } else {
             purposes.to_vec()
         };
-        let (best, alternatives, more, too_big, embedding) = catalog::recommend(
-            &catalog,
-            &purposes,
-            &self.inner.hw,
-            memory.clone(),
-            self.reserve(),
-            &installed,
-            self.resource_settings().variant,
-        );
+        let (best, alternatives, more, too_big, embedding, smallest_need_bytes) =
+            catalog::recommend(
+                &catalog,
+                &purposes,
+                &self.inner.hw,
+                memory.clone(),
+                self.reserve(),
+                &installed,
+                self.resource_settings().variant,
+            );
         Ok(Recommendations {
             purposes,
             best,
             alternatives,
             more,
             too_big,
+            smallest_need_bytes,
             embedding,
             chip: self.inner.hw.chip.clone(),
             memory,

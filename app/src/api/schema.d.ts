@@ -7948,6 +7948,12 @@ export interface operations {
                         more: components["schemas"]["Suggestion"][];
                         purposes: components["schemas"]["Purpose"][];
                         /**
+                         * Format: uint64
+                         * @description What the smallest model for these purposes needs (memory) – to say
+                         *     honestly how far this computer is from running one when none fits.
+                         */
+                        smallest_need_bytes?: number | null;
+                        /**
                          * Format: uint32
                          * @description Catalog models too big for this machine.
                          */

@@ -15,6 +15,7 @@ export const messagesEn = {
   "msg.model.no_answer_http": "the model did not answer: {why}",
   "msg.model.rejected": "the model rejected the request: {why}",
   "msg.model.failed_http": "the model failed (HTTP {status}): {why}",
+  "msg.model.none_fits": "This computer does not have enough memory for any of Ancilo's AI models, so there is no AI to answer here yet. Set up › The AI for your computer shows what it would need.",
   "msg.agent.call_failed": "model call failed: {why}",
   "msg.agent.no_answer": "the model ended without an answer",
   "msg.agent.repeating": "the model kept repeating the same tool call",

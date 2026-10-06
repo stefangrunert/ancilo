@@ -19,7 +19,10 @@ test.describe("on a machine that is too small", () => {
     await daemon.open(page);
     // The guided choice says so honestly …
     await page.getByRole("button", { name: "Next" }).click();
-    await expect(page.getByTestId("step-model")).toContainText("none of Ancilo's models fits comfortably on this computer (1.0 GB memory)");
+    const step = page.getByTestId("step-model");
+    await expect(step).toContainText("This computer does not have enough memory for an AI model: the smallest needs about 0.9 GB");
+    await expect(step).toContainText("(1.0 GB in all)");
+    await expect(step.getByRole("button", { name: "Continue without a local model" })).toBeVisible();
     // … and so does the expert way.
     await daemon.openSystem(page);
     await page.getByText("For experts: enter a model address").click();

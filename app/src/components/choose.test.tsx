@@ -99,6 +99,28 @@ describe("Choosing a model", () => {
     expect(await screen.findByText("Ready! Ancilo is set up.")).toBeInTheDocument();
   });
 
+  // A computer too small for any local model (a 4 GB laptop): the numbers,
+  // the way out, and in the setup no dead end.
+  it("says with numbers when the computer is too small, and goes on without a model", async () => {
+    let skipped = false;
+    renderWithDaemon(<ModelChoice purposes={["chat"]} onSkip={() => (skipped = true)} />, {
+      recommend_models: () =>
+        recs({ best: null, alternatives: [], more: [], too_big: 11, smallest_need_bytes: 1.7 * 2 ** 30, memory: { ...recs().memory, total_bytes: 4 * 2 ** 30, for_models_bytes: 1.2 * 2 ** 30 } }),
+    });
+    const note = await screen.findByTestId("nothing-fits");
+    expect(note).toHaveTextContent("the smallest needs about 1.7 GB, and this computer can spare at most 1.2 GB for it (4.0 GB in all)");
+    expect(note).toHaveTextContent("8 GB or more");
+    await userEvent.click(within(note).getByRole("button", { name: "Continue without a local model" }));
+    expect(skipped).toBe(true);
+  });
+
+  it("says when only small models run here", async () => {
+    renderWithDaemon(<ModelChoice purposes={["chat"]} />, {
+      recommend_models: () => recs({ best: suggestion("tiny", { quality: 2 }) }),
+    });
+    expect(await screen.findByText(/Only small models run on this computer/)).toBeInTheDocument();
+  });
+
   it("says honestly when nothing fits, and searches Hugging Face on request", async () => {
     const { calls } = renderWithDaemon(<ModelChoice purposes={["chat"]} />, {
       // The search is part of the expert view.
@@ -107,7 +129,7 @@ describe("Choosing a model", () => {
       search_models: () => [{ repo: "someone/Fit-GGUF", address: "hf.co/someone/Fit-GGUF", downloads: 1234, likes: 1, updated: null, pipeline_tag: null }],
       plan_model: () => ({ address: {}, download_bytes: 1e9, plan: { fit: "fits" } }),
     });
-    expect(await screen.findByText(/none of Ancilo's models fits comfortably on this computer \(1.0 GB memory\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/none of Ancilo's models fits this computer \(1.0 GB memory\)/)).toBeInTheDocument();
     await userEvent.click(screen.getByText("Search Hugging Face yourself"));
     await userEvent.type(screen.getByRole("textbox", { name: "Search for a model" }), "fit{Enter}");
     await waitFor(() => expect(calls.find((c) => c.op === "search_models")?.input).toEqual({ query: "fit", limit: 10 }));

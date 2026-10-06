@@ -106,7 +106,14 @@ function ModelStep({ models, onDone, onBack }: { models: Model[]; onDone: () => 
           </div>
         </div>
       ) : (
-        <ModelChoice purposes={purposes} next={{ label: t("setup.next"), onClick: () => void done() }} />
+        <ModelChoice
+          purposes={purposes}
+          next={{ label: t("setup.next"), onClick: () => void done() }}
+          onSkip={async () => {
+            await set({ step: "model", state: "skipped" });
+            onDone();
+          }}
+        />
       )}
     </StepFrame>
   );
@@ -324,7 +331,8 @@ export function SetupPage() {
   if (!prefs.data || !models.data) return null;
   const setup = prefs.data.setup ?? {};
   const hasChat = models.data.some((m) => !m.embedding);
-  const complete = (s: Step) => (s === "model" ? hasChat && setup[s] === "done" : setup[s] === "done" || setup[s] === "skipped");
+  // The model step: done with a model – or skipped where none fits.
+  const complete = (s: Step) => (s === "model" ? (hasChat && setup[s] === "done") || setup[s] === "skipped" : setup[s] === "done" || setup[s] === "skipped");
   const firstOpen = STEPS.find((s) => !complete(s)) ?? null;
   const current = editing ?? firstOpen;
   const go = (s: Step | null) => setEditing(s);

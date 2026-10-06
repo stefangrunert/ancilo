@@ -1461,17 +1461,28 @@ impl Assistant {
         let name = |k: &str| plan[k]["repo"]["id"].as_str().map(String::from);
         let gb = plan["download_bytes"].as_u64().unwrap_or(0) as f64 / 1e9;
         let answer = match (name("chat"), name("embed")) {
-            (None, None) => "No model is installed, and none of the recommended models fits this machine comfortably. Choose one with `ancilo plan <address>` and add it with `ancilo add <address>`.".to_string(),
+            // No chat model fits this computer: said plainly – a search model
+            // alone (all the setup would offer) answers nothing.
+            (None, _) => ancilo_core::msg("model.none_fits", &[]),
             (chat, embed) => format!(
                 "No model is installed yet. I propose the first-start setup: {}{}{} ({:.1} GB to download). Confirm it, and I can help with everything else afterwards.",
-                chat.as_deref().map(|c| format!("the chat model {c}")).unwrap_or_default(),
-                if chat.is_some() && embed.is_some() { " and " } else { "" },
-                embed.as_deref().map(|e| format!("the embedding model {e} for search")).unwrap_or_default(),
+                chat.as_deref()
+                    .map(|c| format!("the chat model {c}"))
+                    .unwrap_or_default(),
+                if chat.is_some() && embed.is_some() {
+                    " and "
+                } else {
+                    ""
+                },
+                embed
+                    .as_deref()
+                    .map(|e| format!("the embedding model {e} for search"))
+                    .unwrap_or_default(),
                 gb
             ),
         };
         let mut pending = Vec::new();
-        if !(plan["chat"].is_null() && plan["embed"].is_null()) {
+        if !plan["chat"].is_null() {
             let action = PendingAction {
                 id: format!("a-{}", &uuid::Uuid::new_v4().simple().to_string()[..10]),
                 operation: "setup".into(),

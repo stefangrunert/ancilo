@@ -213,12 +213,15 @@ export function ModelChoice({
   onReady,
   onStarted,
   next,
+  onSkip,
 }: {
   purposes: Purpose[];
   onReady?: () => void;
   onStarted?: () => void;
   /** In the setup: the way on once the model is ready (instead of "ask now"). */
   next?: { label: string; onClick: () => void };
+  /** In the setup: on without a local model – when none fits this computer. */
+  onSkip?: () => void;
 }) {
   const pro = usePro();
   const { t, lang } = useI18n();
@@ -342,6 +345,7 @@ export function ModelChoice({
       </p>
       {rec.best ? (
         <>
+          {rec.best.quality <= 2 && <p className="note">{t("choose.onlySmall")}</p>}
           {card(rec.best, true)}
           {rec.alternatives.length > 0 && (
             <>
@@ -351,7 +355,22 @@ export function ModelChoice({
           )}
         </>
       ) : (
-        <p className="note">{t("choose.nothingFits", { total: formatRam(m.total_bytes) })}</p>
+        // Too small for any local model: said with the numbers, and no dead end.
+        <div className="note stack" data-testid="nothing-fits">
+          <p>
+            {rec.smallest_need_bytes
+              ? t("choose.tooSmall", { need: formatRam(rec.smallest_need_bytes), budget: formatRam(m.for_models_bytes), total: formatRam(m.total_bytes) })
+              : t("choose.nothingFits", { total: formatRam(m.total_bytes) })}
+          </p>
+          <p className="small">{t("choose.tooSmallWayOut")}</p>
+          {onSkip && (
+            <div className="row">
+              <button type="button" onClick={onSkip}>
+                {t("choose.withoutModel")}
+              </button>
+            </div>
+          )}
+        </div>
       )}
       {purposes.includes("documents") && rec.embedding && <p className="muted small">{t("choose.withEmbedding", { size: formatBytes(rec.embedding.download_bytes) })}</p>}
       <ErrorNote error={error} onDismiss={() => setError(null)} />

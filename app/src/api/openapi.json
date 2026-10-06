@@ -11618,6 +11618,15 @@
                       },
                       "type": "array"
                     },
+                    "smallest_need_bytes": {
+                      "description": "What the smallest model for these purposes needs (memory) – to say\nhonestly how far this computer is from running one when none fits.",
+                      "format": "uint64",
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
                     "too_big": {
                       "description": "Catalog models too big for this machine.",
                       "format": "uint32",

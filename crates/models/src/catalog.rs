@@ -216,12 +216,27 @@ pub struct Recommendations {
     pub more: Vec<Suggestion>,
     /// Catalog models too big for this machine.
     pub too_big: u32,
+    /// What the smallest model for these purposes needs (memory) – to say
+    /// honestly how far this computer is from running one when none fits.
+    pub smallest_need_bytes: Option<u64>,
     /// Needed to work with documents (when none is installed yet).
     pub embedding: Option<Suggestion>,
     pub chip: String,
     pub memory: MemoryView,
     pub catalog: CatalogInfo,
 }
+
+/// What `recommend` picks: the best, two or three alternatives, the rest,
+/// how many are too big, the embedding model (documents) and what the
+/// smallest model needs.
+pub type Picked = (
+    Option<Suggestion>,
+    Vec<Suggestion>,
+    Vec<Suggestion>,
+    u32,
+    Option<Suggestion>,
+    Option<u64>,
+);
 
 /// An installed model, as far as recommendations care.
 #[derive(Debug, Clone)]
@@ -470,13 +485,7 @@ pub fn recommend(
     reserve: u64,
     installed: &[Installed],
     variant: Variant,
-) -> (
-    Option<Suggestion>,
-    Vec<Suggestion>,
-    Vec<Suggestion>,
-    u32,
-    Option<Suggestion>,
-) {
+) -> Picked {
     let purposes: Vec<Purpose> = if purposes.is_empty() {
         vec![Purpose::Chat]
     } else {
@@ -484,12 +493,17 @@ pub fn recommend(
     };
     let mut fitting = Vec::new();
     let mut too_big = 0;
+    let mut smallest: Option<u64> = None;
     for m in catalog
         .models
         .iter()
         .filter(|m| m.kind == "chat" && m.purposes.iter().any(|p| purposes.contains(p)))
     {
-        match suggest(m, &purposes, hw, &memory, reserve, installed, variant) {
+        let s = suggest(m, &purposes, hw, &memory, reserve, installed, variant);
+        if let Some(s) = &s {
+            smallest = Some(smallest.map_or(s.ram_bytes, |n: u64| n.min(s.ram_bytes)));
+        }
+        match s {
             Some(s) if s.room != Room::TooBig => fitting.push(s),
             _ => too_big += 1,
         }
@@ -509,7 +523,7 @@ pub fn recommend(
             .find_map(|m| suggest(m, &purposes, hw, &memory, reserve, installed, Variant::Auto))
     })
     .flatten();
-    (best, alternatives, more, too_big, embedding)
+    (best, alternatives, more, too_big, embedding, smallest)
 }
 
 #[cfg(test)]
@@ -525,17 +539,7 @@ mod tests {
         memory_view(hw, budget, available_now, 0)
     }
 
-    fn run(
-        ram_gib: u64,
-        purposes: &[Purpose],
-        available_now: Option<u64>,
-    ) -> (
-        Option<Suggestion>,
-        Vec<Suggestion>,
-        Vec<Suggestion>,
-        u32,
-        Option<Suggestion>,
-    ) {
+    fn run(ram_gib: u64, purposes: &[Purpose], available_now: Option<u64>) -> Picked {
         let hw = HardwareProfile::apple(ram_gib);
         let reserve = (hw.total_ram_bytes / 5).min(8 * GIB);
         recommend(
@@ -599,7 +603,7 @@ mod tests {
     fn recommendations_match_the_machine() {
         let mut seen = Vec::new();
         for ram in [8u64, 16, 32, 64, 128] {
-            let (best, alternatives, _, _, _) = run(ram, &[Purpose::Chat], None);
+            let (best, alternatives, ..) = run(ram, &[Purpose::Chat], None);
             let best = best.unwrap_or_else(|| panic!("{ram} GB: no recommendation"));
             assert_eq!(best.room, Room::Comfortable, "{ram} GB: {}", best.name);
             assert_ne!(best.speed, Speed::Slow, "{ram} GB: {}", best.name);
@@ -633,9 +637,9 @@ mod tests {
         let code = code.unwrap();
         assert!(code.purposes.contains(&Purpose::Code), "{}", code.name);
         // Documents bring the embedding model along.
-        let (_, _, _, _, embedding) = run(16, &[Purpose::Documents], None);
+        let (_, _, _, _, embedding, _) = run(16, &[Purpose::Documents], None);
         assert_eq!(embedding.unwrap().id, "all-minilm-l6-v2");
-        let (_, _, _, _, none) = run(16, &[Purpose::Chat], None);
+        let (_, _, _, _, none, _) = run(16, &[Purpose::Chat], None);
         assert!(none.is_none());
     }
 
@@ -689,9 +693,15 @@ mod tests {
 
     #[test]
     fn a_tiny_machine_still_gets_something_or_nothing_honestly() {
-        let (best, _, _, too_big, _) = run(4, &[Purpose::Chat], None);
+        let (best, _, _, too_big, ..) = run(4, &[Purpose::Chat], None);
         let best = best.expect("a small model fits 4 GB");
         assert!(best.ram_bytes < 3 * GIB);
         assert!(too_big > 5);
+        // Too small for any: nothing to choose – and how much the smallest
+        // would need, to say so honestly.
+        let (best, alternatives, more, _, _, smallest) = run(2, &[Purpose::Chat], None);
+        assert!(best.is_none() && alternatives.is_empty() && more.is_empty());
+        let need = smallest.expect("the smallest model's need");
+        assert!(need > GIB && need < 3 * GIB, "{need}");
     }
 }
