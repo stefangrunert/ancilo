@@ -13,6 +13,7 @@ export const de: Record<Key, string> = {
   "msg.check.numbers_ok": "{n} Summe(n) und Beträge geprüft – sie stimmen",
   "msg.check.numbers_none": "Keine Summen oder Beträge, die sich prüfen lassen",
   "msg.check.total_wrong": "Die Summe von „{what}“ ist {shown}, die Zeilen darüber ergeben aber {sum}",
+  "msg.check.table_as_text": "{n} Tabelle(n) als Text geschrieben (mit |) – Word zeigt die Striche, keine Tabelle",
   "msg.check.total_beside": "Die Summe steht neben „{what}“, nicht darunter – gegen diese Spalte geprüft",
   "msg.check.total_alone": "Eine Summe von „{what}“ hat keine eigenen Zeilen darüber – nicht geprüft",
   "msg.check.maybe_missing": "Die Aufgabe nennt {what} – in der Datei nicht gefunden; bitte prüfen, ob es fehlt",

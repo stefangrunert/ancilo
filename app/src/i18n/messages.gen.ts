@@ -49,6 +49,7 @@ export const messagesEn = {
   "msg.check.numbers_ok": "{n} total(s) and amount(s) checked – they add up",
   "msg.check.numbers_none": "no totals or amounts that could be checked",
   "msg.check.total_wrong": "the total of “{what}” says {shown}, but the rows above add up to {sum}",
+  "msg.check.table_as_text": "{n} table(s) written as text (with |) – Word shows the bars, not a table",
   "msg.check.total_beside": "the total stands beside “{what}”, not under it – checked against that column",
   "msg.check.total_alone": "a total of “{what}” has no rows of its own above it – not checked",
   "msg.check.maybe_missing": "the task names {what} – not found in the file; please look whether it is needed",

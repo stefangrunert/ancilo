@@ -168,6 +168,10 @@ pub const MESSAGES: &[(&str, &str)] = &[
         "the total of “{what}” says {shown}, but the rows above add up to {sum}",
     ),
     (
+        "check.table_as_text",
+        "{n} table(s) written as text (with |) – Word shows the bars, not a table",
+    ),
+    (
         "check.total_beside",
         "the total stands beside “{what}”, not under it – checked against that column",
     ),

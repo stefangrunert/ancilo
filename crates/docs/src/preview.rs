@@ -885,6 +885,33 @@ pub fn check(l: &Layout, task: &str) -> Vec<Finding> {
             None,
         ));
     }
+    // A table written as text (`| Firma | Betrag |`, found live): Word
+    // shows the bars, not a table – said, a hint.
+    let text_tables = l
+        .blocks
+        .iter()
+        .filter(|b| match b {
+            Block::Paragraph { text } => {
+                let rows: Vec<&str> = text.lines().map(str::trim).collect();
+                rows.len() >= 2
+                    && rows
+                        .iter()
+                        .filter(|r| r.starts_with('|') && r.ends_with('|'))
+                        .count()
+                        >= 2
+                    && rows.iter().any(|r| r.starts_with('|') && r.contains("---"))
+            }
+            _ => false,
+        })
+        .count();
+    if l.kind == Kind::Word && text_tables > 0 {
+        out.push(find(
+            CheckArea::Complete,
+            CheckLevel::Warning,
+            msg("check.table_as_text", &[("n", &text_tables)]),
+            None,
+        ));
+    }
     // A total the task asks for.
     let tables = tables(l);
     // What the task names, filled in every row that has the rest.
@@ -2829,6 +2856,20 @@ mod tests {
         assert_eq!(errors(&f).len(), 1, "{f:#?}");
         assert_eq!(errors(&f)[0].place.as_deref(), Some("Rechnungen!D4"));
         let f = beside("30");
+        assert!(
+            errors(&f).is_empty() && f.iter().any(|x| x.level == CheckLevel::Warning),
+            "{f:#?}"
+        );
+        // A table written as text in a Word file: a hint.
+        let l = Layout {
+            kind: Kind::Word,
+            sheets: Vec::new(),
+            blocks: vec![Block::Paragraph {
+                text: "| Firma | Betrag |\n|---|---|\n| A | 10 |".into(),
+            }],
+            limits: Vec::new(),
+        };
+        let f = check(&l, "");
         assert!(
             errors(&f).is_empty() && f.iter().any(|x| x.level == CheckLevel::Warning),
             "{f:#?}"
