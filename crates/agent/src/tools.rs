@@ -185,6 +185,89 @@ fn replace_path(text: &str, from: &str, to: &str) -> String {
     out
 }
 
+/// Like [`replace_path`], for a shell command: `to` is written as the
+/// command's quoting at that place needs it – escaped where it stands bare,
+/// inside double or single quotes as those need. The copy may lie where a
+/// path has spaces ("Application Support"); the agent's command for its
+/// project path must still run.
+fn replace_path_in_shell(text: &str, from: &str, to: &str) -> String {
+    if from.is_empty() || from == to {
+        return text.to_string();
+    }
+    #[derive(Clone, Copy, PartialEq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+    let name_char = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
+    let bare_ok = |c: char| c.is_alphanumeric() || "/._-+:@%,=".contains(c);
+    let quoted = |q: Quote| -> String {
+        match q {
+            Quote::None => to
+                .chars()
+                .flat_map(|c| if bare_ok(c) { vec![c] } else { vec!['\\', c] })
+                .collect(),
+            Quote::Double => to
+                .chars()
+                .flat_map(|c| {
+                    if "\"$`\\".contains(c) {
+                        vec!['\\', c]
+                    } else {
+                        vec![c]
+                    }
+                })
+                .collect(),
+            Quote::Single => to.replace('\'', "'\\''"),
+        }
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut q = Quote::None;
+    let mut prev: Option<char> = None;
+    let mut i = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        if let Some(after) = rest.strip_prefix(from) {
+            let mut next = after.chars();
+            let ends = match next.next() {
+                None => true,
+                Some('.') => !next.next().is_some_and(name_char),
+                Some(c) => !name_char(c),
+            };
+            let starts = !prev.is_some_and(|c| name_char(c) || c == '.');
+            if starts && ends {
+                out.push_str(&quoted(q));
+                prev = from.chars().next_back();
+                i += from.len();
+                continue;
+            }
+        }
+        let c = rest.chars().next().expect("not at the end");
+        match (q, c) {
+            (Quote::None, '\\') | (Quote::Double, '\\') => {
+                // An escaped character: both stay as they are.
+                out.push(c);
+                if let Some(n) = rest[1..].chars().next() {
+                    out.push(n);
+                    i += n.len_utf8();
+                    prev = Some(n);
+                }
+                i += 1;
+                continue;
+            }
+            (Quote::None, '\'') => q = Quote::Single,
+            (Quote::Single, '\'') => q = Quote::None,
+            (Quote::None, '"') => q = Quote::Double,
+            (Quote::Double, '"') => q = Quote::None,
+            _ => {}
+        }
+        out.push(c);
+        prev = Some(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
 /// Search over the project (the index of M5), offered to the model as the
 /// tool `search` when available.
 pub trait CodeSearch: Send + Sync {
@@ -339,6 +422,19 @@ impl Workspace {
         }
     }
 
+    /// A command the agent wrote → the command run in this workspace (its
+    /// project path written as the command's quoting needs it).
+    fn inbound_shell(&self, command: &str) -> String {
+        match &self.shown {
+            Some(shown) => replace_path_in_shell(
+                command,
+                &shown.display().to_string(),
+                &self.root.display().to_string(),
+            ),
+            None => command.to_string(),
+        }
+    }
+
     /// Paths in this workspace → the paths the agent knows.
     fn outbound(&self, text: &str) -> String {
         let Some(shown) = &self.shown else {
@@ -489,7 +585,7 @@ impl Workspace {
                 "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]})));
         }
         if self.access >= Access::Shell {
-            tools.push(f("bash", "Run a shell command in the project directory (no network). Returns output and exit code.", json!({"type": "object", "properties": {
+            tools.push(f("bash", "Run a shell command in the project directory (no network). It already runs there: use paths relative to the project, no cd needed. Returns output and exit code.", json!({"type": "object", "properties": {
                 "command": {"type": "string"}, "timeout_s": {"type": "integer", "minimum": 1, "maximum": 600}}, "required": ["command"]})));
         }
         tools
@@ -836,7 +932,7 @@ impl Workspace {
             .map(Duration::from_secs)
             .unwrap_or(self.shell.default_timeout)
             .min(self.shell.max_timeout);
-        let script = self.inbound(&a.command);
+        let script = self.inbound_shell(&a.command);
         let mut cmd = if self.shell.sandbox {
             let bounds = sandbox::Bounds {
                 root: &self.root,
@@ -1431,6 +1527,70 @@ mod tests {
             "/a/wcs2 /x/a/wcs /a/wcs.git"
         );
         assert_eq!(replace_path("same", "", "/x"), "same");
+    }
+
+    #[test]
+    fn a_project_path_in_a_command_is_written_as_its_quoting_needs() {
+        let r = |t: &str| replace_path_in_shell(t, "/p/proj", "/w/App Support/work");
+        // Bare: escaped; in double or single quotes: as it is.
+        assert_eq!(r("cd /p/proj && ls"), "cd /w/App\\ Support/work && ls");
+        assert_eq!(r("cat /p/proj/a.txt"), "cat /w/App\\ Support/work/a.txt");
+        assert_eq!(
+            r("cat \"/p/proj/a b.txt\""),
+            "cat \"/w/App Support/work/a b.txt\""
+        );
+        assert_eq!(r("cat '/p/proj/a.txt'"), "cat '/w/App Support/work/a.txt'");
+        // Quotes of another kind inside, escapes, not a whole path.
+        assert_eq!(
+            r("echo \"it's\" /p/proj"),
+            "echo \"it's\" /w/App\\ Support/work"
+        );
+        assert_eq!(r("echo \\' /p/proj"), "echo \\' /w/App\\ Support/work");
+        assert_eq!(r("ls /p/proj2 /x/p/proj"), "ls /p/proj2 /x/p/proj");
+        // What double and single quotes cannot hold as it is.
+        let d = replace_path_in_shell("\"/p/proj\"", "/p/proj", "/w/$x\"y");
+        assert_eq!(d, "\"/w/\\$x\\\"y\"");
+        let q = replace_path_in_shell("'/p/proj'", "/p/proj", "/w/it's");
+        assert_eq!(q, "'/w/it'\\''s'");
+    }
+
+    /// Found live: the copy lies under "Application Support"; the agent's
+    /// commands for its project path – bare, as small models write them –
+    /// must run there.
+    #[tokio::test]
+    async fn commands_run_in_a_copy_whose_path_has_a_space() {
+        let base = tempfile::tempdir().unwrap();
+        let copy = base.path().join("Application Support").join("work");
+        std::fs::create_dir_all(&copy).unwrap();
+        std::fs::write(copy.join("data.txt"), "hello\n").unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let shown = std::fs::canonicalize(project.path())
+            .unwrap()
+            .display()
+            .to_string();
+        for sandbox in [false, cfg!(target_os = "macos")] {
+            let w = Workspace::new(&copy, Access::Shell)
+                .unwrap()
+                .with_shell(ShellSettings {
+                    sandbox,
+                    ..Default::default()
+                })
+                .showing(project.path());
+            for command in [
+                format!("cd {shown} && cat data.txt && echo x > {shown}/bare.txt"),
+                format!("cat \"{shown}/data.txt\" && echo x > \"{shown}/double.txt\""),
+                format!("cat '{shown}/data.txt' && echo x > '{shown}/single.txt'"),
+            ] {
+                let out = w.execute("bash", &json!({ "command": command })).await;
+                assert!(!out.is_error, "{command}: {}", out.content);
+                assert!(out.content.contains("hello"), "{}", out.content);
+            }
+            for f in ["bare.txt", "double.txt", "single.txt"] {
+                assert!(copy.join(f).exists(), "{f} (sandbox: {sandbox})");
+                std::fs::remove_file(copy.join(f)).unwrap();
+            }
+        }
+        assert!(!project.path().join("bare.txt").exists());
     }
 
     // covers: M8-AC-09
