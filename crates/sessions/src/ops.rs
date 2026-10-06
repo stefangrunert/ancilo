@@ -92,6 +92,18 @@ pub struct SaveInput {
     /// Where to save (default: the user's Documents).
     #[serde(default)]
     pub dir: Option<PathBuf>,
+    /// The results as the user saw them (`check_results` / `preview_result`):
+    /// refused when they changed since.
+    #[serde(default)]
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResultRef {
+    pub session: String,
+    /// The result's path in the task (as listed in its changes).
+    pub path: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -314,7 +326,23 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
         "Save a free task's results (new and changed files) into a folder – default: Documents; never over an existing file",
         manage = true,
         conseq = false,
-        |s, i: SaveInput| s.save_results(&i.session, i.dir).await
+        |s, i: SaveInput| s
+            .save_results(&i.session, i.dir, i.version.as_deref())
+            .await
+    );
+    op!(
+        "preview_result",
+        "Look at a task's result before keeping it: a spreadsheet's sheets, a document's headings, paragraphs and tables – and what the checks found (empty, missing what the task names, totals that do not add up), for exactly the version returned",
+        manage = false,
+        conseq = false,
+        |s, i: ResultRef| s.preview_result(&i.session, &i.path).await
+    );
+    op!(
+        "check_results",
+        "Check all results of a task (readable, complete, numbers) – for exactly the version returned; keep or save with that version",
+        manage = false,
+        conseq = false,
+        |s, i: SessionRef| s.check_results(&i.session).await
     );
     op!(
         "undo_apply",

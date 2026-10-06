@@ -873,6 +873,10 @@ const PORTED: &[(&str, &str)] = &[
         "anything-llm",
         "AnythingLLM (Mintplex-Labs/anything-llm, TextSplitter, MIT) – crates/docs/src/split.rs",
     ),
+    (
+        "jan",
+        "Jan (janhq/jan, preview states, Apache-2.0; This product includes software developed by Menlo Research (https://menlo.ai)) – app/src/state/preview.ts",
+    ),
 ];
 
 fn notices(root: &Path) -> Result<String> {

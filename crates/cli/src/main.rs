@@ -291,6 +291,10 @@ enum Command {
     /// the user's files, in a sandboxed process of its own.
     #[command(hide = true)]
     ExtractDocument { path: std::path::PathBuf },
+    /// (Internal) What a file looks like inside – sheets, headings, tables –
+    /// for looking at a result before keeping it; prints JSON.
+    #[command(hide = true)]
+    PreviewDocument { path: std::path::PathBuf },
     /// Print the path of the Ancilo plugin for Claude Code (try it without
     /// installing: `claude --plugin-dir "$(ancilo claude-plugin)"`).
     ClaudePlugin,
@@ -587,6 +591,11 @@ async fn run(cli: Cli) -> Result<()> {
     if let Command::ExtractDocument { path } = &cli.command {
         let doc = ancilo_docs::extract::extract_file(path)?;
         println!("{}", serde_json::to_string(&doc)?);
+        return Ok(());
+    }
+    if let Command::PreviewDocument { path } = &cli.command {
+        let layout = ancilo_docs::preview::layout_file(path)?;
+        println!("{}", serde_json::to_string(&layout)?);
         return Ok(());
     }
     let paths = Paths::resolve();
@@ -1430,7 +1439,10 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Command::Connect { client: target } => connect(&client, &target, false, cli.json).await?,
         Command::Disconnect { client: target } => connect(&client, &target, true, cli.json).await?,
-        Command::Mcp | Command::ExtractDocument { .. } | Command::Uninstall { .. } => {
+        Command::Mcp
+        | Command::ExtractDocument { .. }
+        | Command::PreviewDocument { .. }
+        | Command::Uninstall { .. } => {
             unreachable!()
         }
         Command::ClaudePlugin => {

@@ -320,6 +320,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ops/check_results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check all results of a task (readable, complete, numbers) – for exactly the version returned; keep or save with that version
+         * @description Check all results of a task (readable, complete, numbers) – for exactly the version returned; keep or save with that version
+         */
+        post: operations["check_results"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ops/choose_folder": {
         parameters: {
             query?: never;
@@ -1423,6 +1443,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ops/open_evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A source of an answer from documents ([D3]): the passage the answer had, and whether its document changed since
+         * @description A source of an answer from documents ([D3]): the passage the answer had, and whether its document changed since
+         */
+        post: operations["open_evidence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ops/open_project": {
         parameters: {
             query?: never;
@@ -1557,6 +1597,26 @@ export interface paths {
          * @description Resolves the address, picks the best quantization and context for this hardware, and reports whether it fits, what would be downloaded and whether an existing local copy (LM Studio, Ollama, Hugging Face cache) can be used.
          */
         post: operations["plan_model"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ops/preview_result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Look at a task's result before keeping it: a spreadsheet's sheets, a document's headings, paragraphs and tables – and what the checks found (empty, missing what the task names, totals that do not add up), for exactly the version returned
+         * @description Look at a task's result before keeping it: a spreadsheet's sheets, a document's headings, paragraphs and tables – and what the checks found (empty, missing what the task names, totals that do not add up), for exactly the version returned
+         */
+        post: operations["preview_result"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2869,6 +2929,21 @@ export interface components {
             /** @default [] */
             warnings: components["schemas"]["Warning"][];
         };
+        Block: {
+            /** @constant */
+            kind: "heading";
+            /** Format: uint8 */
+            level: number;
+            text: string;
+        } | {
+            /** @constant */
+            kind: "paragraph";
+            text: string;
+        } | {
+            /** @constant */
+            kind: "table";
+            rows: string[][];
+        };
         /** @description Who started it. */
         By: "you" | "ancilo";
         CatalogInfo: {
@@ -2908,6 +2983,9 @@ export interface components {
             /** @description Tool calls of an assistant message: `name(args)`. */
             tool_calls?: string[];
         };
+        /** @description Which question a check answers. */
+        CheckArea: "readable" | "complete" | "numbers";
+        CheckLevel: "ok" | "warning" | "error";
         CheckResult: {
             /** Format: uint64 */
             duration_ms: number;
@@ -3016,6 +3094,13 @@ export interface components {
             attachments?: components["schemas"]["AttachmentView"][];
             /** @description The answer drew on the user's documents. */
             documents?: boolean;
+            /** @description Marks the model made up (no such passage): taken out of the text. */
+            dropped_marks?: string[];
+            /**
+             * @description The passages the answer was given, each with its mark (`[D3]` in the
+             *     text) and where it stands.
+             */
+            evidence?: components["schemas"]["Evidence"][];
             model?: string | null;
             /** @description Operations the assistant ran or proposed for this answer. */
             operations?: components["schemas"]["OperationCall"][];
@@ -3080,6 +3165,32 @@ export interface components {
                 message: string;
             };
         };
+        /** @description One passage an answer could draw on. */
+        Evidence: {
+            at?: components["schemas"]["Locator"] | null;
+            /**
+             * @description The answer named it.
+             * @default false
+             */
+            cited: boolean;
+            /** @description The document's name (in a folder: its path there). */
+            document: string;
+            /** @description The mark (`D3`) – unique in its conversation. */
+            id: string;
+            origin: components["schemas"]["Origin"];
+            /**
+             * Format: uint
+             * @description Which part (page, sheet) by position, and where in it.
+             */
+            part: number;
+            /** @description The document's text as it was read (hash) – to tell a later version. */
+            revision: string;
+            /** Format: uint */
+            start?: number | null;
+            /** @description The passage as the model got it. */
+            text: string;
+            warnings?: components["schemas"]["Warning"][];
+        };
         FileChange: {
             /** Format: uint */
             added: number;
@@ -3105,6 +3216,13 @@ export interface components {
              * @default false
              */
             runs: boolean;
+        };
+        /** @description One thing a check found – said in words, with where. */
+        Finding: {
+            area: components["schemas"]["CheckArea"];
+            level: components["schemas"]["CheckLevel"];
+            message: string;
+            place?: string | null;
         };
         Fit: "does_not_fit" | "fits" | "tight";
         /** @description One click that helps. */
@@ -3210,6 +3328,14 @@ export interface components {
             scores: components["schemas"]["JudgeScore"][];
         };
         Kind: ("text" | "pdf" | "word" | "spreadsheet") | "image";
+        /** @description What a file looks like inside. */
+        Layout: {
+            blocks?: components["schemas"]["Block"][];
+            kind: components["schemas"]["Kind"];
+            /** @description What the preview does not show. */
+            limits?: components["schemas"]["Limit"][];
+            sheets?: components["schemas"]["SheetView"][];
+        };
         LeaderboardEntry: {
             /** Format: uint64 */
             duration_p50_ms?: number | null;
@@ -3220,6 +3346,34 @@ export interface components {
             tokens_per_s?: number | null;
         };
         Level: "eco" | "balanced" | "performance" | "max";
+        /** @description What a preview leaves out – said, so nobody takes it for the whole. */
+        Limit: {
+            /** @constant */
+            kind: "rows_cut";
+            sheet: string;
+            /** Format: uint */
+            shown: number;
+            /** Format: uint */
+            total: number;
+        } | {
+            /** @constant */
+            kind: "blocks_cut";
+            /** Format: uint */
+            shown: number;
+            /** Format: uint */
+            total: number;
+        } | {
+            /** @constant */
+            kind: "no_formatting";
+        } | {
+            /** Format: uint */
+            count: number;
+            /** @constant */
+            kind: "formulas_saved";
+        } | {
+            /** @constant */
+            kind: "not_shown";
+        };
         /** @description A loaded model in the resource view. */
         LoadedView: {
             /** @description Answering right now. */
@@ -3240,6 +3394,13 @@ export interface components {
         Localized: {
             de: string;
             en: string;
+        };
+        /** @description Where a part of a document is – for the source an answer names. */
+        Locator: {
+            /** Format: uint32 */
+            page: number;
+        } | {
+            sheet: string;
         };
         MemoryView: {
             /**
@@ -3304,6 +3465,8 @@ export interface components {
             path: string;
             reason: string;
         };
+        /** @description How a document stands now, against the evidence taken from it. */
+        Now: "same" | "changed" | "gone";
         OperationCall: {
             input: unknown;
             operation: string;
@@ -3311,6 +3474,17 @@ export interface components {
             outcome: string;
             /** @description Short result or error. */
             result: string;
+        };
+        /** @description Where a document is. */
+        Origin: {
+            id: string;
+            /** @constant */
+            kind: "attachment";
+        } | {
+            folder: string;
+            /** @constant */
+            kind: "folder";
+            path: string;
         };
         /** @description An action proposed by the assistant, waiting for the user. */
         PendingAction: {
@@ -3508,17 +3682,34 @@ export interface components {
             priority: components["schemas"]["Priority"];
             variant: components["schemas"]["Variant"];
         };
+        /** @description What the checks found in one result. */
+        ResultCheck: {
+            /** Format: uint */
+            errors: number;
+            file: string;
+            path: string;
+            /** Format: uint */
+            warnings: number;
+            worst: components["schemas"]["CheckLevel"];
+        };
         /** @description Is there room for a model right now? */
         Room: "comfortable" | "close_programs" | "too_big";
         RouteRule: {
             kind: string;
             model: string;
         };
+        Row: {
+            cells: string[];
+            /** Format: uint32 */
+            number: number;
+        };
         Run: {
             /** Format: uint64 */
             duration_ms: number;
             failure?: string | null;
             passed: boolean;
+            /** Format: uint64 */
+            reread?: number | null;
             status: string;
             /** Format: uint64 */
             steps?: number | null;
@@ -3528,6 +3719,14 @@ export interface components {
              * @default null
              */
             tokens: number | null;
+            /**
+             * Format: uint64
+             * @description Tool calls over all turns, and how many of them read an earlier
+             *     result again (`read_result`) – coding eval only.
+             */
+            tool_calls?: number | null;
+            /** @description The conversation as the session shows it (coding eval, for the record). */
+            transcript?: unknown;
         };
         /** @description Everything that makes runs comparable – logged with every comparison. */
         RunConfig: {
@@ -3659,6 +3858,16 @@ export interface components {
             web_used: boolean;
             /** @description Where the agent works (the terminal of the session opens here). */
             workdir: string;
+        };
+        SheetView: {
+            name: string;
+            /** @description Rows with content (their number in the sheet), the first ones. */
+            rows: components["schemas"]["Row"][];
+            /**
+             * Format: uint
+             * @description Rows with content in all.
+             */
+            total_rows: number;
         };
         /** @description A source an answer may name as `[n]`. */
         Source: {
@@ -4321,6 +4530,10 @@ export interface operations {
                          * @default false
                          */
                         documents: boolean;
+                        /** @description Marks the model made up: taken out of the answer. */
+                        dropped_marks?: string[];
+                        /** @description The passages the answer was given, with their marks (`[D3]`). */
+                        evidence?: components["schemas"]["Evidence"][];
                         /**
                          * @description Passages from the knowledge base went along with the request.
                          * @default false
@@ -4576,6 +4789,10 @@ export interface operations {
                          * @default false
                          */
                         documents: boolean;
+                        /** @description Marks the model made up: taken out of the answer. */
+                        dropped_marks?: string[];
+                        /** @description The passages the answer was given, with their marks (`[D3]`). */
+                        evidence?: components["schemas"]["Evidence"][];
                         /**
                          * @description Passages from the knowledge base went along with the request.
                          * @default false
@@ -4815,6 +5032,44 @@ export interface operations {
                 content: {
                     "application/json": {
                         ok: boolean;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    check_results: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    session: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        files: components["schemas"]["ResultCheck"][];
+                        version: string;
                     };
                 };
             };
@@ -7450,6 +7705,49 @@ export interface operations {
             };
         };
     };
+    open_evidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Id of the conversation (`c-…`). */
+                    conversation: string;
+                    /** @description The mark in the answer, e.g. `D3`. */
+                    mark: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        after?: string | null;
+                        before?: string | null;
+                        evidence: components["schemas"]["Evidence"];
+                        now: components["schemas"]["Now"];
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     open_project: {
         parameters: {
             query?: never;
@@ -7765,6 +8063,55 @@ export interface operations {
                         existing_in?: components["schemas"]["FoundIn"] | null;
                         plan: components["schemas"]["Plan"];
                         repo?: components["schemas"]["RepoInfo"] | null;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    preview_result: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The result's path in the task (as listed in its changes). */
+                    path: string;
+                    session: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The file as read (hash). */
+                        file: string;
+                        findings: components["schemas"]["Finding"][];
+                        /** @description How it looks inside (none: it could not be read). */
+                        layout?: components["schemas"]["Layout"] | null;
+                        path: string;
+                        /**
+                         * @description The version of the task's changes this was read from – keep or save
+                         *     with it, and nothing newer goes out.
+                         */
+                        version: string;
                     };
                 };
             };
@@ -9241,6 +9588,12 @@ export interface operations {
                      */
                     dir?: string | null;
                     session: string;
+                    /**
+                     * @description The results as the user saw them (`check_results` / `preview_result`):
+                     *     refused when they changed since.
+                     * @default null
+                     */
+                    version?: string | null;
                 };
             };
         };

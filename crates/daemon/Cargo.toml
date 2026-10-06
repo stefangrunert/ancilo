@@ -40,6 +40,8 @@ uuid.workspace = true
 security-framework.workspace = true
 
 [dev-dependencies]
+hex.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 ancilo-agent.workspace = true
 ancilo-testkit.workspace = true

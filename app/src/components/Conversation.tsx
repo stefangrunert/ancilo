@@ -12,6 +12,7 @@ import { DocChip, LocalNote, PendingDocs, usePendingDocs } from "./Documents";
 import { Icon } from "./Icon";
 import { ErrorNote } from "./ui";
 import { WebSwitch } from "./WebSearch";
+import { DocSources, linkEvidence, SourceDialog, useSource } from "./Sources";
 
 type Conversation = OpOutput<"get_conversation">;
 type Message = Conversation["messages"][number];
@@ -218,18 +219,28 @@ function WebProposal({ web, onDecide, busy }: { web: WebNote; onDecide: (search:
   );
 }
 
-function Reply({ m, live, onAsk }: { m: Message; live: Set<string>; onAsk: (text: string) => void }) {
+function Reply({ m, live, onAsk, conversation }: { m: Message; live: Set<string>; onAsk: (text: string) => void; conversation: string | null }) {
   const { t, says } = useI18n();
   const pro = usePro();
+  const source = useSource();
   const ran = (m.operations ?? []).filter((o) => o.outcome !== "proposed");
   const failed = m.text.startsWith("(failed:");
+  const evidence = m.evidence ?? [];
   // A decided proposal leaves no trace of its own: the answer below says what happened.
   if (m.web && ["proposed", "accepted", "declined"].includes(m.web.state) && !m.text) return null;
+  let text = m.web?.state === "searched" ? linkCitations(m.text, m.web.sources ?? []) : says(m.text);
+  if (evidence.length > 0) text = linkEvidence(text, evidence);
   return (
     <div className={failed ? "reply failed" : "reply"}>
       <div data-testid="assistant-answer">
-        <Markdown text={m.web?.state === "searched" ? linkCitations(m.text, m.web.sources ?? []) : says(m.text)} />
+        <Markdown text={text} onSource={evidence.length > 0 ? source.open : undefined} />
       </div>
+      {evidence.length > 0 && conversation && (
+        <>
+          <DocSources evidence={evidence} dropped={m.dropped_marks ?? []} onOpen={source.open} />
+          <SourceDialog conversation={conversation} mark={source.mark} onClose={source.close} />
+        </>
+      )}
       {m.web && <WebSources web={m.web} />}
       {(m.pending ?? []).length > 0 && <Proposals pending={m.pending ?? []} live={live} onAsk={onAsk} />}
       {ran.length > 0 && !pro && <p className="reply-meta">{t("assistant.lookedAt", { what: lookedAt(ran.map((o) => o.operation), t) })}</p>}
@@ -401,7 +412,7 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
             }
           />
         ) : (
-          <Reply key={i} m={m} live={liveIds} onAsk={pick} />
+          <Reply key={i} m={m} live={liveIds} onAsk={pick} conversation={id} />
         ),
       )}
       {/* A greeting kept in the conversation offers its answers until the first reply. */}

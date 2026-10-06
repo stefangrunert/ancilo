@@ -130,6 +130,43 @@ pub const MESSAGES: &[(&str, &str)] = &[
         "doc.too_long",
         "reading this file took too long – it may be damaged",
     ),
+    // Checking a result before keeping it (FPL-03)
+    ("check.unreadable", "the file cannot be read: {why}"),
+    ("check.readable", "the file opens and can be read"),
+    ("check.empty", "the file is empty"),
+    (
+        "check.header_only",
+        "the table has a header row but no rows below it",
+    ),
+    (
+        "check.missing",
+        "not in the file, though the task asks for it: {what}",
+    ),
+    ("check.has", "has what the task names: {what}"),
+    (
+        "check.no_total",
+        "the task asks for a total, but there is no total row",
+    ),
+    (
+        "check.formula_text",
+        "{n} cell(s) hold a formula as text – Ancilo does not calculate formulas; check these values yourself",
+    ),
+    (
+        "check.numbers_ok",
+        "{n} total(s) and amount(s) checked – they add up",
+    ),
+    (
+        "check.numbers_none",
+        "no totals or amounts that could be checked",
+    ),
+    (
+        "check.total_wrong",
+        "the total of “{what}” says {shown}, but the rows above add up to {sum}",
+    ),
+    (
+        "check.product_wrong",
+        "the amount {amount} does not match quantity × price ({qty} × {price} = {want})",
+    ),
     // Tasks and sessions
     (
         "task.too_wide",

@@ -10,6 +10,7 @@ pub mod evidence;
 pub mod extract;
 pub mod library;
 pub mod ocr;
+pub mod preview;
 pub mod split;
 pub mod write;
 
@@ -142,7 +143,51 @@ impl Extractor {
     }
 
     async fn read_apart(&self, bin: &Path, file: &Path, workdir: &Path) -> Result<Extracted> {
-        let mut cmd = reader_command(bin, file, workdir, &self.hidden)?;
+        let out = self
+            .run_apart(bin, "extract-document", file, workdir)
+            .await?;
+        serde_json::from_slice(&out).map_err(Error::internal)
+    }
+
+    /// What a file looks like inside – for looking at a result before
+    /// keeping it ([`preview`]) – read like a document: apart, sandboxed,
+    /// with a time limit. `workdir` is removed afterwards.
+    pub async fn layout(&self, file: &Path, workdir: &Path) -> Result<preview::Layout> {
+        let result = async {
+            match &self.bin {
+                Some(bin) => {
+                    let file = self.inside(file, workdir)?;
+                    let out = self
+                        .run_apart(bin, "preview-document", &file, workdir)
+                        .await?;
+                    serde_json::from_slice(&out).map_err(Error::internal)
+                }
+                None => {
+                    let file = file.to_path_buf();
+                    tokio::task::spawn_blocking(move || {
+                        std::panic::catch_unwind(|| preview::layout_file(&file))
+                            .unwrap_or_else(|_| Err(Error::invalid("this file could not be read")))
+                    })
+                    .await
+                    .map_err(Error::internal)?
+                }
+            }
+        }
+        .await;
+        std::fs::remove_dir_all(workdir).ok();
+        result
+    }
+
+    /// Runs the reader (`what`: `extract-document`, `preview-document`) on
+    /// `file`; its output.
+    async fn run_apart(
+        &self,
+        bin: &Path,
+        what: &str,
+        file: &Path,
+        workdir: &Path,
+    ) -> Result<Vec<u8>> {
+        let mut cmd = reader_command(bin, what, file, workdir, &self.hidden)?;
         cmd.current_dir(workdir)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -170,7 +215,7 @@ impl Extractor {
         if out.stdout.len() > MAX_OUTPUT {
             return Err(Error::invalid("this file holds too much text"));
         }
-        serde_json::from_slice(&out.stdout).map_err(Error::internal)
+        Ok(out.stdout)
     }
 }
 
@@ -180,6 +225,7 @@ impl Extractor {
 #[cfg(target_os = "macos")]
 fn reader_command(
     bin: &Path,
+    what: &str,
     file: &Path,
     workdir: &Path,
     _hidden: &[PathBuf],
@@ -207,7 +253,7 @@ fn reader_command(
     c.arg("-p")
         .arg(profile)
         .arg(bin)
-        .arg("extract-document")
+        .arg(what)
         .arg(file)
         .env_clear()
         .env("LANG", "C.UTF-8");
@@ -217,12 +263,13 @@ fn reader_command(
 #[cfg(not(target_os = "macos"))]
 fn reader_command(
     bin: &Path,
+    what: &str,
     file: &Path,
     workdir: &Path,
     hidden: &[PathBuf],
 ) -> Result<tokio::process::Command> {
     let script = format!(
-        "exec {} extract-document {}",
+        "exec {} {what} {}",
         quote(&bin.display().to_string()),
         quote(&file.display().to_string())
     );

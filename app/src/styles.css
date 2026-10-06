@@ -499,6 +499,42 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .grow { flex: 1; min-width: 0; }
 .grow input { width: 100%; }
 .outcome.good { color: var(--ok); font-size: 13px; }
+/* A task's results looked at and checked before keeping them (FPL-03). */
+.check-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.check-badge.ok { color: var(--ok, #15803d); }
+.check-badge.warning { color: var(--warn, #b45309); }
+.check-badge.error { color: var(--danger, #b91c1c); }
+.result-preview { display: flex; flex-direction: column; gap: 10px; width: min(860px, 86vw); }
+.check-findings { display: grid; gap: 8px; }
+.check-area ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 3px; font-size: 13.5px; }
+.check-area li { display: flex; gap: 6px; align-items: baseline; }
+.check-mark { width: 1em; text-align: center; font-weight: 700; }
+.check-ok .check-mark { color: var(--ok, #15803d); }
+.check-warning .check-mark { color: var(--warn, #b45309); }
+.check-error .check-mark { color: var(--danger, #b91c1c); }
+.check-place { margin-left: 6px; font-size: 12px; }
+.preview-limits { margin: 0; padding-left: 18px; }
+.preview-table-wrap { overflow: auto; max-height: 46vh; border: 1px solid var(--border, rgba(127,127,127,0.25)); border-radius: 6px; }
+.preview-table { border-collapse: collapse; font-size: 13px; width: max-content; min-width: 100%; }
+.preview-table th, .preview-table td { border: 1px solid var(--border, rgba(127,127,127,0.2)); padding: 3px 8px; text-align: left; white-space: pre-wrap; max-width: 320px; }
+.preview-table thead th, .preview-table tbody th { background: var(--surface, rgba(127,127,127,0.08)); color: var(--muted, #666); font-weight: 500; font-size: 11.5px; position: sticky; }
+.preview-table thead th { top: 0; }
+.preview-table tbody th { left: 0; }
+.preview-table td.marked { outline: 2px solid var(--danger, #b91c1c); outline-offset: -2px; background: color-mix(in srgb, var(--danger, #b91c1c) 12%, transparent); }
+.preview-doc { max-height: 46vh; overflow: auto; padding: 4px 10px; border: 1px solid var(--border, rgba(127,127,127,0.25)); border-radius: 6px; }
+.preview-doc h3 { margin: 10px 0 4px; } .preview-doc h4 { margin: 8px 0 4px; } .preview-doc p { margin: 4px 0; white-space: pre-wrap; }
+.tabs .tab { border: 1px solid var(--border, rgba(127,127,127,0.25)); background: transparent; padding: 3px 10px; border-radius: 6px; cursor: pointer; }
+.tabs .tab.active { border-color: var(--accent); color: var(--accent); }
+/* Sources of an answer from documents (FPL-01): marks in the text, the list below, the passage. */
+.source-mark { display: inline-flex; align-items: center; justify-content: center; min-width: 1.4em; height: 1.35em; padding: 0 4px; margin: 0 1px; border-radius: 6px; border: 1px solid var(--accent); background: transparent; color: var(--accent); font-size: 0.78em; font-weight: 600; line-height: 1; vertical-align: 0.15em; cursor: pointer; }
+.source-mark:hover, .source-mark:focus-visible { background: var(--accent); color: var(--bg, #fff); }
+.doc-sources { margin-top: 6px; }
+.doc-sources ol { margin: 4px 0 0; padding-left: 22px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+.doc-sources button.link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; display: inline-flex; gap: 4px; align-items: center; overflow-wrap: anywhere; }
+.doc-sources .warn-text { color: var(--warn, #b45309); }
+.source-view { display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
+.source-text { margin: 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface, rgba(127,127,127,0.08)); white-space: pre-wrap; max-height: 50vh; overflow: auto; font-size: 14px; line-height: 1.5; }
+.source-text mark { background: color-mix(in srgb, var(--accent) 22%, transparent); color: inherit; padding: 1px 0; }
 .web-sources { margin-top: 6px; }
 .web-sources ol { margin: 4px 0 0; padding-left: 22px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
 .web-sources a { color: var(--accent); overflow-wrap: anywhere; }

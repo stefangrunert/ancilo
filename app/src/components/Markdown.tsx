@@ -1,4 +1,4 @@
-import { memo, useState, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useI18n } from "../i18n";
@@ -59,11 +59,38 @@ const components: Components = {
 /**
  * A model's answer as Markdown (GitHub flavour). Raw HTML in the text is not
  * rendered – the page can operate Ancilo, so model output never becomes markup.
+ * With `onSource`, a link to `#source-D3` (a checked source of an answer
+ * from documents, see Sources) opens that source instead of leaving the app.
  */
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+export const Markdown = memo(function Markdown({ text, onSource }: { text: string; onSource?: (id: string) => void }) {
+  const { t } = useI18n();
+  const withSources = useMemo<Components>(
+    () =>
+      onSource
+        ? {
+            ...components,
+            a: ({ href, children }) => {
+              const id = href?.startsWith("#source-") ? href.slice("#source-".length) : null;
+              if (!id) {
+                return (
+                  <a href={href} target="_blank" rel="noreferrer noopener">
+                    {children}
+                  </a>
+                );
+              }
+              return (
+                <button type="button" className="source-mark" data-testid={`mark-${id}`} aria-label={t("sources.open", { n: textOf(children) })} onClick={() => onSource(id)}>
+                  {children}
+                </button>
+              );
+            },
+          }
+        : components,
+    [onSource, t],
+  );
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} skipHtml>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={withSources} skipHtml>
         {text}
       </ReactMarkdown>
     </div>

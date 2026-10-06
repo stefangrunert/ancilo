@@ -16,6 +16,7 @@ chrono.workspace = true
 hex.workspace = true
 pdf-extract = "0.12"
 quick-xml = "0.42"
+regex.workspace = true
 rusqlite.workspace = true
 rust_xlsxwriter = { version = "0.99", default-features = false }
 schemars.workspace = true

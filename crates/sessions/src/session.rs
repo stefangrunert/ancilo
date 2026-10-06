@@ -247,6 +247,37 @@ struct Inner {
     extractor: Mutex<Option<Arc<ancilo_docs::Extractor>>>,
 }
 
+/// A task's result looked at before keeping it (FPL-03).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ResultPreview {
+    pub path: String,
+    /// The version of the task's changes this was read from – keep or save
+    /// with it, and nothing newer goes out.
+    pub version: String,
+    /// The file as read (hash).
+    pub file: String,
+    /// How it looks inside (none: it could not be read).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<ancilo_docs::preview::Layout>,
+    pub findings: Vec<ancilo_docs::preview::Finding>,
+}
+
+/// What the checks found in one result.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ResultCheck {
+    pub path: String,
+    pub file: String,
+    pub worst: ancilo_docs::preview::CheckLevel,
+    pub errors: usize,
+    pub warnings: usize,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ResultChecks {
+    pub version: String,
+    pub files: Vec<ResultCheck>,
+}
+
 #[derive(Clone)]
 pub struct Sessions {
     inner: Arc<Inner>,
@@ -1331,7 +1362,12 @@ impl Sessions {
 
     /// Saves a free task's results – the new and changed files – into `dir`
     /// (default: the user's Documents), never over a file that is there.
-    pub async fn save_results(&self, id: &str, dir: Option<PathBuf>) -> Result<Saved> {
+    pub async fn save_results(
+        &self,
+        id: &str,
+        dir: Option<PathBuf>,
+        version: Option<&str>,
+    ) -> Result<Saved> {
         let _g = self.acquire(id).await?;
         let (mut meta, history) = self.load(id)?;
         if !meta.free {
@@ -1342,6 +1378,14 @@ impl Sessions {
         let Changes::Folder { copy, .. } = &meta.changes else {
             return Err(Error::invalid("this task has no results"));
         };
+        // Saved is what the user saw (and what was checked) – nothing newer.
+        if let Some(v) = version
+            && copy.version()? != v
+        {
+            return Err(Error::Conflict(
+                "the results are not the ones you saw anymore – look at them again".into(),
+            ));
+        }
         let results: Vec<String> = copy
             .changes()?
             .into_iter()
@@ -1384,6 +1428,136 @@ impl Sessions {
             json!({"files": saved.files.len()}),
         );
         Ok(saved)
+    }
+
+    /// What the task asked for: the user's words in the conversation.
+    fn task_words(history: &[Value]) -> String {
+        history
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .filter_map(|m| m["content"].as_str())
+            .map(|t| {
+                let t = t.split(crate::tools::CONTEXT_MARK).next().unwrap_or(t);
+                t.split(GIVEN_MARK).next().unwrap_or(t).trim().to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The files of a task's changes that can be looked at, and the
+    /// version of exactly these changes.
+    fn results_of(meta: &Meta) -> Result<(String, PathBuf, Vec<String>)> {
+        let Changes::Folder { copy, .. } = &meta.changes else {
+            return Err(Error::invalid("only a task's results can be looked at"));
+        };
+        let version = copy.version()?;
+        let files = copy
+            .changes()?
+            .into_iter()
+            .filter(|c| c.kind != crate::workcopy::ChangeKind::Deleted)
+            .map(|c| c.path)
+            .filter(|p| ancilo_docs::preview::shown(p))
+            .collect();
+        Ok((version, copy.work(), files))
+    }
+
+    async fn look_at(
+        &self,
+        work: &Path,
+        rel: &str,
+        task: &str,
+    ) -> (
+        String,
+        Option<ancilo_docs::preview::Layout>,
+        Vec<ancilo_docs::preview::Finding>,
+    ) {
+        let file = work.join(rel);
+        let hash = std::fs::read(&file)
+            .map(|b| hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&b)[..8]))
+            .unwrap_or_default();
+        let extractor = self.inner.extractor.lock().unwrap().clone();
+        let layout = match extractor {
+            Some(ex) => match ex.workdir() {
+                Ok(dir) => ex.layout(&file, &dir).await,
+                Err(e) => Err(e),
+            },
+            None => ancilo_docs::preview::layout_file(&file),
+        };
+        match layout {
+            Ok(l) => {
+                let findings = ancilo_docs::preview::check(&l, task);
+                (hash, Some(l.shown()), findings)
+            }
+            Err(e) => (hash, None, ancilo_docs::preview::unreadable(&e.message())),
+        }
+    }
+
+    /// A result of a task looked at (FPL-03): how it looks inside and what
+    /// the checks found – for exactly the version of the changes returned
+    /// (keep or save with it: nothing newer goes out).
+    pub async fn preview_result(&self, id: &str, path: &str) -> Result<ResultPreview> {
+        let (meta, history) = self.load(id)?;
+        let (version, work, files) = Self::results_of(&meta)?;
+        // Only a result of this task – never another path.
+        let rel = files
+            .iter()
+            .find(|f| f.as_str() == path)
+            .ok_or_else(|| {
+                Error::not_found(format!(
+                    "{path} is not a result of this task that can be shown"
+                ))
+            })?
+            .clone();
+        let task = Self::task_words(&history);
+        let (file, layout, findings) = self.look_at(&work, &rel, &task).await;
+        // Changed while it was read: what was shown would not be what is kept.
+        let (after, _, _) = Self::results_of(&self.load(id)?.0)?;
+        if after != version {
+            return Err(Error::Conflict(
+                "the results changed while they were read – look again".into(),
+            ));
+        }
+        Ok(ResultPreview {
+            path: rel,
+            version,
+            file,
+            layout,
+            findings,
+        })
+    }
+
+    /// The checks of all results of a task, for exactly the version returned.
+    pub async fn check_results(&self, id: &str) -> Result<ResultChecks> {
+        use ancilo_docs::preview::CheckLevel;
+        let (meta, history) = self.load(id)?;
+        let (version, work, files) = Self::results_of(&meta)?;
+        let task = Self::task_words(&history);
+        let mut out = Vec::new();
+        for rel in files {
+            let (file, _, findings) = self.look_at(&work, &rel, &task).await;
+            let count = |l: CheckLevel| findings.iter().filter(|f| f.level == l).count();
+            out.push(ResultCheck {
+                worst: findings
+                    .iter()
+                    .map(|f| f.level)
+                    .max()
+                    .unwrap_or(CheckLevel::Ok),
+                errors: count(CheckLevel::Error),
+                warnings: count(CheckLevel::Warning),
+                path: rel,
+                file,
+            });
+        }
+        let (after, _, _) = Self::results_of(&self.load(id)?.0)?;
+        if after != version {
+            return Err(Error::Conflict(
+                "the results changed while they were read – look again".into(),
+            ));
+        }
+        Ok(ResultChecks {
+            version,
+            files: out,
+        })
     }
 
     pub fn decide(&self, approval: &str, allow: bool, remember: bool) -> Result<Approval> {

@@ -11,6 +11,8 @@ import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
 import { WebSwitch } from "./WebSearch";
 import { Dialog, ErrorNote } from "./ui";
+import { CheckBadge, problems, ResultPreview, useChecks } from "./ResultPreview";
+import { previewKindFor } from "../state/preview";
 
 type Session = OpOutput<"get_session">;
 type Change = Session["changes"][number];
@@ -235,7 +237,7 @@ const CHANGE_LABEL: Record<string, Key> = {
   renamed: "task.change.renamed",
 };
 
-function ChangeLine({ c }: { c: Change }) {
+function ChangeLine({ c, check, onLook }: { c: Change; check?: Parameters<typeof CheckBadge>[0]["check"]; onLook?: (path: string) => void }) {
   const { t } = useI18n();
   const kind = c.change ?? "modified";
   return (
@@ -243,7 +245,31 @@ function ChangeLine({ c }: { c: Change }) {
       <span className="badge">{t(CHANGE_LABEL[kind] ?? "task.change.modified")}</span>
       <code>{c.path}</code>
       {c.from && <span className="muted small">{t("task.change.from", { from: c.from })}</span>}
+      <CheckBadge check={check} />
+      {onLook && kind !== "deleted" && previewKindFor(c.path) !== "file" && (
+        <button type="button" className="link" data-testid="look-at" onClick={() => onLook(c.path)}>
+          {t("check.look")}
+        </button>
+      )}
     </li>
+  );
+}
+
+/** Keep anyway? Asked when the checks found something wrong. */
+function AnywayDialog({ open, text, label, onYes, onNo }: { open: boolean; text: string; label: string; onYes: () => void; onNo: () => void }) {
+  const { t } = useI18n();
+  return (
+    <Dialog open={open} title={t("confirm.title")} onClose={onNo}>
+      <p>{text}</p>
+      <div className="row end">
+        <button type="button" className="secondary" onClick={onNo}>
+          {t("confirm.no")}
+        </button>
+        <button type="button" data-testid="anyway" onClick={onYes}>
+          {label}
+        </button>
+      </div>
+    </Dialog>
   );
 }
 
@@ -255,15 +281,21 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
   const refresh = useRefresh();
   const [dropping, setDropping] = useState(false);
   const [undoing, setUndoing] = useState(false);
+  const [looking, setLooking] = useState<string | null>(null);
+  const [anyway, setAnyway] = useState(false);
   const act = async (f: () => Promise<unknown>) => {
     try {
       await f();
       await refresh("get_session", "list_sessions");
     } catch (e) {
       onError(e);
+      await refresh("get_session", "check_results");
     }
   };
   const running = s.status === "running";
+  const checks = useChecks(s.id, s.changes_version, s.changes.length > 0 && !running);
+  // Kept is what was checked and shown – the daemon refuses anything newer.
+  const keep = () => void act(() => client.op("apply_changes", { session: s.id, paths: null, version: checks.data?.version ?? s.changes_version ?? null }, true));
   if (s.changes.length === 0) {
     if (!s.applied || running) return null;
     return (
@@ -301,11 +333,11 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
       <p className="muted small">{t("task.notYet", { folder: nameOf(s.project) })}</p>
       <ul className="task-change-list">
         {s.changes.map((c) => (
-          <ChangeLine key={c.path} c={c} />
+          <ChangeLine key={c.path} c={c} check={checks.data?.files.find((f) => f.path === c.path)} onLook={setLooking} />
         ))}
       </ul>
       <div className="row">
-        <button type="button" onClick={() => void act(() => client.op("apply_changes", { session: s.id, paths: null, version: s.changes_version ?? null }, true))}>
+        <button type="button" data-testid="keep" onClick={() => (problems(checks.data) > 0 ? setAnyway(true) : keep())}>
           {t("task.keep")}
         </button>
         <button type="button" className="secondary" onClick={() => setDropping(true)}>
@@ -329,6 +361,17 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
           </button>
         </div>
       </Dialog>
+      <AnywayDialog
+        open={anyway}
+        text={t("check.keepAnyway", { n: problems(checks.data) })}
+        label={t("task.keep")}
+        onNo={() => setAnyway(false)}
+        onYes={() => {
+          setAnyway(false);
+          keep();
+        }}
+      />
+      <ResultPreview session={s.id} path={looking} current={s.changes_version} onClose={() => setLooking(null)} />
     </div>
   );
 }
@@ -340,14 +383,22 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
   const client = useClient();
   const refresh = useRefresh();
   const choose = useChooseFolder();
+  const [looking, setLooking] = useState<string | null>(null);
+  const [anyway, setAnyway] = useState<null | { dir: string | null }>(null);
   const act = async (f: () => Promise<unknown>) => {
     try {
       await f();
       await refresh("get_session", "list_sessions");
     } catch (e) {
       onError(e);
+      await refresh("get_session", "check_results");
     }
   };
+  const checks = useChecks(s.id, s.changes_version, s.changes.length > 0 && s.status !== "running");
+  // Saved is what was checked and shown – the daemon refuses anything newer.
+  const version = checks.data?.version ?? s.changes_version ?? null;
+  const save = (dir: string | null) => void act(() => client.op("save_results", { session: s.id, ...(dir ? { dir } : {}), ...(version ? { version } : {}) }));
+  const trySave = (dir: string | null) => (problems(checks.data) > 0 ? setAnyway({ dir }) : save(dir));
   if (s.status === "running") return null;
   if (s.changes.length === 0) {
     if (!s.saved) return null;
@@ -378,14 +429,20 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
       <strong>{t("results.title", { n: s.changes.length })}</strong>
       <ul className="task-change-list">
         {s.changes.map((c) => (
-          <li key={c.path} className="task-change added">
+          <li key={c.path} className="task-change added" data-testid="task-change">
             <Icon name="doc" size={14} />
             <code>{c.path}</code>
+            <CheckBadge check={checks.data?.files.find((f) => f.path === c.path)} />
+            {previewKindFor(c.path) !== "file" && (
+              <button type="button" className="link" data-testid="look-at" onClick={() => setLooking(c.path)}>
+                {t("check.look")}
+              </button>
+            )}
           </li>
         ))}
       </ul>
       <div className="row">
-        <button type="button" onClick={() => void act(() => client.op("save_results", { session: s.id }))}>
+        <button type="button" data-testid="save" onClick={() => trySave(null)}>
           {t("results.save")}
         </button>
         <button
@@ -393,12 +450,24 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
           className="secondary"
           onClick={async () => {
             const dir = await choose();
-            if (dir) await act(() => client.op("save_results", { session: s.id, dir }));
+            if (dir) trySave(dir);
           }}
         >
           {t("results.elsewhere")}
         </button>
       </div>
+      <AnywayDialog
+        open={anyway !== null}
+        text={t("check.saveAnyway", { n: problems(checks.data) })}
+        label={t("results.save")}
+        onNo={() => setAnyway(null)}
+        onYes={() => {
+          const dir = anyway?.dir ?? null;
+          setAnyway(null);
+          save(dir);
+        }}
+      />
+      <ResultPreview session={s.id} path={looking} current={s.changes_version} onClose={() => setLooking(null)} />
     </div>
   );
 }

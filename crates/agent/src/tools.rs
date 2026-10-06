@@ -1086,6 +1086,40 @@ mod tests {
         (dir, w)
     }
 
+    // covers: FPL-02 – a long command output keeps its finding from the
+    // middle and its end, and stays whole for read_result.
+    #[tokio::test]
+    async fn a_long_command_output_keeps_its_finding_and_stays_whole() {
+        let (_d, w) = ws(Access::Shell);
+        let out = w
+            .execute(
+                "bash",
+                &json!({"command": "i=0; while [ $i -lt 1500 ]; do echo \"  step $i ... ok\"; i=$((i+1)); if [ $i -eq 900 ]; then echo '  step cert ... FAILED: expires in 3 days'; fi; done; echo 'Result: 1 blocking problem'; exit 1"}),
+            )
+            .await;
+        assert!(out.is_error);
+        assert!(
+            out.content.chars().count() <= MAX_OUTPUT_CHARS,
+            "{}",
+            out.content.len()
+        );
+        assert!(
+            out.content.starts_with("[bash · FAILED · shortened from"),
+            "{}",
+            &out.content[..200]
+        );
+        assert!(
+            out.content
+                .contains("step cert ... FAILED: expires in 3 days")
+        );
+        assert!(out.content.contains("Result: 1 blocking problem"));
+        assert!(
+            out.full
+                .as_deref()
+                .is_some_and(|f| f.contains("step 1499 ... ok"))
+        );
+    }
+
     /// Background processes end with the command, a cancelled call ends the
     /// whole process group – nothing keeps running after the agent.
     #[tokio::test]

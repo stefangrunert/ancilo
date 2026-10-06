@@ -530,6 +530,71 @@
         ],
         "type": "object"
       },
+      "Block": {
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "const": "heading",
+                "type": "string"
+              },
+              "level": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "level",
+              "text"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "paragraph",
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "text"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "table",
+                "type": "string"
+              },
+              "rows": {
+                "items": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "kind",
+              "rows"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "By": {
         "description": "Who started it.",
         "oneOf": [
@@ -668,6 +733,45 @@
           "text"
         ],
         "type": "object"
+      },
+      "CheckArea": {
+        "description": "Which question a check answers.",
+        "oneOf": [
+          {
+            "const": "readable",
+            "description": "Does the file open?",
+            "type": "string"
+          },
+          {
+            "const": "complete",
+            "description": "Is what the task asks for there?",
+            "type": "string"
+          },
+          {
+            "const": "numbers",
+            "description": "Do the numbers add up (where that can be checked)?",
+            "type": "string"
+          }
+        ]
+      },
+      "CheckLevel": {
+        "oneOf": [
+          {
+            "const": "ok",
+            "description": "Checked and found right.",
+            "type": "string"
+          },
+          {
+            "const": "warning",
+            "description": "Worth a look: may be fine.",
+            "type": "string"
+          },
+          {
+            "const": "error",
+            "description": "Found wrong.",
+            "type": "string"
+          }
+        ]
       },
       "CheckResult": {
         "properties": {
@@ -989,6 +1093,20 @@
             "description": "The answer drew on the user's documents.",
             "type": "boolean"
           },
+          "dropped_marks": {
+            "description": "Marks the model made up (no such passage): taken out of the text.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "evidence": {
+            "description": "The passages the answer was given, each with its mark (`[D3]` in the\ntext) and where it stands.",
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            },
+            "type": "array"
+          },
           "model": {
             "type": [
               "string",
@@ -1207,6 +1325,74 @@
         ],
         "type": "object"
       },
+      "Evidence": {
+        "description": "One passage an answer could draw on.",
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Locator"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cited": {
+            "default": false,
+            "description": "The answer named it.",
+            "type": "boolean"
+          },
+          "document": {
+            "description": "The document's name (in a folder: its path there).",
+            "type": "string"
+          },
+          "id": {
+            "description": "The mark (`D3`) – unique in its conversation.",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "part": {
+            "description": "Which part (page, sheet) by position, and where in it.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revision": {
+            "description": "The document's text as it was read (hash) – to tell a later version.",
+            "type": "string"
+          },
+          "start": {
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "The passage as the model got it.",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "document",
+          "origin",
+          "revision",
+          "part",
+          "text"
+        ],
+        "type": "object"
+      },
       "FileChange": {
         "properties": {
           "added": {
@@ -1278,6 +1464,32 @@
           "path",
           "added",
           "removed"
+        ],
+        "type": "object"
+      },
+      "Finding": {
+        "description": "One thing a check found – said in words, with where.",
+        "properties": {
+          "area": {
+            "$ref": "#/components/schemas/CheckArea"
+          },
+          "level": {
+            "$ref": "#/components/schemas/CheckLevel"
+          },
+          "message": {
+            "type": "string"
+          },
+          "place": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "area",
+          "level",
+          "message"
         ],
         "type": "object"
       },
@@ -1694,6 +1906,37 @@
           }
         ]
       },
+      "Layout": {
+        "description": "What a file looks like inside.",
+        "properties": {
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/Block"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Kind"
+          },
+          "limits": {
+            "description": "What the preview does not show.",
+            "items": {
+              "$ref": "#/components/schemas/Limit"
+            },
+            "type": "array"
+          },
+          "sheets": {
+            "items": {
+              "$ref": "#/components/schemas/SheetView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
       "LeaderboardEntry": {
         "properties": {
           "duration_p50_ms": {
@@ -1749,6 +1992,110 @@
             "const": "max",
             "description": "Everything for speed; other programs may slow down.",
             "type": "string"
+          }
+        ]
+      },
+      "Limit": {
+        "description": "What a preview leaves out – said, so nobody takes it for the whole.",
+        "oneOf": [
+          {
+            "description": "Only the first rows of a sheet are shown (all are checked).",
+            "properties": {
+              "kind": {
+                "const": "rows_cut",
+                "type": "string"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "shown": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "sheet",
+              "shown",
+              "total"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Only the first parts of a document are shown.",
+            "properties": {
+              "kind": {
+                "const": "blocks_cut",
+                "type": "string"
+              },
+              "shown": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "shown",
+              "total"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Fonts, colours, column widths, pictures and charts are not shown.",
+            "properties": {
+              "kind": {
+                "const": "no_formatting",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Formulas show their saved value; Ancilo does not calculate them.",
+            "properties": {
+              "count": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "kind": {
+                "const": "formulas_saved",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "count"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "This kind of file is not shown (a PDF, a picture): open it.",
+            "properties": {
+              "kind": {
+                "const": "not_shown",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
           }
         ]
       },
@@ -1812,6 +2159,37 @@
           "en"
         ],
         "type": "object"
+      },
+      "Locator": {
+        "description": "Where a part of a document is – for the source an answer names.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "page": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "page"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "sheet": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sheet"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "MemoryView": {
         "properties": {
@@ -2013,6 +2391,26 @@
         ],
         "type": "object"
       },
+      "Now": {
+        "description": "How a document stands now, against the evidence taken from it.",
+        "oneOf": [
+          {
+            "const": "same",
+            "description": "The same text as when the answer was given.",
+            "type": "string"
+          },
+          {
+            "const": "changed",
+            "description": "Changed since – the passage shown is the one the answer had.",
+            "type": "string"
+          },
+          {
+            "const": "gone",
+            "description": "No longer there (removed, or the conversation's attachment deleted).",
+            "type": "string"
+          }
+        ]
+      },
       "OperationCall": {
         "properties": {
           "input": true,
@@ -2035,6 +2433,49 @@
           "result"
         ],
         "type": "object"
+      },
+      "Origin": {
+        "description": "Where a document is.",
+        "oneOf": [
+          {
+            "description": "Attached to the conversation.",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "attachment",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "In the chat project's folder (`path` relative to it).",
+            "properties": {
+              "folder": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "folder",
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "folder",
+              "path"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "PendingAction": {
         "description": "An action proposed by the assistant, waiting for the user.",
@@ -2651,6 +3092,38 @@
         ],
         "type": "object"
       },
+      "ResultCheck": {
+        "description": "What the checks found in one result.",
+        "properties": {
+          "errors": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "warnings": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "worst": {
+            "$ref": "#/components/schemas/CheckLevel"
+          }
+        },
+        "required": [
+          "path",
+          "file",
+          "worst",
+          "errors",
+          "warnings"
+        ],
+        "type": "object"
+      },
       "Room": {
         "description": "Is there room for a model right now?",
         "oneOf": [
@@ -2686,6 +3159,26 @@
         ],
         "type": "object"
       },
+      "Row": {
+        "properties": {
+          "cells": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "number": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "cells"
+        ],
+        "type": "object"
+      },
       "Run": {
         "properties": {
           "duration_ms": {
@@ -2701,6 +3194,14 @@
           },
           "passed": {
             "type": "boolean"
+          },
+          "reread": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "status": {
             "type": "string"
@@ -2722,6 +3223,18 @@
               "integer",
               "null"
             ]
+          },
+          "tool_calls": {
+            "description": "Tool calls over all turns, and how many of them read an earlier\nresult again (`read_result`) – coding eval only.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "transcript": {
+            "description": "The conversation as the session shows it (coding eval, for the record)."
           }
         },
         "required": [
@@ -3181,6 +3694,32 @@
           "web_used",
           "kind",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "SheetView": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "rows": {
+            "description": "Rows with content (their number in the sheet), the first ones.",
+            "items": {
+              "$ref": "#/components/schemas/Row"
+            },
+            "type": "array"
+          },
+          "total_rows": {
+            "description": "Rows with content in all.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "rows",
+          "total_rows"
         ],
         "type": "object"
       },
@@ -4839,6 +5378,20 @@
                       "description": "The answer drew on the user's documents.",
                       "type": "boolean"
                     },
+                    "dropped_marks": {
+                      "description": "Marks the model made up: taken out of the answer.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "evidence": {
+                      "description": "The passages the answer was given, with their marks (`[D3]`).",
+                      "items": {
+                        "$ref": "#/components/schemas/Evidence"
+                      },
+                      "type": "array"
+                    },
                     "grounded": {
                       "default": false,
                       "description": "Passages from the knowledge base went along with the request.",
@@ -5282,6 +5835,20 @@
                       "default": false,
                       "description": "The answer drew on the user's documents.",
                       "type": "boolean"
+                    },
+                    "dropped_marks": {
+                      "description": "Marks the model made up: taken out of the answer.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "evidence": {
+                      "description": "The passages the answer was given, with their marks (`[D3]`).",
+                      "items": {
+                        "$ref": "#/components/schemas/Evidence"
+                      },
+                      "type": "array"
                     },
                     "grounded": {
                       "default": false,
@@ -5883,6 +6450,73 @@
         "summary": "Stop the coding agent's current turn",
         "x-ancilo-consequential": false,
         "x-ancilo-permission": "manage"
+      }
+    },
+    "/api/v1/ops/check_results": {
+      "post": {
+        "description": "Check all results of a task (readable, complete, numbers) – for exactly the version returned; keep or save with that version",
+        "operationId": "check_results",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "session": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session"
+                ],
+                "title": "SessionRef",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "files": {
+                      "items": {
+                        "$ref": "#/components/schemas/ResultCheck"
+                      },
+                      "type": "array"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "files"
+                  ],
+                  "title": "ResultChecks",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Check all results of a task (readable, complete, numbers) – for exactly the version returned; keep or save with that version",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
       }
     },
     "/api/v1/ops/choose_folder": {
@@ -10682,6 +11316,89 @@
         "x-ancilo-permission": "read"
       }
     },
+    "/api/v1/ops/open_evidence": {
+      "post": {
+        "description": "A source of an answer from documents ([D3]): the passage the answer had, and whether its document changed since",
+        "operationId": "open_evidence",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "conversation": {
+                    "description": "Id of the conversation (`c-…`).",
+                    "type": "string"
+                  },
+                  "mark": {
+                    "description": "The mark in the answer, e.g. `D3`.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "conversation",
+                  "mark"
+                ],
+                "title": "EvidenceRef",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "A mark opened: the passage as the answer had it, how its document stands\nnow, and – when unchanged – the text around it.",
+                  "properties": {
+                    "after": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "before": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "evidence": {
+                      "$ref": "#/components/schemas/Evidence"
+                    },
+                    "now": {
+                      "$ref": "#/components/schemas/Now"
+                    }
+                  },
+                  "required": [
+                    "evidence",
+                    "now"
+                  ],
+                  "title": "Opened",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "A source of an answer from documents ([D3]): the passage the answer had, and whether its document changed since",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
+      }
+    },
     "/api/v1/ops/open_project": {
       "post": {
         "description": "Open a project for coding (starts its search index)",
@@ -11259,6 +11976,100 @@
           }
         },
         "summary": "Show how a model would run on this machine, without adding it",
+        "x-ancilo-consequential": false,
+        "x-ancilo-permission": "read"
+      }
+    },
+    "/api/v1/ops/preview_result": {
+      "post": {
+        "description": "Look at a task's result before keeping it: a spreadsheet's sheets, a document's headings, paragraphs and tables – and what the checks found (empty, missing what the task names, totals that do not add up), for exactly the version returned",
+        "operationId": "preview_result",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "description": "The result's path in the task (as listed in its changes).",
+                    "type": "string"
+                  },
+                  "session": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session",
+                  "path"
+                ],
+                "title": "ResultRef",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "A task's result looked at before keeping it (FPL-03).",
+                  "properties": {
+                    "file": {
+                      "description": "The file as read (hash).",
+                      "type": "string"
+                    },
+                    "findings": {
+                      "items": {
+                        "$ref": "#/components/schemas/Finding"
+                      },
+                      "type": "array"
+                    },
+                    "layout": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Layout"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "How it looks inside (none: it could not be read)."
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "description": "The version of the task's changes this was read from – keep or save\nwith it, and nothing newer goes out.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "version",
+                    "file",
+                    "findings"
+                  ],
+                  "title": "ResultPreview",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Look at a task's result before keeping it: a spreadsheet's sheets, a document's headings, paragraphs and tables – and what the checks found (empty, missing what the task names, totals that do not add up), for exactly the version returned",
         "x-ancilo-consequential": false,
         "x-ancilo-permission": "read"
       }
@@ -14034,6 +14845,14 @@
                   },
                   "session": {
                     "type": "string"
+                  },
+                  "version": {
+                    "default": null,
+                    "description": "The results as the user saw them (`check_results` / `preview_result`):\nrefused when they changed since.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [

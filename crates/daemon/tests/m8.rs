@@ -1603,3 +1603,92 @@ steps:
     assert!(!results.exists());
     env.stop().await;
 }
+
+// covers: FPL-03 – a task's result is looked at and checked before it is
+// kept: a wrong total is found with its place, what was shown and checked
+// is what gets saved – a newer version is refused until looked at again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn results_are_checked_and_what_was_checked_is_what_is_saved() {
+    let script = r#"
+steps:
+  - respond: { tool_calls: [{ name: write_spreadsheet, arguments: { path: "Kosten.xlsx", sheets: [{ name: "2025", rows: [["Posten", "Betrag"], ["Miete", "900"], ["Strom", "80"], ["Summe", "990"]] }] } }] }
+  - respond: { text: "Fertig: Kosten.xlsx." }
+  - respond: { tool_calls: [{ name: write_spreadsheet, arguments: { path: "Kosten.xlsx", overwrite: true, sheets: [{ name: "2025", rows: [["Posten", "Betrag"], ["Miete", "900"], ["Strom", "80"], ["Summe", "980"]] }] } }] }
+  - respond: { text: "Korrigiert." }
+"#;
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
+    let s = env.op("create_task", json!({"title": "Kosten"})).await;
+    let id = s["id"].as_str().unwrap().to_string();
+    env.op(
+        "send_message",
+        json!({"session": id, "text": "Mach eine Tabelle der Kosten mit den Spalten Posten und Betrag und einer Summe", "wait": true}),
+    )
+    .await;
+    let checks = env.op("check_results", json!({"session": id})).await;
+    assert_eq!(checks["files"][0]["path"], "Kosten.xlsx", "{checks}");
+    assert_eq!(checks["files"][0]["worst"], "error", "{checks}");
+    let first = checks["version"].as_str().unwrap().to_string();
+    let p = env
+        .op(
+            "preview_result",
+            json!({"session": id, "path": "Kosten.xlsx"}),
+        )
+        .await;
+    assert_eq!(p["version"], first.as_str());
+    assert_eq!(
+        p["layout"]["sheets"][0]["rows"][3]["cells"],
+        json!(["Summe", "990"])
+    );
+    let wrong: Vec<&Value> = p["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["level"] == "error")
+        .collect();
+    assert_eq!(wrong.len(), 1, "{p}");
+    assert_eq!(wrong[0]["place"], "2025!B4");
+    assert!(wrong[0]["message"].as_str().unwrap().contains("980"), "{p}");
+    // Only a result of this task is shown – never another path.
+    let (ok, _) = env
+        .call(
+            "preview_result",
+            json!({"session": id, "path": "../../token"}),
+            true,
+        )
+        .await;
+    assert!(!ok);
+    // The task corrects it: what was checked before is not what would be saved.
+    env.op(
+        "send_message",
+        json!({"session": id, "text": "Die Summe stimmt nicht", "wait": true}),
+    )
+    .await;
+    let docs = env.home.scratch("Dokumente");
+    let (ok, e) = env
+        .call(
+            "save_results",
+            json!({"session": id, "dir": docs, "version": first}),
+            true,
+        )
+        .await;
+    assert!(!ok && e.to_string().contains("not the ones you saw"), "{e}");
+    assert_eq!(
+        std::fs::read_dir(&docs).unwrap().count(),
+        0,
+        "nothing saved"
+    );
+    // Looked at again: right now – and exactly that file is saved.
+    let checks = env.op("check_results", json!({"session": id})).await;
+    assert_eq!(checks["files"][0]["worst"], "ok", "{checks}");
+    let saved = env
+        .op(
+            "save_results",
+            json!({"session": id, "dir": docs, "version": checks["version"]}),
+        )
+        .await;
+    let file = std::path::PathBuf::from(saved["files"][0].as_str().unwrap());
+    use sha2::Digest;
+    let hash = hex::encode(&sha2::Sha256::digest(std::fs::read(&file).unwrap())[..8]);
+    assert_eq!(hash, checks["files"][0]["file"].as_str().unwrap());
+    env.stop().await;
+}

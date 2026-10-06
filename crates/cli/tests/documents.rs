@@ -63,3 +63,43 @@ async fn the_reader_cannot_see_ancilos_own_data() {
     let doc = ex.read(&work.join("upload.txt"), &work).await.unwrap();
     assert_eq!(doc.parts[0].text, "hallo");
 }
+
+// covers: FPL-03 – a result is looked at like a document is read: in the
+// sandboxed reader; its whole content reaches the checks, the app gets the
+// first rows.
+#[tokio::test]
+async fn results_are_looked_at_in_the_reader_and_checked_whole() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let ex = reader(&base.join("scratch"), vec![base.join("ancilo-home")]);
+    let mut rows: Vec<Vec<String>> = vec![vec!["Nr".into(), "Betrag".into()]];
+    for i in 1..=300 {
+        rows.push(vec![i.to_string(), "1".into()]);
+    }
+    rows.push(vec!["Summe".into(), "301".into()]);
+    let file = base.join("Liste.xlsx");
+    std::fs::write(
+        &file,
+        ancilo_docs::write::xlsx(&[ancilo_docs::write::Sheet {
+            name: "Liste".into(),
+            rows,
+        }])
+        .unwrap(),
+    )
+    .unwrap();
+    let l = ex.layout(&file, &ex.workdir().unwrap()).await.unwrap();
+    assert_eq!(l.sheets[0].rows.len(), 302, "all rows come back");
+    let f = ancilo_docs::preview::check(&l, "");
+    assert!(
+        f.iter()
+            .any(|x| x.place.as_deref() == Some("Liste!B302") && x.message.contains("300")),
+        "{f:#?}"
+    );
+    assert_eq!(l.shown().sheets[0].rows.len(), ancilo_docs::preview::MAX_ROWS_SHOWN);
+    // A broken file: said, nothing hangs.
+    let broken = base.join("kaputt.xlsx");
+    std::fs::write(&broken, b"PK not really").unwrap();
+    let e = ex.layout(&broken, &ex.workdir().unwrap()).await.unwrap_err();
+    assert!(e.message().contains("cannot read"), "{}", e.message());
+    assert_eq!(std::fs::read_dir(base.join("scratch")).unwrap().count(), 0);
+}
