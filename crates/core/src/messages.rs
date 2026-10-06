@@ -172,6 +172,18 @@ pub const MESSAGES: &[(&str, &str)] = &[
         "a total of “{what}” has no rows of its own above it – not checked",
     ),
     (
+        "check.mixed_formats",
+        "“{what}” writes its numbers two ways ({a} and {b}) – one of them is read wrong",
+    ),
+    (
+        "check.text_total",
+        "the text says the total is {shown}, but the table adds up to {sum}",
+    ),
+    (
+        "check.missing_value",
+        "“{what}” is empty in a row that has the rest",
+    ),
+    (
         "check.product_wrong",
         "the amount {amount} does not match quantity × price ({qty} × {price} = {want})",
     ),

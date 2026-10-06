@@ -133,7 +133,8 @@ pub fn layout(name: &str, bytes: &[u8]) -> Result<Layout> {
         .to_ascii_lowercase();
     let mut l = match ext.as_str() {
         "xlsx" | "xlsm" | "xls" | "ods" => sheets(name, bytes)?,
-        "csv" | "tsv" => delimited(name, bytes, if ext == "tsv" { b'\t' } else { b',' })?,
+        "tsv" => delimited(name, bytes, b'\t')?,
+        "csv" => delimited(name, bytes, separator(&String::from_utf8_lossy(bytes)))?,
         "docx" => word(name, bytes)?,
         "txt" | "md" | "markdown" => text(bytes),
         _ => Layout {
@@ -257,6 +258,32 @@ fn sheets(name: &str, bytes: &[u8]) -> Result<Layout> {
         blocks: Vec::new(),
         limits,
     })
+}
+
+/// How a CSV separates its columns: what its first line has most of –
+/// a comma, a semicolon (as Excel writes it where the comma is the decimal
+/// mark) or a tab; quoted text does not count.
+fn separator(text: &str) -> u8 {
+    let first = text
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or_default();
+    let mut quoted = false;
+    let mut counts = [(b',', 0usize), (b';', 0), (b'\t', 0)];
+    for c in first.bytes() {
+        if c == b'"' {
+            quoted = !quoted;
+        } else if !quoted && let Some(n) = counts.iter_mut().find(|(s, _)| *s == c) {
+            n.1 += 1;
+        }
+    }
+    counts
+        .iter()
+        .fold(
+            (b',', 0),
+            |best, &(s, n)| if n > best.1 { (s, n) } else { best },
+        )
+        .0
 }
 
 fn delimited(name: &str, bytes: &[u8], sep: u8) -> Result<Layout> {
@@ -790,6 +817,35 @@ pub fn check(l: &Layout, task: &str) -> Vec<Finding> {
     }
     // A total the task asks for.
     let tables = tables(l);
+    // What the task names, filled in every row that has the rest.
+    for t in &tables {
+        let Some(h) = header_row(t) else {
+            continue;
+        };
+        for term in w.terms.iter().filter(|t| t.need == Need::Column) {
+            let Some(c) = t.rows[h]
+                .cells
+                .iter()
+                .position(|x| has_words(x, &term.text))
+            else {
+                continue;
+            };
+            let empty = t.rows[h + 1..].iter().filter(|r| {
+                !is_total_row(r)
+                    && r.cells.get(c).is_none_or(|x| x.trim().is_empty())
+                    && r.values.get(c).is_none_or(Option::is_none)
+                    && r.cells.iter().filter(|x| !x.trim().is_empty()).count() >= 2
+            });
+            for r in empty.take(3) {
+                out.push(find(
+                    CheckArea::Complete,
+                    CheckLevel::Error,
+                    msg("check.missing_value", &[("what", &t.rows[h].cells[c])]),
+                    Some(t.at(r.number, c)),
+                ));
+            }
+        }
+    }
     // A total row without a number ("wird ergänzt") is no total; one with a
     // formula is (Ancilo keeps formulas as text – said below, not changed).
     let has_total = tables.iter().any(|t| {
@@ -799,7 +855,8 @@ pub fn check(l: &Layout, task: &str) -> Vec<Finding> {
                     .any(|c| value(r, c).is_some() || r.cells[c].trim_start().starts_with('='))
         })
     });
-    if w.total && !has_total {
+    let stated = stated_totals(l);
+    if w.total && !has_total && stated.is_empty() {
         out.push(find(
             CheckArea::Complete,
             CheckLevel::Error,
@@ -814,6 +871,31 @@ pub fn check(l: &Layout, task: &str) -> Vec<Finding> {
         let (c, w) = check_numbers(t, &mut out);
         checked += c;
         wrong += w;
+    }
+    // A total the text states ("Die Gesamtsumme beträgt 108,00 EUR")
+    // against the table's amounts.
+    let amounts: Vec<Vec<Num>> = tables.iter().filter_map(table_total).collect();
+    for said in stated.iter().filter(|_| !amounts.is_empty()) {
+        checked += 1;
+        let fits = amounts.iter().any(|a| {
+            [Way::De, Way::En].iter().any(|&way| {
+                let sum: f64 = a.iter().map(|n| n.get(way)).sum();
+                said.iter().any(|n| close(sum, n.get(way)))
+            })
+        });
+        if !fits {
+            wrong += 1;
+            let sum: f64 = amounts[0].iter().map(|n| n.get(Way::De)).sum();
+            out.push(find(
+                CheckArea::Numbers,
+                CheckLevel::Error,
+                msg(
+                    "check.text_total",
+                    &[("shown", &show(said[0].get(Way::De))), ("sum", &show(sum))],
+                ),
+                None,
+            ));
+        }
     }
     let formula_text: Vec<String> = tables
         .iter()
@@ -1057,6 +1139,14 @@ static LIST: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     )
     .expect("valid")
 });
+/// A table described by what it holds: "Liste mit A, B und C", "eine
+/// Tabelle für A, B und C".
+static FIELDS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(
+        r"(?i)\b(tabelle|liste|\w+liste|übersicht|csv|excel(?:-\w+)?|table|list|spreadsheet|sheet)\b[^.;!?\n]{0,40}?\b(?:mit|with|für|for)\s+([^.;!?\n:]+)",
+    )
+    .expect("valid")
+});
 static QUOTED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r#"[„“"»«']([^„“"»«'\n]{2,60})[“”"«»']"#).expect("valid")
 });
@@ -1088,27 +1178,48 @@ pub fn wanted(task: &str) -> Wanted {
                 add(&mut w, text, Need::Quoted);
             }
         }
-        for m in LIST.captures_iter(sentence) {
-            let trigger = m[1].to_lowercase();
-            let need = if [
-                "überschriften",
-                "abschnitten",
-                "abschnitte",
-                "sections",
-                "headings",
-            ]
-            .contains(&trigger.as_str())
-            {
-                Need::Section
-            } else {
-                Need::Column
-            };
+        // Lists of what to hold: after "Spalten", "Abschnitte" … – or, in a
+        // table's description, after "mit"/"für" when it is a list of three
+        // or more ("eine Liste mit Rechnungsnummer, Datum und Betrag").
+        let mut lists: Vec<(Need, usize, usize, &str)> = LIST
+            .captures_iter(sentence)
+            .map(|m| {
+                let trigger = m[1].to_lowercase();
+                let need = if [
+                    "überschriften",
+                    "abschnitten",
+                    "abschnitte",
+                    "sections",
+                    "headings",
+                ]
+                .contains(&trigger.as_str())
+                {
+                    Need::Section
+                } else {
+                    Need::Column
+                };
+                let (t, i) = (m.get(1).unwrap(), m.get(2).unwrap());
+                (need, t.start(), i.start(), i.as_str())
+            })
+            .collect();
+        if lists.is_empty()
+            && let Some(m) = FIELDS.captures(sentence)
+            && m[2].contains(',')
+            && m[2]
+                .split([','])
+                .flat_map(|p| p.split(" und ").flat_map(|q| q.split(" and ")))
+                .count()
+                >= 3
+        {
+            let (t, i) = (m.get(1).unwrap(), m.get(2).unwrap());
+            lists.push((Need::Column, t.start(), i.start(), i.as_str()));
+        }
+        for (need, trigger_at, items_at, items) in lists {
             // "ohne Spalten …": the whole list is taken back.
-            let list_negated = no_before(&sentence[..m.get(1).map_or(0, |x| x.start())]);
+            let list_negated = no_before(&sentence[..trigger_at]);
             // "Nicht die Spalte Datum entfernen": what follows is kept.
-            let list_turned =
-                turned_around(&words_of(&sentence[..m.get(2).map_or(0, |x| x.start())]));
-            for item in m[2].split([',', '/', '&']).flat_map(|p| {
+            let list_turned = turned_around(&words_of(&sentence[..items_at]));
+            for item in items.split([',', '/', '&']).flat_map(|p| {
                 p.split(" und ")
                     .flat_map(|q| q.split(" and "))
                     .flat_map(|q| q.split(" sowie "))
@@ -1319,6 +1430,26 @@ pub fn read_number(cell: &str) -> Option<Num> {
     }
 }
 
+/// Which way a cell's text writes a number, where only one way reads it
+/// (1.234,50 · 250,50 German; 1,234.50 · 250.50 English); `None`: either,
+/// or no marks.
+fn style(cell: &str) -> Option<Way> {
+    if !matches!(read_number(cell)?, Num::Sure(_)) {
+        return None;
+    }
+    let s: String = cell.chars().filter(|c| matches!(c, '.' | ',')).collect();
+    let (dots, commas) = (s.matches('.').count(), s.matches(',').count());
+    match (dots, commas) {
+        (0, 0) => None,
+        (0, 1) => Some(Way::De),
+        (1, 0) => Some(Way::En),
+        (_, 0) => Some(Way::De),
+        (0, _) => Some(Way::En),
+        _ if s.ends_with(',') => Some(Way::De),
+        _ => Some(Way::En),
+    }
+}
+
 /// A number the German way where a cell could be read both ways.
 pub fn number(cell: &str) -> Option<f64> {
     read_number(cell).map(|n| n.get(Way::De))
@@ -1361,6 +1492,35 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
     let header = &t.rows[h].cells;
     let first = h + 1;
     let cols = t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
+    // One column, one way of writing numbers: 1.234,50 next to 250.50 is
+    // read by no program as meant.
+    for c in 0..cols {
+        let mut seen: Vec<(Way, u32, &str)> = Vec::new();
+        for r in t.rows.iter().skip(first) {
+            if r.values.get(c).is_some_and(Option::is_some) {
+                continue;
+            }
+            if let Some(cell) = r.cells.get(c)
+                && let Some(w) = style(cell)
+                && !seen.iter().any(|(x, ..)| *x == w)
+            {
+                seen.push((w, r.number, cell.as_str()));
+            }
+        }
+        if let [(_, _, a), (_, row, b)] = seen.as_slice() {
+            checked += 1;
+            wrong += 1;
+            out.push(find(
+                CheckArea::Numbers,
+                CheckLevel::Error,
+                msg(
+                    "check.mixed_formats",
+                    &[("what", &name_of(header, c)), ("a", a), ("b", b)],
+                ),
+                Some(t.at(*row, c)),
+            ));
+        }
+    }
     // A total: a subtotal against the rows of its group; a grand total
     // against all rows (or the totals before and what came after them); a
     // plain "Summe"/"Total" against any of these.
@@ -1494,6 +1654,69 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
     (checked, wrong)
 }
 
+/// The header of a table: the first of its first three rows with two cells
+/// or more (a title above it does not count).
+fn header_row(t: &Table) -> Option<usize> {
+    t.rows
+        .iter()
+        .take(3)
+        .position(|r| r.cells.iter().filter(|c| !c.trim().is_empty()).count() >= 2)
+}
+
+/// What a table's amounts come to: its total row's amount, or the amounts
+/// of its rows – for a table with an amount column.
+fn table_total(t: &Table) -> Option<Vec<Num>> {
+    let h = header_row(t)?;
+    let a = t.rows[h]
+        .cells
+        .iter()
+        .position(|c| AMOUNT.is_match(c.trim()))?;
+    let rows = &t.rows[h + 1..];
+    if let Some(total) = rows
+        .iter()
+        .rev()
+        .find(|r| is_total_row(r))
+        .and_then(|r| value(r, a))
+    {
+        return Some(vec![total]);
+    }
+    let all: Vec<Num> = rows.iter().filter_map(|r| value(r, a)).collect();
+    (!all.is_empty()).then_some(all)
+}
+
+/// The totals a document's text states: for each, the numbers of its
+/// sentence after the word (one of them is the total – "die Summe der 3
+/// Posten beträgt 96").
+fn stated_totals(l: &Layout) -> Vec<Vec<Num>> {
+    l.blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Paragraph { text } => Some(text),
+            _ => None,
+        })
+        .flat_map(|text| {
+            STATED_TOTAL.find_iter(text).filter_map(|m| {
+                let rest = &text[m.end()..];
+                let sentence = rest.split(". ").next().unwrap_or(rest);
+                let nums: Vec<Num> = NUMBER
+                    .find_iter(sentence)
+                    .filter_map(|n| read_number(n.as_str()))
+                    .collect();
+                (!nums.is_empty()).then_some(nums)
+            })
+        })
+        .collect()
+}
+
+static STATED_TOTAL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(
+        r"(?i)\b(gesamtsumme|gesamtbetrag|endsumme|summe|insgesamt|grand total|total)\b",
+    )
+    .expect("valid")
+});
+static NUMBER: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"-?\d[\d.,']*\d|\d").expect("valid"));
+
 fn name_of(header: &[String], c: usize) -> String {
     header
         .get(c)
@@ -1608,7 +1831,7 @@ enum Total {
 }
 
 fn total_kind(r: &Row) -> Option<Total> {
-    let label = r.cells.iter().find(|c| TOTAL_LABEL.is_match(c.trim()))?;
+    let label = r.cells.iter().find(|c| total_label(c))?;
     let l = label.trim().to_lowercase();
     Some(
         if ["teilsumme", "zwischensumme", "subtotal", "sub-total"]
@@ -1637,8 +1860,23 @@ fn total_kind(r: &Row) -> Option<Total> {
 /// "netto", a currency, a colon), not a row that merely starts with it
 /// ("Total service").
 fn is_total_row(r: &Row) -> bool {
-    r.cells.iter().any(|c| TOTAL_LABEL.is_match(c.trim()))
+    r.cells.iter().any(|c| total_label(c))
 }
+
+/// A cell that names a total: the word alone (with a "netto", a currency),
+/// or a word that can mean nothing else with what it is of ("Zwischensumme
+/// Nord", "Subtotal Q1") – never "Total service".
+fn total_label(cell: &str) -> bool {
+    let c = cell.trim();
+    TOTAL_LABEL.is_match(c) || (c.chars().count() <= 40 && QUALIFIED_TOTAL.is_match(c))
+}
+
+static QUALIFIED_TOTAL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(
+        r"(?i)^(zwischensumme|teilsumme|gesamtsumme|endsumme|subtotal|sub-total|grand total)\b",
+    )
+    .expect("valid")
+});
 
 static TOTAL_LABEL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
@@ -2064,6 +2302,96 @@ mod tests {
                 .any(|x| x.level == CheckLevel::Warning && x.place.as_deref() == Some("t.csv!B4")),
             "{f:#?}"
         );
+    }
+
+    #[test]
+    fn round_3_tables_as_people_write_them() {
+        let n = |text: &str, task: &str| errors(&csv(text, task)).len();
+        // Semicolons, as Excel writes CSV where the comma is the decimal mark.
+        assert_eq!(
+            n("Posten;Betrag\nA;86,50\nB;13,50\nGesamtsumme;105,00", ""),
+            1
+        );
+        assert_eq!(
+            n(
+                "Posten;Betrag\nA;86,50\nB;13,50\nGesamtsumme;100,00",
+                "mit einer Gesamtsumme"
+            ),
+            0
+        );
+        // A subtotal named with what it is of.
+        assert_eq!(
+            n(
+                "Region,Status,Betrag\nN,ok,125.5\nN,ok,74.5\n,Zwischensumme Nord,200\nS,ok,90\nS,ok,110\n,Zwischensumme Süd,200\n,Gesamtsumme,400",
+                ""
+            ),
+            0
+        );
+        // "Total service" stays an item.
+        assert_eq!(n("Item,Amount\nTotal service,50\nB,20\nTotal,70", ""), 0);
+        // One column, two ways of writing numbers.
+        assert_eq!(
+            n(
+                "Projekt;Betrag\nA;1.234,50\nB;250.50\nGesamtsumme;1.485,00",
+                ""
+            ),
+            1
+        );
+        // What a list of a table's fields names is a column …
+        assert_eq!(
+            n(
+                "Rechnungsnummer,Lieferdatum,Betrag\nR-1,2026-09-30,48",
+                "Erstelle die Rechnungsliste mit Rechnungsnummer, Rechnungsdatum und Betrag (EUR)."
+            ),
+            1
+        );
+        // … but not what a table is "with" in a few words.
+        assert_eq!(
+            n(
+                "Firma,Betrag\nA,10",
+                "Erstelle eine Tabelle mit den Rechnungen."
+            ),
+            0
+        );
+        assert_eq!(
+            n(
+                "Firma,Betrag\nA,10",
+                "Erstelle eine Tabelle mit den Rechnungen und Belegen."
+            ),
+            0
+        );
+        // A named column empty in a row that has the rest.
+        let e = csv(
+            "Beleg,Datum,Betrag\nK-31,2026-10-03,18\nK-32,,22",
+            "Liste mit Beleg, Datum und Betrag",
+        );
+        assert_eq!(errors(&e).len(), 1, "{e:#?}");
+        assert_eq!(errors(&e)[0].place.as_deref(), Some("t.csv!B3"));
+    }
+
+    #[test]
+    fn round_3_a_total_the_text_states_matches_the_table() {
+        let doc = |para: &str| {
+            let blocks = vec![
+                Block::Table {
+                    rows: vec![
+                        vec!["Menge".into(), "Einzelpreis".into(), "Betrag".into()],
+                        vec!["12".into(), "8,00".into(), "96,00".into()],
+                    ],
+                },
+                Block::Paragraph { text: para.into() },
+            ];
+            let l = Layout {
+                kind: Kind::Word,
+                sheets: Vec::new(),
+                blocks,
+                limits: Vec::new(),
+            };
+            check(&l, "mit der Gesamtsumme im Text")
+        };
+        assert_eq!(errors(&doc("Die Gesamtsumme beträgt 108,00 EUR.")).len(), 1);
+        assert!(errors(&doc("Die Gesamtsumme beträgt 96,00 EUR.")).is_empty());
+        assert!(errors(&doc("Die Summe der 12 Essen beträgt 96 Euro.")).is_empty());
     }
 
     #[test]
