@@ -39,13 +39,11 @@ When the agent is done, a card lists what changed: **new**, **changed**, **delet
 
 Every new or changed table, Word document and text gets checked before you decide – each shows *checked*, *n note(s)* or *n problem(s)*. **Look at it** shows the file as it is inside: a spreadsheet's sheets with their row numbers and column letters (as in Excel), a Word document's headings, paragraphs and tables. A cell a check found wrong is marked.
 
-The checks follow fixed rules, by question:
+The checks follow fixed rules, by question. A *problem* is only what is sure; what Ancilo can only suppose is a *note* (marked "!") – it never blocks a file that is fine:
 
-| | |
-|---|---|
-| **Opens** | the file can be read at all |
-| **Complete** | it is not empty (a table with only a header row counts as empty); what your task names is there – columns you listed after *columns*/*Spalten* (and similar), words in quotes, a total when you asked for one |
-| **Numbers** | a row labelled *Summe*, *Gesamt*, *Total* … matches the rows above it; where there are columns for quantity, price and amount, quantity × price matches the amount |
+- **Readable** – the file opens and its contents can be read (a broken table or Word file is a problem; a Word file must be a complete package).
+- **Complete** – the file is not empty, has more than a header row, and holds what you named: columns you asked for with "columns …" (in its header row, as whole words – an "Update" column is no "Date" column), sections as headings, words in quotes anywhere, and a total row if you asked for one under any name ("Summe", "Gesamtkosten", "Overall budget"). Saying no takes a request back ("ohne Datum", "Datum weg", "no total"); "Datum ist nicht optional" does not. When a task only describes a table ("a list with A, B and C"), its items count as columns only if the file has most of them as column heads; otherwise one not found is a note. A named column left empty in a row is a note too, unless the task says it may be.
+- **Numbers** – totals add up (a subtotal over its group – also "Travel subtotal", "Zwischensumme Nord" – a grand total over all rows or the totals before it), and quantity × price (or hours × rate) = amount, row by row. A column is read one way throughout: 1,250 is 1.25 or 1250 in every row of it, never one here and the other there; a column that writes its numbers both ways is a note. A total stated in a document's text that does not match its table is a note (what the text means is not sure). Only the first 20,000 rows of a sheet are checked; if it has more, the check says so.
 
 They cannot tell whether the content is right – only whether it holds together. Formulas are never calculated: a formula Ancilo was given is written as text (that is on purpose – nothing in a file runs), and the check says so; a workbook's own formulas show the value they had when it was saved. What the view leaves out is said below it: fonts, colours, pictures and charts; only the first 200 rows of a sheet (all of them are checked).
 
