@@ -265,18 +265,26 @@ fn sheets(name: &str, bytes: &[u8]) -> Result<Layout> {
 /// Excel writes it where the comma is the decimal mark; a "Name; Vorname"
 /// inside a comma file does not); ties: the comma.
 fn separator(text: &str) -> u8 {
-    let head: String = text.lines().take(50).collect::<Vec<_>>().join("\n");
+    let head: String = text.lines().take(2000).collect::<Vec<_>>().join("\n");
     let score = |sep: u8| -> (bool, usize) {
         let Some(recs) = records(&head, sep as char) else {
             return (false, 0);
         };
-        let recs: Vec<usize> = recs.iter().take(20).map(|(_, r)| r.len()).collect();
-        let Some(&first) = recs.first() else {
+        let recs: Vec<usize> = recs.iter().map(|(_, r)| r.len()).collect();
+        // All alike (one column too): this mark.
+        if recs.first().is_some_and(|&f| recs.iter().all(|&n| n == f)) {
+            return (true, usize::MAX);
+        }
+        // A title line above the table does not count – but the fewer lines
+        // a mark has to leave out, the likelier it is the one.
+        let skipped = recs.iter().take_while(|&&n| n < 2).count();
+        let body = &recs[skipped..];
+        let Some(&first) = body.first() else {
             return (false, 0);
         };
-        let same = recs.iter().filter(|&&n| n == first).count();
-        // Even: (nearly) every record has the header's number of fields.
-        (first >= 2 && same * 10 >= recs.len() * 9, first)
+        // Even: every record has the header's number of fields (a total
+        // row too) – more fields prove nothing.
+        (body.iter().all(|&n| n == first), usize::MAX - skipped)
     };
     b",;\t"
         .iter()
@@ -518,10 +526,17 @@ fn xml_elements(
             Event::Text(t) if open == 0 && !t.xml10_content().trim().is_empty() => {
                 return Err("it is not a Word document".into());
             }
+            Event::CData(_) if open == 0 => return Err("it is not a Word document".into()),
             _ => continue,
         };
         let name = e.local_name().into_inner().to_string();
-        // Every attribute well-formed (none twice, values that read).
+        // Every attribute well-formed (none twice, values that read); the
+        // root's namespace as its prefix (or none) declares it.
+        let prefix = e.name().prefix().map(|p| p.into_inner().to_string());
+        let declares = match &prefix {
+            Some(p) => format!("xmlns:{p}"),
+            None => "xmlns".to_string(),
+        };
         let mut attrs: Vec<(String, String)> = Vec::new();
         let mut xmlns = None;
         for a in e.attributes() {
@@ -530,7 +545,7 @@ fn xml_elements(
                 .normalized_value(quick_xml::XmlVersion::Implicit1_0)
                 .map_err(|_| "it is not a Word document".to_string())?
                 .to_string();
-            if a.key.into_inner() == "xmlns" {
+            if a.key.into_inner() == declares {
                 xmlns = Some(v.clone());
             }
             attrs.push((a.key.local_name().into_inner().to_string(), v));
@@ -595,6 +610,11 @@ fn word_blocks(xml: &str) -> std::result::Result<Vec<Block>, String> {
         match &event {
             // Nothing but space outside the document.
             Event::Text(t) if open == 0 && !t.xml10_content().trim().is_empty() => {
+                return Err("it is not a Word document".into());
+            }
+            Event::CData(_) if open == 0 => return Err("it is not a Word document".into()),
+            // Every element's attributes well-formed (none twice).
+            Event::Start(e) | Event::Empty(e) if e.attributes().any(|a| a.is_err()) => {
                 return Err("it is not a Word document".into());
             }
             Event::Start(e) | Event::Empty(e) if open == 0 => {
@@ -822,8 +842,24 @@ pub fn check(l: &Layout, task: &str) -> Vec<Finding> {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let (maybe, sure): (Vec<&Term>, Vec<&Term>) =
-        missing.iter().partition(|t| t.need == Need::Field);
+    // A description's items are columns when the file says so: most of them
+    // are its column heads ("deliveries.csv with Order, Carrier and Delivery
+    // date" – Order and Carrier are). Then a missing one is missing.
+    let fields: Vec<&Term> = w.terms.iter().filter(|t| t.need == Need::Field).collect();
+    let as_column = |t: &Term| {
+        present(
+            l,
+            &Term {
+                text: t.text.clone(),
+                need: Need::Column,
+            },
+        )
+    };
+    let columns = fields.iter().filter(|t| as_column(t)).count();
+    let fields_are_columns = columns >= 1 && columns * 2 >= fields.len();
+    let (maybe, sure): (Vec<&Term>, Vec<&Term>) = missing
+        .iter()
+        .partition(|t| t.need == Need::Field && !fields_are_columns);
     if !sure.is_empty() {
         out.push(find(
             CheckArea::Complete,
@@ -1108,7 +1144,7 @@ pub struct Wanted {
 
 static TOTAL_WORD: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
-        r"(?i)\b(summe|gesamtsumme|gesamtbetrag|teilsumme|teilsummen|zwischensumme|zwischensummen|insgesamt|total|totals|subtotal|subtotals|sum)\b",
+        r"(?i)\b(summe|summenzeile|gesamt|gesamtsumme|gesamtbetrag|teilsumme|teilsummen|zwischensumme|zwischensummen|insgesamt|total|totals|subtotal|subtotals|sum)\b",
     )
     .expect("valid")
 });
@@ -1129,6 +1165,12 @@ const NO_AFTER: &[&str] = &[
     "removed",
     "dropped",
 ];
+/// Words that take back what follows them in their clause ("Do not add
+/// totals", "No aggregate total is required").
+const CLAUSE_NO: &[&str] = &[
+    "no", "not", "nicht", "kein", "keine", "keinen", "keiner", "never", "nie", "don't", "dont",
+];
+
 /// Words that turn a taking back around ("nicht Datum entfernen", "don't
 /// remove the date").
 const NOT: &[&str] = &["nicht", "not", "don't", "do not", "never", "nie", "niemals"];
@@ -1185,10 +1227,21 @@ fn has_words(text: &str, name: &str) -> bool {
 
 static LIST: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
-        r"(?i)\b(spalten?|spaltenüberschriften|columns?|column headers|felder|fields|überschriften|abschnitten|abschnitte|abschnitt|sections?|headings?)\b\s*(?:[:\-–]|für|for|namens|named|wie|like)?\s*([^.;!?\n]+)",
+        r"(?i)\b(spalten|spaltenüberschriften|columns|column headers|felder|fields|überschriften|abschnitten|abschnitte|sections|headings)\b\s*(?:[:\-–]|für|for|namens|named|wie|like)?\s*([^.;!?\n]+)",
     )
     .expect("valid")
 });
+/// One column or section, named after it.
+static SINGLE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\b(spalte|column|abschnitt|section|heading|überschrift)\b\s*(?:[:\-–]|namens|named)?\s*")
+        .expect("valid")
+});
+/// Where a named item ends.
+static ITEM_END: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\s+(und|and|sowie|mit|with|als|as|für|for|in|im|on)\s|[,:(]")
+        .expect("valid")
+});
+
 /// A table described by what it holds: "Liste mit A, B und C", "eine
 /// Tabelle für A, B und C".
 static FIELDS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
@@ -1255,6 +1308,21 @@ pub fn wanted(task: &str) -> Wanted {
                 (need, t.start(), i.start(), i.as_str())
             })
             .collect();
+        // "einen Abschnitt Befund und einen Abschnitt Nächste Schritte",
+        // "heading Estimate and a table …": a singular names one thing –
+        // up to the next "und", "and", comma.
+        for m in SINGLE.captures_iter(sentence) {
+            let (t, all) = (m.get(1).unwrap(), m.get(0).unwrap());
+            let rest = &sentence[all.end()..];
+            let cut = ITEM_END.find(rest).map_or(rest.len(), |e| e.start());
+            let trigger = t.as_str().to_lowercase();
+            let need = if ["spalte", "column"].contains(&trigger.as_str()) {
+                Need::Column
+            } else {
+                Need::Section
+            };
+            lists.push((need, t.start(), all.end(), &rest[..cut]));
+        }
         if lists.is_empty()
             && let Some(m) = FIELDS.captures(sentence)
             && m[2].contains(',')
@@ -1267,6 +1335,38 @@ pub fn wanted(task: &str) -> Wanted {
             let (t, i) = (m.get(1).unwrap(), m.get(2).unwrap());
             lists.push((Need::Field, t.start(), i.start(), i.as_str()));
         }
+        let ranges: Vec<(usize, usize)> = lists
+            .iter()
+            .map(|(_, _, at, items)| (*at, at + items.len()))
+            .collect();
+        // Inside a list as a name of its own (`Gesamt`, `Line total EUR`) –
+        // not as part of a phrase ("und unbedingt eine Gesamtsumme am Ende").
+        let in_list = |i: usize| {
+            ranges.iter().any(|&(a, b)| {
+                if !(a..b).contains(&i) {
+                    return false;
+                }
+                let from = sentence[a..i]
+                    .rfind([',', '/', '&'])
+                    .map_or(a, |k| a + k + 1);
+                let to = sentence[i..b]
+                    .find([',', '/', '&', ':'])
+                    .map_or(b, |k| i + k);
+                let item = sentence[from..to]
+                    .split(" und ")
+                    .flat_map(|q| q.split(" and "))
+                    .find(|q| {
+                        let start = q.as_ptr() as usize - sentence.as_ptr() as usize;
+                        (start..start + q.len()).contains(&i)
+                    })
+                    .unwrap_or("");
+                let words = item
+                    .split_whitespace()
+                    .filter(|w| !STOP.contains(&w.to_lowercase().as_str()))
+                    .count();
+                words <= 3
+            })
+        };
         for (need, trigger_at, items_at, items) in lists {
             // "ohne Spalten …": the whole list is taken back.
             let list_negated = no_before(&sentence[..trigger_at]);
@@ -1349,10 +1449,56 @@ pub fn wanted(task: &str) -> Wanted {
         // "Keine Summe, sondern Gesamtsumme": one mention that asks for a
         // total is enough; the sentence takes it back only when every one
         // says no.
+        // A total's word inside a list of columns, or as a column's name
+        // ("Line total EUR"), asks for no total row; a "no", "not", "kein"
+        // anywhere before it in its clause ("Do not add totals", "No
+        // aggregate total is required") takes it back.
         let said: Vec<bool> = TOTAL_WORD
             .find_iter(sentence)
+            .filter(|m| !in_list(m.start()))
+            // The name of a column asked for ("Hinterlege Gesamt als Formel").
+            .filter(|m| {
+                !w.terms
+                    .iter()
+                    .any(|t| t.need == Need::Column && t.text.eq_ignore_ascii_case(m.as_str()))
+            })
+            .filter(|m| {
+                let before = words_of(&sentence[..m.start()]);
+                let after = words_of(&sentence[m.end()..]);
+                !(before.last().is_some_and(|w| w == "line" || w == "zeilen")
+                    || after
+                        .first()
+                        .is_some_and(|w| ["eur", "usd", "gbp", "chf"].contains(&w.as_str())))
+            })
             .map(|m| {
-                !(no_before(&sentence[..m.start()])
+                let clause_start = sentence[..m.start()]
+                    .rfind([',', ';', ':'])
+                    .map_or(0, |i| i + 1);
+                let clause = words_of(&sentence[clause_start..m.start()]);
+                let clause_no = clause.iter().any(|w| CLAUSE_NO.contains(&w.as_str()));
+                // "… ist nicht verlangt", "… is not required".
+                let clause_end = sentence[m.end()..]
+                    .find([',', ';', ':'])
+                    .map_or(sentence.len(), |k| m.end() + k);
+                let rest = words_of(&sentence[m.end()..clause_end]);
+                let not_wanted = rest.windows(2).any(|p| {
+                    ["nicht", "not", "kein"].contains(&p[0].as_str())
+                        && [
+                            "verlangt",
+                            "nötig",
+                            "notwendig",
+                            "erforderlich",
+                            "gewünscht",
+                            "required",
+                            "needed",
+                            "necessary",
+                            "wanted",
+                        ]
+                        .contains(&p[1].as_str())
+                });
+                let clause_no = clause_no || not_wanted;
+                !(clause_no
+                    || no_before(&sentence[..m.start()])
                     || no_after(&sentence[..m.start()], &sentence[m.end()..]))
             })
             .collect();
@@ -1426,11 +1572,11 @@ fn present(l: &Layout, t: &Term) -> bool {
             // A header: a sheet's first row with two cells or more (a title
             // above it does not count), a table's first row.
             l.sheets.iter().any(|s| {
-                s.rows
-                    .iter()
-                    .take(2)
-                    .find(|r| r.cells.iter().filter(|c| !c.trim().is_empty()).count() >= 2)
-                    .is_some_and(|r| r.cells.iter().any(|c| has(c)))
+                let t = Table {
+                    name: None,
+                    rows: s.rows.clone(),
+                };
+                header_row(&t).is_some_and(|h| t.rows[h].cells.iter().any(|c| has(c)))
             }) || l.blocks.iter().any(|b| match b {
                 Block::Table { rows } => rows.first().is_some_and(|r| r.iter().any(|c| has(c))),
                 _ => false,
@@ -1768,10 +1914,12 @@ fn may_be_empty(task: &str, name: &str) -> bool {
 /// The header of a table: the first of its first three rows with two cells
 /// or more (a title above it does not count).
 fn header_row(t: &Table) -> Option<usize> {
-    t.rows
-        .iter()
-        .take(3)
-        .position(|r| r.cells.iter().filter(|c| !c.trim().is_empty()).count() >= 2)
+    let filled = |r: &Row| r.cells.iter().filter(|c| !c.trim().is_empty()).count();
+    // A table of one column: its first row.
+    if t.rows.iter().all(|r| filled(r) <= 1) {
+        return t.rows.iter().position(|r| filled(r) == 1);
+    }
+    t.rows.iter().take(3).position(|r| filled(r) >= 2)
 }
 
 /// What a table's amounts come to: its total row's amount, or the amounts
@@ -1946,7 +2094,11 @@ enum Total {
 }
 
 fn total_kind(r: &Row) -> Option<Total> {
-    let label = label_of(r).filter(|c| total_label(c))?;
+    let label = r
+        .cells
+        .iter()
+        .map(String::as_str)
+        .find(|c| total_label(c))?;
     let l = label.trim().to_lowercase();
     Some(
         if ["teilsumme", "zwischensumme", "subtotal", "sub-total"]
@@ -1976,7 +2128,7 @@ fn total_kind(r: &Row) -> Option<Total> {
 /// "netto", a currency, a colon), not a row that merely starts with it
 /// ("Total service").
 fn is_total_row(r: &Row) -> bool {
-    label_of(r).is_some_and(total_label)
+    r.cells.iter().any(|c| total_label(c))
 }
 
 /// What names a row: its first cell with text (not a number) – a total's
@@ -2020,7 +2172,9 @@ static ANY_TOTAL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|
 
 static QUALIFIED_TOTAL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
-        r"(?i)^((zwischensumme|teilsumme|gesamtsumme|endsumme|subtotal|sub-total)(\s+\S+){1,2}|grand total\s+\d{4})$",
+        // What it is of names a thing: capitalized or a number ("Zwischensumme
+        // Nord", "Subtotal Q1") – "Gesamtsumme folgt unten" is a sentence.
+        r"^((?i:zwischensumme|teilsumme|gesamtsumme|endsumme|subtotal|sub-total)(\s+[\p{Lu}\d]\S*){1,2}|(?i:grand total)\s+\d{4})$",
     )
     .expect("valid")
 });
@@ -2033,10 +2187,13 @@ static TOTAL_LABEL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new
 });
 
 static QTY: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-    regex::Regex::new(r"(?i)^(menge|anzahl|stück|stk\.?|qty|quantity|units)\b").expect("valid")
+    regex::Regex::new(
+        r"(?i)^(menge|anzahl|stück|stk\.?|stunden|std\.?|qty|quantity|units|hours|hrs)\b",
+    )
+    .expect("valid")
 });
 static PRICE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-    regex::Regex::new(r"(?i)^(einzelpreis|stückpreis|preis|unit price|price|ep)\b").expect("valid")
+    regex::Regex::new(r"(?i)^(einzelpreis|stückpreis|stundensatz|preis|satz|unit price|unit cost|price|rate|ep)\b").expect("valid")
 });
 static AMOUNT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r"(?i)^(betrag|gesamt|gesamtpreis|summe|total|amount|line total|line amount|line value|value|wert|gp)\b")
@@ -2565,6 +2722,84 @@ mod tests {
     }
 
     #[test]
+    fn review_5_what_is_sure_and_what_is_not() {
+        let n = |text: &str, task: &str| errors(&csv(text, task)).len();
+        // A comma file whose first field holds semicolons, with its total (49).
+        let mut f = String::from("Name; Vorname; Titel,Amount\n");
+        for i in 1..=19 {
+            f.push_str(&format!("A{i:02};X;Y,10\n"));
+        }
+        f.push_str("Total,190\n");
+        assert_eq!(n(&f, "mit einer Gesamtsumme"), 0);
+        // Subtotals beside their category (50).
+        assert_eq!(
+            n(
+                "Category,Item,Amount\nTravel,Train,75\nTravel,Bus,25\nTravel,Subtotal,100\nMeals,Lunch,18\nMeals,Dinner,22\nMeals,Subtotal,40\n,Grand total,140",
+                ""
+            ),
+            0
+        );
+        assert_eq!(
+            n(
+                "Artikel,Betrag\nGesamtsumme folgt unten,10\nB,20\nGesamtsumme,30",
+                ""
+            ),
+            0
+        );
+        // One column (54).
+        assert_eq!(n("Name\nAlpha;Beta\nGamma;Delta", "Spalte Name"), 0);
+        // No total asked for (round 5 cases).
+        for task in [
+            "Create contacts.csv with Customer ID, Organisation and Contact. Do not add totals.",
+            "Create stock.xlsx with columns SKU, Opening, Closing. No aggregate total is required.",
+            "On Lines, use columns Item, Quantity, Unit price EUR, Line total EUR.",
+        ] {
+            assert!(!wanted(task).total, "{task}");
+        }
+        assert!(wanted("Ergänze eine Zeile Gesamt mit der Besucherzahl.").total);
+        assert!(wanted("Keine Summe, sondern Gesamtsumme.").total);
+        assert!(!wanted("Spalten Artikel, Anzahl, Gesamt. Hinterlege Gesamt als Formel. Eine Gesamtsumme ist nicht verlangt.").total);
+        assert!(
+            wanted(
+                "Eine Excel-Datei mit Leistung und Betrag, und unbedingt eine Gesamtsumme am Ende."
+            )
+            .total
+        );
+        // One section each, after a singular.
+        assert_eq!(
+            required("Ich brauche einen Abschnitt Befund und einen Abschnitt Nächste Schritte."),
+            ["Befund", "Nächste Schritte"]
+        );
+        assert_eq!(
+            required("Create estimate.docx with heading Estimate and a table Service, Hours."),
+            ["Estimate"]
+        );
+        // Hours × rate.
+        assert_eq!(
+            n(
+                "Service,Hours,Rate EUR,Amount EUR\nTranslation,4,60,260",
+                ""
+            ),
+            1
+        );
+        // Items most of which are columns: the rest are missing columns.
+        assert_eq!(
+            n(
+                "Order,Carrier\nSO-61,Parcel Post",
+                "Create deliveries.csv with Order, Carrier and Delivery date."
+            ),
+            1
+        );
+        assert_eq!(
+            n(
+                "Name,Betrag\nAlice,10\nBob,20\nCharlie,30",
+                "Erstelle eine Liste mit Alice, Bob und Charlie"
+            ),
+            0
+        );
+    }
+
+    #[test]
     fn round_3_a_total_the_text_states_matches_the_table() {
         let doc = |tables: &[&[(&str, &str)]], para: &str| {
             let mut blocks: Vec<Block> = tables
@@ -2840,6 +3075,39 @@ mod tests {
             ("[Content_Types].xml", &alien_types),
             ("_rels/.rels", &r),
             ("word/document.xml", &d)
+        ]));
+        // Review 5: prefixed package namespaces are the same; an attribute
+        // twice inside, CDATA after the document are not.
+        let ct = t
+            .replace("<Types xmlns=", "<ct:Types xmlns:ct=")
+            .replace("</Types>", "</ct:Types>")
+            .replace("<Default ", "<ct:Default ")
+            .replace("<Override ", "<ct:Override ");
+        assert!(ok(&[
+            ("[Content_Types].xml", &ct),
+            ("_rels/.rels", &r),
+            ("word/document.xml", &d)
+        ]));
+        let pr = r
+            .replace("<Relationships xmlns=", "<pr:Relationships xmlns:pr=")
+            .replace("</Relationships>", "</pr:Relationships>")
+            .replace("<Relationship ", "<pr:Relationship ");
+        assert!(ok(&[
+            ("[Content_Types].xml", &t),
+            ("_rels/.rels", &pr),
+            ("word/document.xml", &d)
+        ]));
+        let inner = d.replacen("<w:p>", r#"<w:p test="a" test="b">"#, 1);
+        assert!(!ok(&[
+            ("[Content_Types].xml", &t),
+            ("_rels/.rels", &r),
+            ("word/document.xml", &inner)
+        ]));
+        let cdata = format!("{d}<![CDATA[garbage]]>");
+        assert!(!ok(&[
+            ("[Content_Types].xml", &t),
+            ("_rels/.rels", &r),
+            ("word/document.xml", &cdata)
         ]));
     }
 

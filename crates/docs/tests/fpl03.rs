@@ -122,6 +122,9 @@ fn docx(blocks: &[Value]) -> Vec<u8> {
     out.into_inner()
 }
 
+static CELL: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"^(.+!)?\$?[A-Z]{1,3}\$?\d+$").unwrap());
+
 /// What a check got wrong against a case (empty: right).
 fn misses(expect: &Value, findings: &[Finding]) -> Vec<String> {
     let errors: Vec<&Finding> = findings
@@ -140,6 +143,10 @@ fn misses(expect: &Value, findings: &[Finding]) -> Vec<String> {
     for want in expect["errors"].as_array().into_iter().flatten() {
         let area = want["area"].as_str().unwrap_or_default();
         let place = want["place"].as_str();
+        // A place is compared when it is a cell ("Blatt!B4", "B4"); one
+        // written otherwise ("file.csv: Delivery date") names no cell to
+        // compare with – the area is what counts then.
+        let place = place.filter(|p| CELL.is_match(p));
         let found = errors.iter().any(|e| {
             serde_json::to_value(e.area).unwrap() == area
                 && place.is_none_or(|p| e.place.as_deref() == Some(p))

@@ -349,7 +349,7 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
     // detail after it.
     let mut shown: Vec<usize> = Vec::new();
     if let Some(f) = first {
-        out.push_str(head(plain(all[f]), (room / 6).clamp(40, 200)));
+        out.push_str(&squeeze(plain(all[f]), (room / 3).clamp(40, 300)));
         out.push('\n');
         shown.push(f);
         if is_key_line(all[f])
@@ -656,18 +656,17 @@ fn squeeze(line: &str, cap: usize) -> String {
     }
     let front = cap / 3;
     let back = cap - front - 3;
-    // A finding word between start and end (`"error":"RATE_LIMIT"` in a
-    // long response): the start, the words around it, the end.
-    // The strongest one: shouted (`ERROR`) over spoken, never one that
-    // says there is none (`error: none`).
-    let middle = KEY_WORD
+    // Finding words between start and end (`"error":"RATE_LIMIT"` in a
+    // long response): the start, the words around them, the end. Strongest
+    // first: shouted (`ERROR`)
+    // over spoken, never one that says there is none (`error: none`).
+    let mut found: Vec<(i32, usize)> = KEY_WORD
         .find_iter(line)
         .filter_map(|m| {
             let at = line[..m.start()].chars().count();
             (at > front && at + 20 < n - back / 2).then_some((m, at))
         })
         .map(|(m, at)| {
-            let word = m.as_str();
             let after: String = line[m.end()..]
                 .chars()
                 .take(12)
@@ -678,21 +677,44 @@ fn squeeze(line: &str, cap: usize) -> String {
                     .trim_start_matches([':', '=', ' ', '"'])
                     .starts_with(x)
             });
-            let loud = word
+            let loud = m
+                .as_str()
                 .chars()
                 .filter(|c| c.is_alphabetic())
                 .all(char::is_uppercase);
             (i32::from(loud) * 2 - i32::from(none) * 3, at)
         })
-        .max_by_key(|&(score, at)| (score, std::cmp::Reverse(at)))
-        .map(|(_, at)| at);
-    if let Some(at) = middle {
-        // Most of the room to what is around the finding word.
-        let (f, b) = (cap / 6, cap / 6);
-        let w = cap - f - b - 6;
-        let from = at.saturating_sub(w / 6);
-        let window: String = line.chars().skip(from).take(w).collect();
-        return format!("{} … {window} … {}", head(line, f), last(line, b));
+        .filter(|&(score, _)| score >= 0)
+        .collect();
+    found.sort_by_key(|&(score, at)| (std::cmp::Reverse(score), at));
+    // Up to two places, apart from each other (two errors in one response).
+    let (f, b) = (cap / 6, cap / 6);
+    let room = cap - f - b - 6;
+    let mut places: Vec<usize> = Vec::new();
+    for &(_, at) in &found {
+        // One window covers what lies close together.
+        if places.len() < 2 && places.iter().all(|&p| p.abs_diff(at) > room * 5 / 6) {
+            places.push(at);
+        }
+    }
+    if !places.is_empty() {
+        places.sort_unstable();
+        let w = room / places.len() - 4 * (places.len() - 1);
+        let windows: Vec<String> = places
+            .iter()
+            .map(|&at| {
+                line.chars()
+                    .skip(at.saturating_sub(w / 6))
+                    .take(w)
+                    .collect()
+            })
+            .collect();
+        return format!(
+            "{} … {} … {}",
+            head(line, f),
+            windows.join(" … "),
+            last(line, b)
+        );
     }
     format!("{} … {}", head(line, front), last(line, back))
 }
@@ -1295,6 +1317,31 @@ mod tests {
             "cleanup ok\n".repeat(300)
         );
         let s = shorten(&meta("bash", true, Some("r3")), &log, 1000);
+        assert!(s.contains("RATE_LIMIT retry_after=60"), "{s}");
+        // Two findings in one long line, and one in a long first line
+        // (review 5, 53).
+        let line = format!(
+            "response: {} ERROR code AUTH_DENIED field=role {} ERROR code RATE_LIMIT retry_after=60 {}\n",
+            "x".repeat(700),
+            "y".repeat(1500),
+            "z".repeat(1000)
+        );
+        let log = format!(
+            "run checks\n{line}{}exit status 1\n",
+            "cleanup ok\n".repeat(300)
+        );
+        let s = shorten(&meta("bash", true, Some("r5")), &log, 1000);
+        assert!(
+            s.contains("AUTH_DENIED") && s.contains("RATE_LIMIT retry_after=60"),
+            "{s}"
+        );
+        let first = format!(
+            "ERROR response: {} ERROR code RATE_LIMIT retry_after=60 {}\n",
+            "x".repeat(1800),
+            "y".repeat(1800)
+        );
+        let log = format!("{first}{}exit status 1\n", "cleanup ok\n".repeat(300));
+        let s = shorten(&meta("bash", true, Some("r6")), &log, 1000);
         assert!(s.contains("RATE_LIMIT retry_after=60"), "{s}");
         // Never over the budget (48).
         let mut grep: String = (0..100)
