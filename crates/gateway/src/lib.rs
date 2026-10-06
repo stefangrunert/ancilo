@@ -75,6 +75,26 @@ pub struct Fallback {
     pub why: String,
 }
 
+/// Why a model did not fit, as a note can say it: the numbers – not the
+/// advice to close programs (another model answered instead).
+fn short_reason(why: &str) -> String {
+    let mut s = why;
+    if let Some(i) = s.find("right now: ") {
+        s = &s[i + "right now: ".len()..];
+    }
+    for end in [
+        " – close some programs",
+        " Stop another model first",
+        " (",
+        " – loaded now",
+    ] {
+        if let Some(i) = s.find(end) {
+            s = &s[..i];
+        }
+    }
+    s.trim().trim_end_matches('.').to_string()
+}
+
 /// What happened to one call – for metrics and tests.
 #[derive(Debug, Clone, Default)]
 pub struct CallRecord {
@@ -528,7 +548,7 @@ impl Gateway {
                 rec.fallback = Some(Fallback {
                     from: model.clone(),
                     to: alt.clone(),
-                    why,
+                    why: short_reason(&why),
                 });
                 rec.model = alt.clone();
                 model = alt;
@@ -912,4 +932,24 @@ fn cloud_note(body: &Value) -> ancilo_net::Note {
         body["model"].as_str().unwrap_or("a model"),
         ancilo_net::By::You,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fallback_note_gives_the_numbers_not_the_advice() {
+        let why = "'qwen3.6-35b-a3b-q8_0' cannot be loaded right now: this model needs about 41.6 GB of memory, but only about 21.4 GB are free right now – close some programs or choose a smaller model (all-minilm-l6-v2-q8_0 loaded)";
+        assert_eq!(
+            short_reason(why),
+            "this model needs about 41.6 GB of memory, but only about 21.4 GB are free right now"
+        );
+        assert_eq!(
+            short_reason(
+                "'a' needs about 9 GB, but only 3 GB of 40 GB are free. Stop another model first."
+            ),
+            "'a' needs about 9 GB, but only 3 GB of 40 GB are free"
+        );
+    }
 }
