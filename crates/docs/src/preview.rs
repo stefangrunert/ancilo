@@ -1360,11 +1360,16 @@ pub fn wanted(task: &str) -> Wanted {
                         (start..start + q.len()).contains(&i)
                     })
                     .unwrap_or("");
+                // "und einer Summe", "and a total": asked for, not a name.
+                let article = item.split_whitespace().any(|w| {
+                    ["ein", "eine", "einer", "einen", "a", "an"]
+                        .contains(&w.to_lowercase().as_str())
+                });
                 let words = item
                     .split_whitespace()
                     .filter(|w| !STOP.contains(&w.to_lowercase().as_str()))
                     .count();
-                words <= 3
+                !article && words <= 3
             })
         };
         for (need, trigger_at, items_at, items) in lists {
@@ -2757,6 +2762,9 @@ mod tests {
             assert!(!wanted(task).total, "{task}");
         }
         assert!(wanted("Ergänze eine Zeile Gesamt mit der Besucherzahl.").total);
+        // Found live: "… mit den Spalten Firma, Datum und Betrag und einer Summe".
+        assert!(wanted("Erstelle eine Tabelle Rechnungen.xlsx mit den Spalten Firma, Datum und Betrag und einer Summe.").total);
+        assert!(wanted("Make a sheet with the columns Item and Amount and a total.").total);
         assert!(wanted("Keine Summe, sondern Gesamtsumme.").total);
         assert!(!wanted("Spalten Artikel, Anzahl, Gesamt. Hinterlege Gesamt als Formel. Eine Gesamtsumme ist nicht verlangt.").total);
         assert!(
