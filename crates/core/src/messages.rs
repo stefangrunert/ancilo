@@ -168,6 +168,10 @@ pub const MESSAGES: &[(&str, &str)] = &[
         "the total of “{what}” says {shown}, but the rows above add up to {sum}",
     ),
     (
+        "check.total_alone",
+        "a total of “{what}” has no rows of its own above it – not checked",
+    ),
+    (
         "check.product_wrong",
         "the amount {amount} does not match quantity × price ({qty} × {price} = {want})",
     ),

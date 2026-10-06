@@ -549,6 +549,7 @@ export const en = {
   "sources.dropped": "Ancilo removed {n} source(s) the answer named that are not in your documents.",
   "sources.changed": "This document has changed since the answer. Shown is the passage as the answer had it.",
   "sources.gone": "This document is no longer here. Shown is the passage as the answer had it.",
+  "sources.unknown": "Whether this document changed since the answer is not known yet – Ancilo reads it again. Shown is the passage as the answer had it.",
   "sources.close": "Close",
   "web.chat.sources": "Sources",
   "web.chat.failed": "The web search did not work ({why}) – this answer is without the web.",

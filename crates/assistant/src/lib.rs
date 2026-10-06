@@ -718,25 +718,42 @@ impl Assistant {
                 if !file.is_file() {
                     return Ok(evidence::open(e, None));
                 }
-                if let Some(was) = &e.file {
-                    let f = file.clone();
-                    let now = tokio::task::spawn_blocking(move || evidence::file_hash(&f))
-                        .await
-                        .ok()
-                        .flatten();
-                    if now.as_ref() != Some(was) {
-                        // Changed under the same size and time too: read again.
-                        if let Some(l) = self.inner.library.get() {
-                            l.invalidate(folder, path);
-                            l.refresh_soon(folder);
-                        }
-                        return Ok(evidence::changed(e));
+                let f = file.clone();
+                let hash = tokio::task::spawn_blocking(move || evidence::file_hash(&f))
+                    .await
+                    .ok()
+                    .flatten();
+                let library = self.inner.library.get();
+                let read_again = || {
+                    if let Some(l) = library {
+                        l.invalidate(folder, path);
+                        l.refresh_soon(folder);
+                    }
+                };
+                if let Some(was) = &e.file
+                    && hash.as_ref() != Some(was)
+                {
+                    // Changed under the same size and time too: read again.
+                    read_again();
+                    return Ok(evidence::changed(e));
+                }
+                // What Ancilo read of it is the file as it is now: compared
+                // against that. Otherwise it is read again – and until then a
+                // source without the file's hash cannot say how it stands.
+                let cached = library.filter(|l| hash.is_some() && l.hash_of(folder, path) == hash);
+                match cached {
+                    Some(l) => l.current(folder, path),
+                    None if e.file.is_some() => {
+                        read_again();
+                        // The very file the answer had: the same – shown
+                        // without the text around it until it is read again.
+                        return Ok(evidence::same(e));
+                    }
+                    None => {
+                        read_again();
+                        return Ok(evidence::unknown(e));
                     }
                 }
-                self.inner
-                    .library
-                    .get()
-                    .and_then(|l| l.current(folder, path))
             }
         };
         Ok(evidence::open(e, now.as_deref()))

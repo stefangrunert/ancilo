@@ -172,9 +172,18 @@ fn holds(c: &Case, req: &str, p: &Passage) -> bool {
         })
 }
 
-/// How many characters of the best-ranked passages it takes until every
-/// requirement is in (lower: found with less room – a folder of many
-/// documents, a small model); `None`: never.
+/// The characters a passage costs as the model gets it: its text and its
+/// head – mark, document, page or sheet (`evidence::for_model`; review 3,
+/// finding 18: passages of other sizes cost other heads).
+fn delivered(p: &Passage) -> usize {
+    let src = ancilo_docs::source(&p.document, p.at.as_ref());
+    let src = src.trim_start_matches('[').trim_end_matches(']');
+    p.text.chars().count() + "[D1] ".len() + src.chars().count() + "\n".len() + "\n\n".len()
+}
+
+/// How many characters (as delivered, heads included) of the best-ranked
+/// passages it takes until every requirement is in (lower: found with less
+/// room – a folder of many documents, a small model); `None`: never.
 fn chars_to_hit(c: &Case, ranked: &[(usize, Passage)]) -> Option<usize> {
     let mut worst = 0;
     for req in &c.required {
@@ -182,7 +191,7 @@ fn chars_to_hit(c: &Case, ranked: &[(usize, Passage)]) -> Option<usize> {
         let mut taken: Vec<Passage> = Vec::new();
         let mut hit = None;
         for (_, p) in ranked {
-            used += p.text.chars().count();
+            used += delivered(p);
             taken.push(p.clone());
             if holds(c, req, p) || joined(c, &taken).iter().any(|j| holds(c, req, j)) {
                 hit = Some(used);

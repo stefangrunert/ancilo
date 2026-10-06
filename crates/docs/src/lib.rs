@@ -118,6 +118,12 @@ impl Extractor {
     /// `file` inside `workdir` – the reading processes see only their own
     /// place: a document from elsewhere is put there first (a clone on APFS).
     /// Ancilo's own data is never handed over.
+    /// `file` copied into `workdir` (from [`Self::workdir`]) to be read
+    /// from there – never Ancilo's own data.
+    pub fn take_in(&self, file: &Path, workdir: &Path) -> Result<PathBuf> {
+        self.inside(file, workdir)
+    }
+
     fn inside(&self, file: &Path, workdir: &Path) -> Result<PathBuf> {
         if file.starts_with(workdir) {
             return Ok(file.to_path_buf());
@@ -763,7 +769,7 @@ pub fn choose(docs: &[(String, Vec<Part>)], query: &str, budget: usize) -> Vec<S
 }
 
 /// Where a passage comes from, as the model is asked to cite it.
-pub(crate) fn source(name: &str, at: Option<&Locator>) -> String {
+pub fn source(name: &str, at: Option<&Locator>) -> String {
     match at {
         Some(Locator::Page(n)) => format!("[{name}, page {n}]"),
         Some(Locator::Sheet(s)) => format!("[{name}, sheet \"{s}\"]"),

@@ -2444,6 +2444,11 @@
             "const": "gone",
             "description": "No longer there (removed, or the conversation's attachment deleted).",
             "type": "string"
+          },
+          {
+            "const": "unknown",
+            "description": "Not known whether it changed (a source from before files were\nhashed, the document not read again yet).",
+            "type": "string"
           }
         ]
       },

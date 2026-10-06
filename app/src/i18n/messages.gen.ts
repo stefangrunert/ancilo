@@ -49,6 +49,7 @@ export const messagesEn = {
   "msg.check.numbers_ok": "{n} total(s) and amount(s) checked – they add up",
   "msg.check.numbers_none": "no totals or amounts that could be checked",
   "msg.check.total_wrong": "the total of “{what}” says {shown}, but the rows above add up to {sum}",
+  "msg.check.total_alone": "a total of “{what}” has no rows of its own above it – not checked",
   "msg.check.product_wrong": "the amount {amount} does not match quantity × price ({qty} × {price} = {want})",
   "msg.task.too_wide": "{folder} is too wide for a task – choose a folder of your documents, like Documents or a folder in it (not the home folder, Library or a system folder)",
   "msg.session.turn_running": "a turn is still running – wait or cancel it",

@@ -607,9 +607,20 @@ impl Changes {
     /// are checked against the project's current state first – on a conflict
     /// nothing changes anywhere.
     pub fn apply(&mut self, paths: Option<&[String]>) -> Result<Vec<String>> {
+        self.apply_seen(paths, None)
+    }
+
+    /// Like [`Self::apply`]; `version`: the changes as the user saw them – a
+    /// task's copy applies exactly those (its plan is made from the same
+    /// look that is compared), or nothing.
+    pub fn apply_seen(
+        &mut self,
+        paths: Option<&[String]>,
+        version: Option<&str>,
+    ) -> Result<Vec<String>> {
         if let Self::Folder { copy, .. } = self {
             return Ok(copy
-                .apply(paths, None)?
+                .apply(paths, version)?
                 .changes
                 .into_iter()
                 .map(|c| c.path)

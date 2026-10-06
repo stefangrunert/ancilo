@@ -1424,12 +1424,20 @@ impl Sessions {
             files: files.clone(),
             at: Utc::now(),
         };
-        meta.saved = Some(saved.clone());
-        if let Err(e) = copy
-            .apply(Some(&paths), None)
-            .and_then(|_| self.save(&meta, &history))
-        {
+        // Noted first, then taken over as exactly the look that was saved:
+        // a step that fails leaves the results open to save again (nothing
+        // saved, nothing marked done).
+        let before = meta.saved.replace(saved.clone());
+        if let Err(e) = self.save(&meta, &history) {
             undo(&files);
+            return Err(e);
+        }
+        if let Err(e) = copy.apply(Some(&paths), Some(&now)) {
+            undo(&files);
+            meta.saved = before;
+            if let Err(e2) = self.save(&meta, &history) {
+                tracing::warn!(session = %id, error = %e2.message(), "a failed save could not be taken back in the task");
+            }
             return Err(e);
         }
         self.inner.bus.emit(
@@ -1658,7 +1666,9 @@ impl Sessions {
             ));
         }
         let Some(v) = variant else {
-            let applied = meta.changes.apply(paths.as_deref())?;
+            // The version once more where the plan is made: what changed
+            // between the look above and here is not applied.
+            let applied = meta.changes.apply_seen(paths.as_deref(), version)?;
             self.save(&meta, &history)?;
             self.inner
                 .bus

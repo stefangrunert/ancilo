@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { OpOutput } from "../api/client";
 import { useI18n, type Key } from "../i18n";
+import { markHref } from "../state/marks";
 import { useOp, useRefresh } from "../state/store";
 import { Icon } from "./Icon";
 import { Dialog, ErrorNote } from "./ui";
@@ -27,7 +28,7 @@ export function placeOf(e: Pick<Evidence, "at">, t: T): string {
 export function linkEvidence(text: string, evidence: Evidence[]): string {
   return text.replace(/\[(D\d+)\](?!\()/gi, (all, id: string) => {
     const e = evidence.find((x) => x.id.toUpperCase() === id.toUpperCase());
-    return e ? `[${num(e.id)}](#source-${e.id})` : all;
+    return e ? `[${num(e.id)}](${markHref(e.id)})` : all;
   });
 }
 
@@ -96,6 +97,11 @@ export function SourceDialog({ conversation, mark, onClose }: { conversation: st
             {o.now === "gone" && (
               <p className="note warn" role="alert" data-testid="source-gone">
                 {t("sources.gone")}
+              </p>
+            )}
+            {o.now === "unknown" && (
+              <p className="note" data-testid="source-unknown">
+                {t("sources.unknown")}
               </p>
             )}
             {(e.warnings ?? []).map((w) => (

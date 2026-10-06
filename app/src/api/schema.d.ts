@@ -3479,7 +3479,7 @@ export interface components {
             reason: string;
         };
         /** @description How a document stands now, against the evidence taken from it. */
-        Now: "same" | "changed" | "gone";
+        Now: "same" | "changed" | "gone" | "unknown";
         OperationCall: {
             input: unknown;
             operation: string;

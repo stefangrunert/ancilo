@@ -250,19 +250,28 @@ impl Library {
                 self.emit(folder);
             }
             let dir = self.extractor.workdir()?;
-            // The file as read: a source from it can tell a later change. A
-            // file that changed while it was read has no hash to go by.
-            let hash_of = |p: PathBuf| async move {
-                tokio::task::spawn_blocking(move || crate::evidence::file_hash(&p))
-                    .await
-                    .ok()
-                    .flatten()
+            // Read from one copy, hashed itself: the text and the hash a
+            // source keeps are of the same content, whatever the file does
+            // meanwhile.
+            let ex = self.extractor.clone();
+            let (from, into) = (f.path.clone(), dir.clone());
+            let taken = tokio::task::spawn_blocking(move || {
+                let copy = ex.take_in(&from, &into)?;
+                let hash = crate::evidence::file_hash(&copy);
+                Ok::<_, Error>((copy, hash))
+            })
+            .await
+            .map_err(Error::internal)
+            .and_then(|r| r);
+            let read = match taken {
+                Ok((copy, hash)) => self.extractor.read(&copy, &dir).await.map(|d| (d, hash)),
+                Err(e) => {
+                    std::fs::remove_dir_all(&dir).ok();
+                    Err(e)
+                }
             };
-            let before = hash_of(f.path.clone()).await;
-            match self.extractor.read(&f.path, &dir).await {
-                Ok(doc) => {
-                    let after = hash_of(f.path.clone()).await;
-                    let hash = before.filter(|b| after.as_ref() == Some(b));
+            match read {
+                Ok((doc, hash)) => {
                     self.store(&key, &f.rel, f.size, f.mtime, Some(&doc.parts), None)?;
                     self.store_read(&key, &f.rel, &doc.warnings, hash.as_deref())?;
                 }
@@ -417,6 +426,24 @@ impl Library {
         Ok(crate::evidence::of(passages, |path| {
             about.get(path).cloned().unwrap_or_default()
         }))
+    }
+
+    /// The content hash of a file as it was read (`None`: not known).
+    pub fn hash_of(&self, folder: &Path, path: &str) -> Option<String> {
+        let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        let key = folder.display().to_string();
+        self.db
+            .with(|c| {
+                c.query_row(
+                    "SELECT hash FROM library WHERE folder = ?1 AND path = ?2",
+                    params![key, path],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .optional()
+            })
+            .ok()
+            .flatten()
+            .flatten()
     }
 
     /// The content hashes of a folder's files as they were read.

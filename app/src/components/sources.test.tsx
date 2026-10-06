@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithDaemon } from "../test-utils";
 import { ConversationView } from "./Conversation";
+import { markHref } from "../state/marks";
 import { linkEvidence } from "./Sources";
 
 const ev = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -35,19 +36,19 @@ function conversation(evidence: unknown[], dropped: string[] = []) {
 // covers: FPL-01 (sources in the chat)
 describe("Sources of an answer from documents", () => {
   it("makes a button only of a source of this very answer", async () => {
-    const answer = { ...conversation([ev("D1")]), messages: [conversation([ev("D1")]).messages[0], { ...conversation([ev("D1")]).messages[1], text: "A [D1]. B [alt](#source-D5). C [x](#source-D1). E [proof][r].\n\n[r]: #source-D1" }] };
+    const answer = { ...conversation([ev("D1")]), messages: [conversation([ev("D1")]).messages[0], { ...conversation([ev("D1")]).messages[1], text: "A [D1]. B [alt](#source-D5). C [x](#source-D1). E [proof][r]. F [1](<#source-D1>). G [1](&#35;source-D1).\n\n[r]: #source-D1" }] };
     renderWithDaemon(<ConversationView id="c-1" />, { get_conversation: () => answer, pending_actions: () => [] });
     const a = await screen.findByTestId("assistant-answer");
     // Only Ancilo's own mark: not a link the model wrote to a source,
     // inline or by reference (review 2, finding 5).
     expect(within(a).getAllByRole("button")).toHaveLength(1);
     expect(within(a).queryByTestId("mark-D5")).toBeNull();
-    expect(a).toHaveTextContent("B alt. C x. E proof.");
+    expect(a).toHaveTextContent("B alt. C x. E proof. F 1. G 1.");
   });
 
   it("links only marks of passages the answer was given", () => {
     const e = [ev("D1"), ev("D2")];
-    expect(linkEvidence("A [D1]. B [D2]. C [D9]. D [d1].", e as never)).toBe("A [1](#source-D1). B [2](#source-D2). C [D9]. D [1](#source-D1).");
+    expect(linkEvidence("A [D1]. B [D2]. C [D9]. D [d1].", e as never)).toBe(`A [1](${markHref("D1")}). B [2](${markHref("D2")}). C [D9]. D [1](${markHref("D1")}).`);
   });
 
   it("opens the passage the answer had, with its place – and says when the document changed", async () => {

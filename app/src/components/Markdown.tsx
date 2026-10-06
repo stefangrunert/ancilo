@@ -2,6 +2,7 @@ import { memo, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useI18n } from "../i18n";
+import { markOf, toSource } from "../state/marks";
 
 function textOf(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -59,7 +60,7 @@ const components: Components = {
 /**
  * A model's answer as Markdown (GitHub flavour). Raw HTML in the text is not
  * rendered – the page can operate Ancilo, so model output never becomes markup.
- * With `onSource`, a link to `#source-D3` (a checked source of an answer
+ * With `onSource`, Ancilo's mark of source D3 (a checked source of an answer
  * from documents, see Sources) opens that source instead of leaving the app.
  */
 export const Markdown = memo(function Markdown({ text, onSource, sources }: { text: string; onSource?: (id: string) => void; sources?: string[] }) {
@@ -70,11 +71,11 @@ export const Markdown = memo(function Markdown({ text, onSource, sources }: { te
         ? {
             ...components,
             a: ({ href, children }) => {
-              const id = href?.startsWith("#source-") ? href.slice("#source-".length) : null;
-              // Only a mark of this very answer becomes a button – its text
-              // is the mark's number, as Ancilo wrote it; any other link to
-              // a source (made up, by reference …) is its plain text.
-              if (id && (!(sources ?? []).includes(id) || textOf(children) !== id.replace(/^D/i, ""))) return <>{children}</>;
+              // Only a mark Ancilo made, of this very answer, becomes a
+              // button; any other link to a source (written by the model,
+              // however spelled) is its plain text.
+              const id = markOf(href);
+              if (toSource(href) && (!id || !(sources ?? []).includes(id))) return <>{children}</>;
               if (!id) {
                 return (
                   <a href={href} target="_blank" rel="noreferrer noopener">

@@ -370,27 +370,160 @@ fn text(bytes: &[u8]) -> Layout {
 fn word(name: &str, bytes: &[u8]) -> Result<Layout> {
     let bad = |e: String| Error::invalid(format!("cannot read the Word file {name} ({e})"));
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| bad(e.to_string()))?;
-    // A Word package names its parts and where its document starts; without
-    // that Word does not open it.
-    if zip.by_name("[Content_Types].xml").is_err() || zip.by_name("_rels/.rels").is_err() {
-        return Err(bad("it is not a complete Word document".into()));
-    }
-    let entry = zip
-        .by_name("word/document.xml")
-        .map_err(|e| bad(e.to_string()))?;
-    let mut xml = String::new();
-    entry
-        .take(crate::extract::MAX_UNPACKED)
-        .read_to_string(&mut xml)
-        .map_err(|e| bad(e.to_string()))?;
-    if xml.len() as u64 >= crate::extract::MAX_UNPACKED {
-        return Err(bad("it is too large to be read whole".into()));
-    }
+    let mut part = |path: &str| -> std::result::Result<String, String> {
+        let entry = zip
+            .by_name(path)
+            .map_err(|_| "it is not a complete Word document".to_string())?;
+        let mut xml = String::new();
+        entry
+            .take(crate::extract::MAX_UNPACKED)
+            .read_to_string(&mut xml)
+            .map_err(|e| e.to_string())?;
+        if xml.len() as u64 >= crate::extract::MAX_UNPACKED {
+            return Err("it is too large to be read whole".into());
+        }
+        Ok(xml)
+    };
+    // A Word package as Word opens it: its parts named with their types,
+    // where its document starts, and that document a Word document.
+    let types = part("[Content_Types].xml").map_err(bad)?;
+    let rels = part("_rels/.rels").map_err(bad)?;
+    let main = package_start(&types, &rels).map_err(bad)?;
+    let xml = part(&main).map_err(bad)?;
     Ok(Layout {
         kind: Kind::Word,
         sheets: Vec::new(),
         blocks: word_blocks(&xml).map_err(bad)?,
         limits: Vec::new(),
+    })
+}
+
+/// The document part a Word package starts with – from its relationships,
+/// of a Word document's type.
+fn package_start(types: &str, rels: &str) -> std::result::Result<String, String> {
+    const NOT_WORD: &str = "it is not a Word document";
+    let mut defaults = Vec::new();
+    let mut overrides = Vec::new();
+    xml_elements(types, "Types", |name, attrs| {
+        let get = |k: &str| attrs.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone());
+        match name {
+            "Default" => defaults.push((
+                get("Extension").unwrap_or_default().to_lowercase(),
+                get("ContentType").unwrap_or_default(),
+            )),
+            "Override" => overrides.push((
+                get("PartName").unwrap_or_default(),
+                get("ContentType").unwrap_or_default(),
+            )),
+            _ => {}
+        }
+    })?;
+    let mut start = None;
+    xml_elements(rels, "Relationships", |name, attrs| {
+        let get = |k: &str| attrs.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone());
+        if name == "Relationship"
+            && get("Type").is_some_and(|t| t.ends_with("/officeDocument"))
+            && get("TargetMode").is_none_or(|m| m != "External")
+        {
+            start = get("Target");
+        }
+    })?;
+    let target = start.ok_or(NOT_WORD)?;
+    let path = target.trim_start_matches('/').to_string();
+    if path.is_empty() || path.split('/').any(|p| p == ".." || p == ".") {
+        return Err(NOT_WORD.into());
+    }
+    let ext = path.rsplit('.').next().unwrap_or_default().to_lowercase();
+    let kind = overrides
+        .iter()
+        .find(|(p, _)| p.trim_start_matches('/').eq_ignore_ascii_case(&path))
+        .or_else(|| defaults.iter().find(|(e, _)| *e == ext))
+        .map(|(_, t)| t.as_str())
+        .unwrap_or_default();
+    let word = [
+        "wordprocessingml.document.main+xml",
+        "wordprocessingml.template.main+xml",
+        "ms-word.document.macroenabled.main+xml",
+        "ms-word.template.macroenabledtemplate.main+xml",
+    ];
+    if !word.iter().any(|w| kind.to_lowercase().ends_with(w)) {
+        return Err(NOT_WORD.into());
+    }
+    Ok(path)
+}
+
+/// Runs `each` over the elements of `xml` (local name, attributes by local
+/// name) – checking it is well-formed XML with the root `root`.
+fn xml_elements(
+    xml: &str,
+    root: &str,
+    mut each: impl FnMut(&str, &[(String, String)]),
+) -> std::result::Result<(), String> {
+    use quick_xml::events::Event;
+    let mut reader = quick_xml::Reader::from_str(xml);
+    let (mut open, mut roots) = (0i64, 0);
+    loop {
+        let event = reader.read_event().map_err(|e| e.to_string())?;
+        let (e, empty) = match &event {
+            Event::Start(e) => (e, false),
+            Event::Empty(e) => (e, true),
+            Event::End(_) => {
+                open -= 1;
+                continue;
+            }
+            Event::Eof => break,
+            Event::Text(t) if open == 0 && !t.xml10_content().trim().is_empty() => {
+                return Err("it is not a Word document".into());
+            }
+            _ => continue,
+        };
+        let name = e.local_name().into_inner().to_string();
+        if open == 0 {
+            roots += 1;
+            if roots > 1 || name != root {
+                return Err("it is not a Word document".into());
+            }
+        }
+        let attrs: Vec<(String, String)> = e
+            .attributes()
+            .flatten()
+            .map(|a| {
+                (
+                    a.key.local_name().into_inner().to_string(),
+                    a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                        .map(|v| v.to_string())
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        each(&name, &attrs);
+        if !empty {
+            open += 1;
+        }
+    }
+    if open != 0 || roots != 1 {
+        return Err("it is not a Word document".into());
+    }
+    Ok(())
+}
+
+/// Whether an element is in Word's namespace (as its prefix is declared on
+/// it).
+fn word_namespace(e: &quick_xml::events::BytesStart) -> bool {
+    const WORD: [&str; 2] = [
+        "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+        "http://purl.oclc.org/ooxml/wordprocessingml/main",
+    ];
+    let name = e.name();
+    let prefix = name.prefix().map(|p| p.into_inner().to_string());
+    let want = match &prefix {
+        Some(p) => format!("xmlns:{p}"),
+        None => "xmlns".into(),
+    };
+    e.attributes().flatten().any(|a| {
+        a.key.into_inner() == want
+            && a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                .is_ok_and(|v| WORD.contains(&v.as_ref()))
     })
 }
 
@@ -416,7 +549,7 @@ fn word_blocks(xml: &str) -> std::result::Result<Vec<Block>, String> {
         match &event {
             Event::Start(e) | Event::Empty(e) if open == 0 => {
                 roots += 1;
-                if roots > 1 || e.local_name().into_inner() != "document" {
+                if roots > 1 || e.local_name().into_inner() != "document" || !word_namespace(e) {
                     return Err("it is not a Word document".into());
                 }
                 if matches!(event, Event::Start(_)) {
@@ -899,8 +1032,17 @@ fn no_before(before: &str) -> bool {
 fn no_after(before: &str, after: &str) -> bool {
     let next = words_of(after);
     let prev = words_of(before);
-    next.first().is_some_and(|w| NO_AFTER.contains(&w.as_str()))
-        && !prev.last().is_some_and(|w| NOT.contains(&w.as_str()))
+    next.first().is_some_and(|w| NO_AFTER.contains(&w.as_str())) && !turned_around(&prev)
+}
+
+/// Whether a "not" stands right before a name (articles and "Spalte"
+/// between are fine): "nicht die Spalte Datum entfernen".
+fn turned_around(before: &[String]) -> bool {
+    before
+        .iter()
+        .rev()
+        .find(|w| !FILLER.contains(&w.as_str()))
+        .is_some_and(|w| NOT.contains(&w.as_str()))
 }
 
 /// Whether `name` stands in `text` as whole words.
@@ -963,6 +1105,9 @@ pub fn wanted(task: &str) -> Wanted {
             };
             // "ohne Spalten …": the whole list is taken back.
             let list_negated = no_before(&sentence[..m.get(1).map_or(0, |x| x.start())]);
+            // "Nicht die Spalte Datum entfernen": what follows is kept.
+            let list_turned =
+                turned_around(&words_of(&sentence[..m.get(2).map_or(0, |x| x.start())]));
             for item in m[2].split([',', '/', '&']).flat_map(|p| {
                 p.split(" und ")
                     .flat_map(|q| q.split(" and "))
@@ -981,9 +1126,11 @@ pub fn wanted(task: &str) -> Wanted {
                     let w = lower(w);
                     NO_BEFORE.contains(&w.as_str()) || NOT.contains(&w.as_str())
                 });
-                let item_after = all
-                    .last()
-                    .is_some_and(|w| NO_AFTER.contains(&lower(w).as_str()));
+                // "Datum weg" – but not "Datum nicht entfernen".
+                let item_after = all.len() >= 2
+                    && NO_AFTER.contains(&lower(&all[all.len() - 1]).as_str())
+                    && !NOT.contains(&lower(&all[all.len() - 2]).as_str())
+                    && !list_turned;
                 let words: Vec<&str> = all
                     .into_iter()
                     .filter(|w| {
@@ -1029,9 +1176,18 @@ pub fn wanted(task: &str) -> Wanted {
                 whole && (no_before(&lower[..at]) || no_after(&lower[..at], &lower[end..]))
             })
         });
-        if let Some(m) = TOTAL_WORD.find(sentence) {
-            w.total = !(no_before(&sentence[..m.start()])
-                || no_after(&sentence[..m.start()], &sentence[m.end()..]));
+        // "Keine Summe, sondern Gesamtsumme": one mention that asks for a
+        // total is enough; the sentence takes it back only when every one
+        // says no.
+        let said: Vec<bool> = TOTAL_WORD
+            .find_iter(sentence)
+            .map(|m| {
+                !(no_before(&sentence[..m.start()])
+                    || no_after(&sentence[..m.start()], &sentence[m.end()..]))
+            })
+            .collect();
+        if !said.is_empty() {
+            w.total = said.contains(&true);
         }
     }
     w
@@ -1206,14 +1362,12 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
     let first = h + 1;
     let cols = t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
     // A total: a subtotal against the rows of its group; a grand total
-    // against all rows (or the subtotals and what came after them); a plain
-    // "Summe"/"Total" against any of these.
+    // against all rows (or the totals before and what came after them); a
+    // plain "Summe"/"Total" against any of these.
     let mut seg_from = first;
     let mut totals: Vec<Vec<Num>> = vec![Vec::new(); cols];
     let mut after_sub: Vec<usize> = vec![first; cols];
-    // Per column: each total with what it may add up to.
-    type Check = (u32, Num, Vec<Vec<Num>>);
-    let mut per_col: Vec<Vec<Check>> = vec![Vec::new(); cols];
+    let mut sums: Vec<Sum> = Vec::new();
     for (ri, r) in t.rows.iter().enumerate().skip(first) {
         let Some(kind) = total_kind(r) else {
             continue;
@@ -1233,105 +1387,213 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
             let all = data(first);
             let mut subs_then = col_totals.clone();
             subs_then.extend(data(after_sub[c]));
-            let candidates: Vec<Vec<Num>> = match kind {
+            let parts: Vec<Vec<Num>> = match kind {
                 Total::Sub => vec![seg],
                 Total::Grand => vec![all, subs_then],
+                // Without any rows above: nothing of its own to add up.
+                Total::Any if all.is_empty() => Vec::new(),
                 Total::Any => vec![seg, all, subs_then],
             }
             .into_iter()
             .filter(|v| !v.is_empty())
             .collect();
-            if kind == Total::Sub {
+            if kind != Total::Grand {
                 col_totals.push(total);
                 after_sub[c] = ri + 1;
             }
-            if !candidates.is_empty() {
-                per_col[c].push((r.number, total, candidates));
+            if parts.is_empty() {
+                // Nothing above it to add up (a total right after a total):
+                // said, not passed over.
+                out.push(find(
+                    CheckArea::Numbers,
+                    CheckLevel::Warning,
+                    msg("check.total_alone", &[("what", &name_of(header, c))]),
+                    Some(t.at(r.number, c)),
+                ));
+                continue;
             }
+            sums.push(Sum {
+                row: r.number,
+                col: c,
+                total,
+                parts,
+            });
         }
         seg_from = ri + 1;
     }
-    // One way of reading a column's numbers for all its totals: the way
-    // under which the fewest are wrong (1,250 is either 1.25 or 1250 – the
-    // same in every row of one column).
-    for (c, checks) in per_col.iter().enumerate() {
-        if checks.is_empty() {
-            continue;
-        }
-        let wrong_in = |way: Way| -> Vec<&Check> {
-            checks
-                .iter()
-                .filter(|(_, total, cands)| {
-                    !cands
-                        .iter()
-                        .any(|cand| close(cand.iter().map(|n| n.get(way)).sum(), total.get(way)))
-                })
-                .collect()
-        };
-        let (de, en) = (wrong_in(Way::De), wrong_in(Way::En));
-        let (way, bad) = if en.len() < de.len() {
-            (Way::En, en)
-        } else {
-            (Way::De, de)
-        };
-        checked += checks.len();
-        wrong += bad.len();
-        for (row, total, cands) in bad {
-            let what = header
-                .get(c)
-                .filter(|h| !h.trim().is_empty())
-                .cloned()
-                .unwrap_or_else(|| column_letter(c));
-            let sum: f64 = cands[0].iter().map(|n| n.get(way)).sum();
-            out.push(find(
-                CheckArea::Numbers,
-                CheckLevel::Error,
-                msg(
-                    "check.total_wrong",
-                    &[
-                        ("what", &what),
-                        ("shown", &show(total.get(way))),
-                        ("sum", &show(sum)),
-                    ],
-                ),
-                Some(t.at(*row, c)),
-            ));
-        }
-    }
     // Quantity × price = amount, row by row.
     let col = |re: &regex::Regex| header.iter().position(|h| re.is_match(h.trim()));
+    let mut products: Vec<Product> = Vec::new();
     if let (Some(q), Some(p), Some(a)) = (col(&QTY), col(&PRICE), col(&AMOUNT))
         && q != a
         && p != a
     {
         for r in t.rows.iter().skip(first).filter(|r| !is_total_row(r)) {
             if let (Some(qv), Some(pv), Some(av)) = (value(r, q), value(r, p), value(r, a)) {
-                checked += 1;
-                let right = [Way::De, Way::En]
-                    .iter()
-                    .any(|&w| close(qv.get(w) * pv.get(w), av.get(w)));
-                if !right {
-                    wrong += 1;
-                    let (qd, pd, ad) = (qv.get(Way::De), pv.get(Way::De), av.get(Way::De));
-                    out.push(find(
-                        CheckArea::Numbers,
-                        CheckLevel::Error,
-                        msg(
-                            "check.product_wrong",
-                            &[
-                                ("amount", &show(ad)),
-                                ("qty", &show(qd)),
-                                ("price", &show(pd)),
-                                ("want", &show(qd * pd)),
-                            ],
-                        ),
-                        Some(t.at(r.number, a)),
-                    ));
-                }
+                products.push(Product {
+                    row: r.number,
+                    cols: [q, p, a],
+                    nums: [qv, pv, av],
+                });
             }
         }
     }
+    // One way of reading each column, for all its totals and amounts
+    // together (1,250 is either 1.25 or 1250 – the same in every row of a
+    // column; another column may write its numbers otherwise): the reading
+    // under which the fewest are wrong.
+    let ways = readings(cols, &sums, &products);
+    checked += sums.len() + products.len();
+    for s in &sums {
+        let way = ways[s.col];
+        if s.right(way) {
+            continue;
+        }
+        wrong += 1;
+        let sum: f64 = s.parts[0].iter().map(|n| n.get(way)).sum();
+        out.push(find(
+            CheckArea::Numbers,
+            CheckLevel::Error,
+            msg(
+                "check.total_wrong",
+                &[
+                    ("what", &name_of(header, s.col)),
+                    ("shown", &show(s.total.get(way))),
+                    ("sum", &show(sum)),
+                ],
+            ),
+            Some(t.at(s.row, s.col)),
+        ));
+    }
+    for p in &products {
+        if p.right(&ways) {
+            continue;
+        }
+        wrong += 1;
+        let [q, pr, a] = p.cols;
+        let (qd, pd, ad) = (
+            p.nums[0].get(ways[q]),
+            p.nums[1].get(ways[pr]),
+            p.nums[2].get(ways[a]),
+        );
+        out.push(find(
+            CheckArea::Numbers,
+            CheckLevel::Error,
+            msg(
+                "check.product_wrong",
+                &[
+                    ("amount", &show(ad)),
+                    ("qty", &show(qd)),
+                    ("price", &show(pd)),
+                    ("want", &show(qd * pd)),
+                ],
+            ),
+            Some(t.at(p.row, a)),
+        ));
+    }
     (checked, wrong)
+}
+
+fn name_of(header: &[String], c: usize) -> String {
+    header
+        .get(c)
+        .filter(|h| !h.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| column_letter(c))
+}
+
+/// A total and what it may add up to (any one of `parts`).
+struct Sum {
+    row: u32,
+    col: usize,
+    total: Num,
+    parts: Vec<Vec<Num>>,
+}
+
+impl Sum {
+    fn right(&self, way: Way) -> bool {
+        self.parts
+            .iter()
+            .any(|p| close(p.iter().map(|n| n.get(way)).sum(), self.total.get(way)))
+    }
+}
+
+/// Quantity × price = amount in one row.
+struct Product {
+    row: u32,
+    /// Quantity, price, amount.
+    cols: [usize; 3],
+    nums: [Num; 3],
+}
+
+impl Product {
+    fn right(&self, ways: &[Way]) -> bool {
+        let g = |i: usize| self.nums[i].get(ways[self.cols[i]]);
+        close(g(0) * g(1), g(2))
+    }
+}
+
+/// The reading of each column under which the fewest totals and amounts
+/// are wrong – every combination for the columns that can be read two ways
+/// (up to eight of them; more: one column after the other while it helps).
+/// Ties: German first.
+fn readings(cols: usize, sums: &[Sum], products: &[Product]) -> Vec<Way> {
+    let two_ways = |c: usize| {
+        sums.iter().filter(|s| s.col == c).any(|s| {
+            matches!(s.total, Num::Either { .. })
+                || s.parts
+                    .iter()
+                    .flatten()
+                    .any(|n| matches!(n, Num::Either { .. }))
+        }) || products.iter().any(|p| {
+            p.cols
+                .iter()
+                .zip(p.nums)
+                .any(|(&pc, n)| pc == c && matches!(n, Num::Either { .. }))
+        })
+    };
+    let open: Vec<usize> = (0..cols).filter(|&c| two_ways(c)).collect();
+    let wrong = |ways: &[Way]| {
+        sums.iter().filter(|s| !s.right(ways[s.col])).count()
+            + products.iter().filter(|p| !p.right(ways)).count()
+    };
+    let mut best = vec![Way::De; cols];
+    if open.len() <= 8 {
+        let mut least = usize::MAX;
+        for bits in 0u32..(1 << open.len()) {
+            let mut ways = vec![Way::De; cols];
+            for (i, &c) in open.iter().enumerate() {
+                if bits & (1 << i) != 0 {
+                    ways[c] = Way::En;
+                }
+            }
+            let w = wrong(&ways);
+            if w < least {
+                least = w;
+                best = ways;
+            }
+        }
+        return best;
+    }
+    let mut least = wrong(&best);
+    loop {
+        let mut better = false;
+        for &c in &open {
+            let mut ways = best.clone();
+            ways[c] = Way::En;
+            if ways[c] != best[c] {
+                let w = wrong(&ways);
+                if w < least {
+                    least = w;
+                    best = ways;
+                    better = true;
+                }
+            }
+        }
+        if !better {
+            return best;
+        }
+    }
 }
 
 /// What kind of total a row is.
@@ -1355,7 +1617,7 @@ fn total_kind(r: &Row) -> Option<Total> {
         {
             Total::Sub
         } else if [
-            "gesamtsumme",
+            "gesamt",
             "endsumme",
             "grand total",
             "gesamtbetrag",
@@ -1555,7 +1817,7 @@ mod tests {
             ]
         );
         assert!(l.limits.contains(&Limit::NoFormatting));
-        let xml = r#"<w:document xmlns:w="w"><w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Menge</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Preis</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Betrag</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>2</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>5</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>11</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>"#;
+        let xml = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Menge</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Preis</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Betrag</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>2</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>5</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>11</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>"#;
         let blocks = word_blocks(xml).unwrap();
         assert_eq!(
             blocks,
@@ -1752,6 +2014,59 @@ mod tests {
     }
 
     #[test]
+    fn review_3_one_reading_per_column_for_totals_and_amounts_together() {
+        let n = |text: &str| errors(&csv(text, "")).len();
+        // 1,250 as 1.25 in one row and as 1250 in the next: no.
+        assert_eq!(
+            n("Quantity,Price,Amount\n2,\"1,250\",2.5\n2,\"1,250\",2500\nGrand total,,2502.5"),
+            1
+        );
+        // The amount as 1.25 for the product, as 1250 for the total: no.
+        assert_eq!(
+            n("Quantity,Price,Amount\n2,0.625,\"1,250\"\nGrand total,,1250"),
+            1
+        );
+        // Each column its own way: fine.
+        assert_eq!(n("Quantity,Price,Amount\n2,\"1,250\",2.500"), 0);
+        assert_eq!(
+            n("Item,Amount\nA,\"1,250\"\nB,\"2,500\"\nGrand total,\"3,750\""),
+            0
+        );
+    }
+
+    #[test]
+    fn review_3_every_total_is_checked_or_said_to_be_not() {
+        // "Gesamt" is of everything.
+        assert_eq!(
+            errors(&csv("Item,Amount\nA,10\nSubtotal,10\nB,20\nGesamt,20", "")).len(),
+            1
+        );
+        // A grand total over plain totals.
+        assert_eq!(
+            errors(&csv(
+                "Item,Amount\nA,10\nTotal,10\nB,20\nTotal,20\nGrand total,999",
+                ""
+            ))
+            .len(),
+            1
+        );
+        assert_eq!(
+            errors(&csv("Item,Amount\nTotal,10\nTotal,20\nGrand total,999", "")).len(),
+            1
+        );
+        // A total with no rows of its own: said.
+        let f = csv(
+            "Item,Amount\nA,10\nSubtotal,10\nSubtotal,999\nGrand total,10",
+            "",
+        );
+        assert!(
+            f.iter()
+                .any(|x| x.level == CheckLevel::Warning && x.place.as_deref() == Some("t.csv!B4")),
+            "{f:#?}"
+        );
+    }
+
+    #[test]
     fn review_2_a_total_label_anywhere_in_its_row() {
         let e = csv(
             "Nr,Datum,Notiz,Art,Betrag\n1,1.1.,x,A,10\n2,2.1.,y,B,20\n,,,Summe,40",
@@ -1788,6 +2103,17 @@ mod tests {
             ["Firma", "Betrag"]
         );
         assert!(!wanted("Without a total.").total);
+        // Review 3: a "not" before the name, or before the verb.
+        assert_eq!(
+            names("Spalten Datum und Betrag. Spalte Datum nicht entfernen."),
+            ["Datum", "Betrag"]
+        );
+        assert_eq!(
+            names("Spalten Datum und Betrag. Nicht die Spalte Datum entfernen."),
+            ["Datum", "Betrag"]
+        );
+        assert!(wanted("Keine Summe, sondern Gesamtsumme.").total);
+        assert!(!wanted("Keine Summe und keine Teilsummen.").total);
         // Columns are whole words: an "Update" column is no "Date" column.
         let e = csv("Name,Update\nA,x", "columns Name and Date");
         assert_eq!(errors(&e).len(), 1, "{e:#?}");
@@ -1851,37 +2177,94 @@ mod tests {
             }
             buf.into_inner()
         };
-        let doc = "<w:document xmlns:w=\"w\"><w:body><w:p><w:r><w:t>Test</w:t></w:r></w:p></w:body></w:document>";
-        let whole = [
+        const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        let types = |part: &str| {
+            format!(
+                r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/{part}" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#
+            )
+        };
+        let rels = |target: &str| {
+            format!(
+                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="{target}"/></Relationships>"#
+            )
+        };
+        let doc = |ns: &str| {
+            format!(
+                r#"<w:document xmlns:w="{ns}"><w:body><w:p><w:r><w:t>Test</w:t></w:r></w:p></w:body></w:document>"#
+            )
+        };
+        let (t, r, d) = (
+            types("word/document.xml"),
+            rels("word/document.xml"),
+            doc(W),
+        );
+        let ok = |parts: &[(&str, &str)]| layout("a.docx", &pack(parts)).is_ok();
+        assert!(ok(&[
+            ("[Content_Types].xml", &t),
+            ("_rels/.rels", &r),
+            ("word/document.xml", &d)
+        ]));
+        // Another place, as its relationship says.
+        let (t2, r2) = (types("word/main.xml"), rels("/word/main.xml"));
+        assert!(ok(&[
+            ("[Content_Types].xml", &t2),
+            ("_rels/.rels", &r2),
+            ("word/main.xml", &d)
+        ]));
+        // Without where the document starts.
+        assert!(!ok(&[
+            ("[Content_Types].xml", &t),
+            ("word/document.xml", &d)
+        ]));
+        // Package parts that are no XML, or not what they should be (review 3).
+        assert!(!ok(&[
+            ("[Content_Types].xml", "garbage"),
+            ("_rels/.rels", "garbage"),
+            ("word/document.xml", &d)
+        ]));
+        assert!(!ok(&[
             ("[Content_Types].xml", "<Types/>"),
             ("_rels/.rels", "<Relationships/>"),
-            ("word/document.xml", doc),
-        ];
-        assert!(layout("a.docx", &pack(&whole)).is_ok());
-        // Without where the document starts.
-        assert!(layout("a.docx", &pack(&[whole[0], whole[2]])).is_err());
-        // Two roots, or a root that is no document.
-        let two = format!("{doc}{doc}");
-        assert!(
-            layout(
-                "a.docx",
-                &pack(&[whole[0], whole[1], ("word/document.xml", &two)])
-            )
-            .is_err()
-        );
-        let other = [
-            whole[0],
-            whole[1],
-            ("word/document.xml", "<w:body xmlns:w=\"w\"></w:body>"),
-        ];
-        assert!(layout("a.docx", &pack(&other)).is_err());
-        assert!(
-            layout(
-                "a.docx",
-                &pack(&[whole[0], whole[1], ("word/document.xml", "")])
-            )
-            .is_err()
-        );
+            ("word/document.xml", &d)
+        ]));
+        // Starting at a part that is not there – another one beside it does not count.
+        let (t3, r3) = (types("missing.xml"), rels("missing.xml"));
+        assert!(!ok(&[
+            ("[Content_Types].xml", &t3),
+            ("_rels/.rels", &r3),
+            ("word/document.xml", &d)
+        ]));
+        // The document of the wrong kind or in another namespace.
+        let plain = t.replace("officedocument.wordprocessingml.document.main+xml", "plain");
+        assert!(!ok(&[
+            ("[Content_Types].xml", &plain),
+            ("_rels/.rels", &r),
+            ("word/document.xml", &d)
+        ]));
+        let alien = doc("urn:alien");
+        assert!(!ok(&[
+            ("[Content_Types].xml", &t),
+            ("_rels/.rels", &r),
+            ("word/document.xml", &alien)
+        ]));
+        // Two roots, a root that is no document, nothing.
+        let two = format!("{d}{d}");
+        assert!(!ok(&[
+            ("[Content_Types].xml", &t),
+            ("_rels/.rels", &r),
+            ("word/document.xml", &two)
+        ]));
+        let body = format!(r#"<w:body xmlns:w="{W}"></w:body>"#);
+        assert!(!ok(&[
+            ("[Content_Types].xml", &t),
+            ("_rels/.rels", &r),
+            ("word/document.xml", &body)
+        ]));
+        assert!(!ok(&[
+            ("[Content_Types].xml", &t),
+            ("_rels/.rels", &r),
+            ("word/document.xml", "")
+        ]));
     }
 
     #[test]

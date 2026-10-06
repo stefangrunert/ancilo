@@ -739,6 +739,16 @@ struct ReadArgs {
     from_char: Option<usize>,
 }
 
+/// The first line to read (0-based): `from_line` counts from 1, a negative
+/// one from the end.
+fn start_line(from_line: Option<i64>, total: usize) -> usize {
+    match from_line {
+        Some(n) if n < 0 => total.saturating_sub(n.unsigned_abs() as usize),
+        Some(n) => (n.max(1) as usize - 1).min(total),
+        None => 0,
+    }
+}
+
 /// Runs `read_result`: (text, is_error).
 pub fn read(store: &ResultStore, args: &Value) -> (String, bool) {
     let a: ReadArgs = match serde_json::from_value(args.clone()) {
@@ -775,8 +785,12 @@ pub fn read(store: &ResultStore, args: &Value) -> (String, bool) {
             .case_insensitive(true)
             .build()
             .expect("an escaped query");
-        // From a line on (paging through many hits).
-        let from = a.from_line.filter(|n| *n > 0).map_or(0, |n| n as usize - 1);
+        // From a line on (paging through many hits; negative: from the
+        // end), at most `lines` hits.
+        let from = start_line(a.from_line, total);
+        let most = a
+            .lines
+            .map_or(READ_MAX_LINES, |n| n.clamp(1, READ_MAX_LINES));
         let hits: Vec<(usize, &str)> = lines
             .iter()
             .enumerate()
@@ -790,7 +804,7 @@ pub fn read(store: &ResultStore, args: &Value) -> (String, bool) {
         ));
         for (shown, (i, l)) in hits.iter().filter(|(i, _)| *i >= from).enumerate() {
             let row = format!("{:>6}\t{}\n", i + 1, around(l, Some(&find)));
-            if shown >= READ_MAX_LINES || chars(&out) + chars(&row) > room {
+            if shown >= most || chars(&out) + chars(&row) > room {
                 out.push_str(&format!(
                     "… more – query with from_line {} for the next ones\n",
                     i + 1
@@ -802,11 +816,7 @@ pub fn read(store: &ResultStore, args: &Value) -> (String, bool) {
         return (out, false);
     }
     let count = a.lines.unwrap_or(READ_LINES).clamp(1, READ_MAX_LINES);
-    let start = match a.from_line {
-        Some(n) if n < 0 => total.saturating_sub(n.unsigned_abs() as usize),
-        Some(n) => (n.max(1) as usize - 1).min(total),
-        None => 0,
-    };
+    let start = start_line(a.from_line, total);
     let end = (start + count).min(total);
     out.push_str(&format!("{label} lines {}–{end}\n", start + 1));
     for (i, l) in lines[start..end].iter().enumerate() {
@@ -1186,6 +1196,21 @@ mod tests {
             next.contains("   401\thit 400") && !next.contains("hit 399\n"),
             "{}",
             &next[..200]
+        );
+        // At most `lines` hits; a negative start counts from the end
+        // (review 3, 37).
+        let (one, _) = read(&store, &json!({"id": "r3", "query": "hit", "lines": 1}));
+        assert!(
+            one.contains("     1\thit 0") && !one.contains("hit 1\n"),
+            "{one}"
+        );
+        let (last, _) = read(
+            &store,
+            &json!({"id": "r3", "query": "hit", "from_line": -2}),
+        );
+        assert!(
+            last.contains("   499\thit 498") && !last.contains("hit 497\n"),
+            "{last}"
         );
         let many: String = (0..2000)
             .map(|i| format!("{i} {}\n", "x".repeat(400)))

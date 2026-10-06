@@ -380,6 +380,9 @@ pub enum Now {
     Changed,
     /// No longer there (removed, or the conversation's attachment deleted).
     Gone,
+    /// Not known whether it changed (a source from before files were
+    /// hashed, the document not read again yet).
+    Unknown,
 }
 
 /// A mark opened: the passage as the answer had it, how its document stands
@@ -402,6 +405,28 @@ pub fn changed(e: &Evidence) -> Opened {
     Opened {
         evidence: e.clone(),
         now: Now::Changed,
+        before: None,
+        after: None,
+    }
+}
+
+/// A source whose file is the very one the answer had (by its hash): the
+/// same, the passage alone.
+pub fn same(e: &Evidence) -> Opened {
+    Opened {
+        evidence: e.clone(),
+        now: Now::Same,
+        before: None,
+        after: None,
+    }
+}
+
+/// A source whose document cannot be compared now: the passage as the
+/// answer had it, nothing said about now.
+pub fn unknown(e: &Evidence) -> Opened {
+    Opened {
+        evidence: e.clone(),
+        now: Now::Unknown,
         before: None,
         after: None,
     }
