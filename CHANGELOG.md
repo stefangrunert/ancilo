@@ -2,7 +2,7 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 0.5.0 – 2026-10-06
 
 - **Sources you can open**: an answer from your documents puts a small numbered mark after what it took from them – a click shows the very passage the answer had, with file, page or sheet and the text around it. Ancilo numbers the passages and checks the marks: a source the AI made up is taken out, and the answer says so. If the file changed since, the source says that too and still shows what the answer had.
 - **Look at a task's results before keeping them**: tables and Word documents a task wrote are checked – does the file open, is what you asked for there (the columns you named, a total), do the totals and amounts add up – and *Look at it* shows the file with its rows and columns, a wrong cell marked. A *problem* is only what is sure; what Ancilo can only suppose (an empty cell, a total in the text that differs) is a *note* and never blocks a good file. *Keep* and *Save* take exactly the version you saw; if the task changed it since, Ancilo checks again first. The checks say what they cannot do: whether the content is right.
