@@ -4,7 +4,9 @@
 //! Sources: AnythingLLM `server/utils/TextSplitter/index.js` (Mintplex-Labs/
 //! anything-llm `ead123f07befc7167d05f160dade56aed5fa7c10`, MIT, © Mintplex
 //! Labs Inc.) wraps `@langchain/textsplitters` 0.0.0 (`dist/text_splitter.js`,
-//! npm integrity `sha512-3hPesWom…`, MIT, © 2023 LangChain). Ported:
+//! npm integrity
+//! `sha512-3hPesWomnmVeYMppEGYbyv0v/sRUugUdlFBNn9m1ueJYHAIKbvCErkWxNUH3guyKKYgJVrkvZoQxcd9faucSaw==`,
+//! MIT, © 2023 LangChain). Ported:
 //! `splitOnSeparator`, `mergeSplits`, `joinDocs`, `_splitText` and the line
 //! counting of `createDocuments`; AnythingLLM's defaults (1000 characters,
 //! 20 overlap) and its idea of a metadata header on every chunk (here: the

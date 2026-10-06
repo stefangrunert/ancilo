@@ -22,7 +22,7 @@ On its own the port did **worse** than Ancilo before on lists and documents (it 
 
 | | |
 |---|---|
-| Source | [Mintplex-Labs/anything-llm](https://github.com/Mintplex-Labs/anything-llm) at `ead123f07befc7167d05f160dade56aed5fa7c10`: `server/utils/TextSplitter/index.js`, which wraps `@langchain/textsplitters` 0.0.0 (`RecursiveCharacterTextSplitter`, npm integrity `sha512-3hPesWom…Saw==`, as pinned in AnythingLLM's `yarn.lock`) |
+| Source | [Mintplex-Labs/anything-llm](https://github.com/Mintplex-Labs/anything-llm) at `ead123f07befc7167d05f160dade56aed5fa7c10`: `server/utils/TextSplitter/index.js`, which wraps `@langchain/textsplitters` 0.0.0 (`RecursiveCharacterTextSplitter`, npm integrity `sha512-3hPesWomnmVeYMppEGYbyv0v/sRUugUdlFBNn9m1ueJYHAIKbvCErkWxNUH3guyKKYgJVrkvZoQxcd9faucSaw==`, as pinned in AnythingLLM's `yarn.lock`) |
 | License | MIT, © Mintplex Labs Inc.; MIT, © 2023 LangChain |
 | In Ancilo | [`crates/docs/src/split.rs`](../crates/docs/src/split.rs) – the splitter with its line counting; identical to LangChain's output on 28 runs (`evals/fpl01/run-langchain.mjs`) |
 | Used? | **No.** Measured against Ancilo's own passages (`crates/docs/tests/fpl01.rs`) on a development set and two independent sets: at the same passage size it chose no better; AnythingLLM's document name on every passage helped where a question named a sheet or folder and hurt where several files looked alike. A variant that weighs the names separately was refuted by an independent set. Ancilo keeps choosing passages as before; the port stays for measuring later versions. |
