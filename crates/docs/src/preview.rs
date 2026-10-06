@@ -1812,6 +1812,35 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
                 col_totals.push(total);
                 after_sub[c] = ri + 1;
             }
+            // A total beside its column (found live: "Summe" under the
+            // amounts, its number one column on, where nothing else is): it
+            // adds up the amounts beside it – checked against them, and its
+            // place said.
+            let beside = (c > 0 && value(r, c - 1).is_none() && data(first).is_empty())
+                .then(|| {
+                    t.rows[seg_from..ri]
+                        .iter()
+                        .filter(|x| total_kind(x).is_none())
+                        .filter_map(|x| value(x, c - 1))
+                        .collect::<Vec<Num>>()
+                })
+                .filter(|v| !v.is_empty());
+            if let Some(amounts) = beside {
+                out.push(find(
+                    CheckArea::Numbers,
+                    CheckLevel::Warning,
+                    msg("check.total_beside", &[("what", &name_of(header, c - 1))]),
+                    Some(t.at(r.number, c)),
+                ));
+                sums.push(Sum {
+                    row: r.number,
+                    col: c - 1,
+                    at: c,
+                    total,
+                    parts: vec![amounts],
+                });
+                continue;
+            }
             if parts.is_empty() {
                 // Nothing above it to add up (a total right after a total):
                 // said, not passed over.
@@ -1826,6 +1855,7 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
             sums.push(Sum {
                 row: r.number,
                 col: c,
+                at: c,
                 total,
                 parts,
             });
@@ -1873,7 +1903,7 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
                     ("sum", &show(sum)),
                 ],
             ),
-            Some(t.at(s.row, s.col)),
+            Some(t.at(s.row, s.at)),
         ));
     }
     for p in &products {
@@ -1996,7 +2026,10 @@ fn name_of(header: &[String], c: usize) -> String {
 /// A total and what it may add up to (any one of `parts`).
 struct Sum {
     row: u32,
+    /// The column it adds up …
     col: usize,
+    /// … and the one it stands in.
+    at: usize,
     total: Num,
     parts: Vec<Vec<Num>>,
 }
@@ -2781,6 +2814,24 @@ mod tests {
         assert_eq!(
             required("Create estimate.docx with heading Estimate and a table Service, Hours."),
             ["Estimate"]
+        );
+        // A total one column beside its amounts (found live, in Excel).
+        let beside = |total: &str| {
+            let x = sheet(&[
+                &["Firma", "Datum", "Betrag"],
+                &["A", "1.1.", "10"],
+                &["B", "2.1.", "20"],
+                &["", "", "Summe", total],
+            ]);
+            check(&layout("r.xlsx", &x).unwrap(), "")
+        };
+        let f = beside("999");
+        assert_eq!(errors(&f).len(), 1, "{f:#?}");
+        assert_eq!(errors(&f)[0].place.as_deref(), Some("Rechnungen!D4"));
+        let f = beside("30");
+        assert!(
+            errors(&f).is_empty() && f.iter().any(|x| x.level == CheckLevel::Warning),
+            "{f:#?}"
         );
         // Hours × rate.
         assert_eq!(

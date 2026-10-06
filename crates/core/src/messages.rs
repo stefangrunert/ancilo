@@ -168,6 +168,10 @@ pub const MESSAGES: &[(&str, &str)] = &[
         "the total of “{what}” says {shown}, but the rows above add up to {sum}",
     ),
     (
+        "check.total_beside",
+        "the total stands beside “{what}”, not under it – checked against that column",
+    ),
+    (
         "check.total_alone",
         "a total of “{what}” has no rows of its own above it – not checked",
     ),
