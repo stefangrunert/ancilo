@@ -189,7 +189,13 @@ pub fn shorten(meta: &Meta, text: &str, budget: usize) -> String {
         }
         Shape::Text => text_body(text, room),
     };
-    format!("{label}\n{body}")
+    // Never over the budget, whatever the parts added up to (what comes
+    // first is what matters most).
+    let out = format!("{label}\n{body}");
+    if chars(&out) > budget {
+        return head(&out, budget).to_string();
+    }
+    out
 }
 
 /// The text of a result shortened before, without what that cut put on
@@ -271,7 +277,24 @@ fn text_body(text: &str, room: usize) -> String {
     // Each gap costs a "…" line; the end a marker.
     let mut avail = room.saturating_sub(chars(&end) + 15);
     let mut picked = std::collections::BTreeSet::new();
-    for i in odd.into_iter().chain(0..body.len()) {
+    // An odd section of a configuration (`[delivery.default]`) brings its
+    // lines – the values that make it odd.
+    let heads = |i: usize| {
+        let l = body[i].trim();
+        l.starts_with('[') && l.ends_with(']')
+    };
+    let mut order: Vec<usize> = Vec::new();
+    for &i in &odd {
+        order.push(i);
+        if heads(i) {
+            order.extend(
+                (i + 1..body.len())
+                    .take(6)
+                    .take_while(|&j| !body[j].trim().is_empty() && !heads(j)),
+            );
+        }
+    }
+    for i in order.into_iter().chain(0..body.len()) {
         let cost = chars(body[i]) + 3;
         if picked.contains(&i) || cost > avail {
             continue;
@@ -302,6 +325,11 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
     if all.is_empty() {
         return String::new();
     }
+    // How often each kind of line repeats (filler or not).
+    let mut common: HashMap<u64, usize> = HashMap::new();
+    for l in &all {
+        *common.entry(pattern_of(l)).or_default() += 1;
+    }
     // A small room: the findings before the counts and the long end.
     let small = room < 300;
     let mut out = String::new();
@@ -331,6 +359,16 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
         {
             out.push_str(&format!("  {}\n", squeeze(plain(next), 200)));
             shown.push(f + 1);
+            // And the other side of a diagnosis (`Expected:` / `Received:`).
+            if is_diagnosis(next)
+                && let Some(more) = all
+                    .get(f + 2)
+                    .filter(|l| is_diagnosis(l) && !is_key_line(l))
+                && f + 2 < all.len() - 1
+            {
+                out.push_str(&format!("  {}\n", squeeze(plain(more), 200)));
+                shown.push(f + 2);
+            }
         }
     }
     // The end: half the room – in a small one only the last line (the
@@ -345,7 +383,7 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
     // little: its last lines only, the room goes to the findings.
     let end_room = {
         let mut size = 0;
-        let mut alike: HashMap<String, usize> = HashMap::new();
+        let mut alike: HashMap<u64, usize> = HashMap::new();
         let mut n = 0;
         for l in all.iter().rev() {
             size += chars(l) + 1;
@@ -403,11 +441,13 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
         .copied()
         .filter(|&i| kinds.insert(kind(i)))
         .collect();
+    let mut in_order: std::collections::HashSet<usize> = order.iter().copied().collect();
     let rest: Vec<usize> = keys
         .iter()
         .copied()
-        .filter(|i| !order.contains(i))
+        .filter(|i| !in_order.contains(i))
         .collect();
+    in_order.extend(rest.iter().copied());
     let (mut a, mut b) = (0usize, rest.len());
     while a < b {
         order.push(rest[a]);
@@ -419,21 +459,65 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
     }
     // Odd lines right after a finding first (its `Expected:`), then the
     // others.
-    let near = |i: usize| keys.iter().any(|&k| k < i && i <= k + 6);
+    let mut after_key = vec![false; all.len()];
+    for &k in &keys {
+        for slot in after_key
+            .iter_mut()
+            .take((k + 7).min(all.len()))
+            .skip(k + 1)
+        {
+            *slot = true;
+        }
+    }
+    let near = |i: usize| after_key[i];
+    // A run's summary before the other odd lines (`Tests run: 84, …,
+    // Skipped: 2` in the middle of a build).
+    static SUMMARY: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(tests? run|passed|skipped|warnings?|deselected|xfailed)\b.*\d|\d+ (tests?|passed|skipped)\b")
+            .expect("valid")
+    });
+    // A warning in a run that went through: what to look at.
+    let warnings: Vec<usize> = (0..tail_from)
+        .filter(|&i| {
+            WARNING.is_match(all[i])
+                && !keys_set.contains(&i)
+                && !shown.contains(&i)
+                && !in_order.contains(&i)
+                && common.get(&pattern_of(all[i])).copied().unwrap_or(0) < 3
+        })
+        .collect();
+    in_order.extend(warnings.iter().copied());
+    order.extend(warnings);
+    let summaries: Vec<usize> = (0..tail_from)
+        .filter(|&i| {
+            SUMMARY.is_match(all[i])
+                && !keys_set.contains(&i)
+                && !shown.contains(&i)
+                && !in_order.contains(&i)
+                && common.get(&pattern_of(all[i])).copied().unwrap_or(0) < 3
+        })
+        .collect();
+    in_order.extend(summaries.iter().copied());
+    order.extend(summaries);
     order.extend(rare.iter().copied().filter(|&i| near(i)));
     order.extend(rare.iter().copied().filter(|&i| !near(i)));
     let room_for_findings = room.saturating_sub(chars(&out) + end_room.min(room / 2) + 1);
     // A finding's line: longer where there is room (a long response with
     // its reason in the middle).
     let line_cap = (room_for_findings / 2).clamp(200, 400);
-    let mut common: HashMap<String, usize> = HashMap::new();
-    for l in &all {
-        *common.entry(pattern_of(l)).or_default() += 1;
-    }
     let mut picked: std::collections::BTreeMap<usize, String> = Default::default();
     let mut used = 0;
     let mut left_out = 0;
+    let total_keys = keys_set.len();
+    let mut seen_keys = 0;
     for i in order {
+        // Full: the rest of the findings are counted, not tried one by one
+        // (a log of thousands of failures).
+        if room_for_findings.saturating_sub(used) < 24 {
+            left_out += total_keys.saturating_sub(seen_keys);
+            break;
+        }
+        seen_keys += usize::from(keys_set.contains(&i));
         // The detail after a finding (not one of the findings itself, nor
         // a line like many others): its next line – and the one after when
         // both are short (`left:` and `right:`, `Expected:` and `Received:`).
@@ -444,15 +528,47 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
                 && !shown.contains(&j)
                 && !distinct_shown(&shown, &all, j)
                 && !is_marker(all[j])
-                && common.get(&pattern_of(all[j])).copied().unwrap_or(0) < 3
+                && (common.get(&pattern_of(all[j])).copied().unwrap_or(0) < 3
+                    || is_diagnosis(all[j]))
         };
-        let mut entry = vec![(i, format!("! {}", squeeze(plain(all[i]), line_cap)))];
+        // A finding with what explains it: the line before it when that
+        // one is its own (`Applying 20260922_unique_ref`), the line after
+        // it, and the diagnosis a few lines on (`^^^ expected …, found …`,
+        // `E   assert 6 == 7`).
+        let mut entry = Vec::new();
+        if keys_set.contains(&i)
+            && i > 0
+            && !shown.contains(&(i - 1))
+            && !keys_set.contains(&(i - 1))
+            && !is_marker(all[i - 1])
+            && common.get(&pattern_of(all[i - 1])).copied().unwrap_or(0) < 3
+        {
+            entry.push((i - 1, format!("  {}", squeeze(plain(all[i - 1]), 200))));
+        }
+        entry.push((i, format!("! {}", squeeze(plain(all[i]), line_cap))));
+        let mut more = Vec::new();
         if detail(i + 1) {
-            entry.push((i + 1, format!("  {}", squeeze(plain(all[i + 1]), 200))));
+            more.push((i + 1, format!("  {}", squeeze(plain(all[i + 1]), 200))));
             if detail(i + 2) && chars(plain(all[i + 1])) <= 100 && chars(plain(all[i + 2])) <= 100 {
-                entry.push((i + 2, format!("  {}", plain(all[i + 2]))));
+                more.push((i + 2, format!("  {}", plain(all[i + 2]))));
             }
         }
+        for (j, line) in all
+            .iter()
+            .enumerate()
+            .take((i + 11).min(tail_from))
+            .skip(i + 1)
+        {
+            if more.len() >= 5 {
+                break;
+            }
+            if is_diagnosis(line) && detail(j) && !more.iter().any(|(k, _)| *k == j) {
+                more.push((j, format!("  {}", squeeze(plain(line), 200))));
+            }
+        }
+        // Diagnoses first: they are what is dropped last.
+        more.sort_by_key(|(j, _)| (!is_diagnosis(all[*j]), *j));
+        entry.extend(more);
         if picked.contains_key(&i) {
             continue;
         }
@@ -542,10 +658,34 @@ fn squeeze(line: &str, cap: usize) -> String {
     let back = cap - front - 3;
     // A finding word between start and end (`"error":"RATE_LIMIT"` in a
     // long response): the start, the words around it, the end.
-    let middle = KEY_WORD.find_iter(line).find_map(|m| {
-        let at = line[..m.start()].chars().count();
-        (at > front && at + 20 < n - back / 2).then_some(at)
-    });
+    // The strongest one: shouted (`ERROR`) over spoken, never one that
+    // says there is none (`error: none`).
+    let middle = KEY_WORD
+        .find_iter(line)
+        .filter_map(|m| {
+            let at = line[..m.start()].chars().count();
+            (at > front && at + 20 < n - back / 2).then_some((m, at))
+        })
+        .map(|(m, at)| {
+            let word = m.as_str();
+            let after: String = line[m.end()..]
+                .chars()
+                .take(12)
+                .collect::<String>()
+                .to_lowercase();
+            let none = ["none", "null", "0", "false", "ok", "no"].iter().any(|x| {
+                after
+                    .trim_start_matches([':', '=', ' ', '"'])
+                    .starts_with(x)
+            });
+            let loud = word
+                .chars()
+                .filter(|c| c.is_alphabetic())
+                .all(char::is_uppercase);
+            (i32::from(loud) * 2 - i32::from(none) * 3, at)
+        })
+        .max_by_key(|&(score, at)| (score, std::cmp::Reverse(at)))
+        .map(|(_, at)| at);
     if let Some(at) = middle {
         // Most of the room to what is around the finding word.
         let (f, b) = (cap / 6, cap / 6);
@@ -569,9 +709,47 @@ fn is_marker(line: &str) -> bool {
     l == "…" || l.starts_with("… [") || l.starts_with("… ") && l.ends_with("more such lines")
 }
 
+/// A line of a diagnosis (`Expected: 10`, `right: Err(…)`, pytest's `E`):
+/// detail, however often its like appears.
+fn is_diagnosis(line: &str) -> bool {
+    static DIAG: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)^\s*(expected|received|actual|got|want(ed)?|left|right|assert(ion)?|caused by|E\s{2,}|-->|note:)|\bexpected\b.*\bfound\b|^\s*\d*\s*\|\s*\^|^\S+:\d+:\s*\w*error")
+            .expect("valid")
+    });
+    DIAG.is_match(plain(line))
+}
+
+/// The numbers of a line, as they stand (scanned, no regex: a large log
+/// has tens of thousands of lines).
+fn numbers_in(line: &str) -> Vec<&str> {
+    let l = plain(line);
+    let mut out = Vec::new();
+    let mut start = None;
+    for (i, c) in l.char_indices() {
+        match (c.is_ascii_digit(), start) {
+            (true, None) => start = Some(i),
+            (false, Some(st)) => {
+                out.push(&l[st..i]);
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(st) = start {
+        out.push(&l[st..]);
+    }
+    out
+}
+
 /// A line with its digits left out: lines alike but for a counter share it.
-fn pattern_of(l: &str) -> String {
-    plain(l).chars().filter(|c| !c.is_ascii_digit()).collect()
+fn pattern_of(l: &str) -> u64 {
+    // FNV-1a over the bytes but digits: no string made per line.
+    plain(l)
+        .bytes()
+        .filter(|b| !b.is_ascii_digit())
+        .fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        })
 }
 
 /// In a log of repeated lines (`check_0001 ... ok` a thousand times), the
@@ -581,21 +759,56 @@ fn pattern_of(l: &str) -> String {
 fn off_pattern(lines: &[&str], skip: &[usize]) -> Vec<usize> {
     let skip: std::collections::HashSet<&usize> = skip.iter().collect();
     let pattern = pattern_of;
-    let mut count: HashMap<String, usize> = HashMap::new();
-    for l in lines {
-        *count.entry(pattern(l)).or_default() += 1;
+    let patterns: Vec<u64> = lines.iter().map(|l| pattern(l)).collect();
+    let mut count: HashMap<u64, usize> = HashMap::new();
+    for &p in &patterns {
+        *count.entry(p).or_default() += 1;
     }
-    let most = count.values().copied().max().unwrap_or(0);
-    // Repetitive enough to tell the odd ones out.
-    if lines.len() < 20 || most * 3 < lines.len() {
+    // Repetitive enough to tell the odd ones out: most lines repeat a
+    // pattern (one, or the fields of a block repeated – `carrier = …`,
+    // `zone = …` sixty times).
+    let covered: usize = count.values().filter(|&&n| n >= 5).sum();
+    if lines.len() < 20 || covered * 3 < lines.len() * 2 {
         return Vec::new();
     }
-    lines
+    let mut odd: Vec<usize> = lines
         .iter()
         .enumerate()
-        .filter(|(i, l)| !skip.contains(i) && !is_marker(l) && count[&pattern(l)] == 1)
+        .filter(|(i, l)| !skip.contains(i) && !is_marker(l) && count[&patterns[*i]] == 1)
         .map(|(i, _)| i)
-        .collect()
+        .collect();
+    // Alike but for a value most of them share (`timeout_ms = 0` among
+    // `timeout_ms = 30000`): a counter differs in every line, a value in few.
+    let numbers = numbers_in;
+    let mut groups: HashMap<u64, Vec<usize>> = HashMap::new();
+    for (i, &p) in patterns.iter().enumerate() {
+        groups.entry(p).or_default().push(i);
+    }
+    for members in groups.values().filter(|m| m.len() >= 20) {
+        let values: Vec<Vec<&str>> = members.iter().map(|&i| numbers(lines[i])).collect();
+        let width = values.iter().map(Vec::len).min().unwrap_or(0);
+        for k in 0..width {
+            let mut seen: HashMap<&str, usize> = HashMap::new();
+            for v in &values {
+                *seen.entry(v[k]).or_default() += 1;
+            }
+            let Some((&top, &n)) = seen.iter().max_by_key(|(_, n)| **n) else {
+                continue;
+            };
+            if n * 10 >= members.len() * 8 && n < members.len() {
+                odd.extend(
+                    members
+                        .iter()
+                        .zip(&values)
+                        .filter(|(i, v)| v[k] != top && !skip.contains(i))
+                        .map(|(&i, _)| i),
+                );
+            }
+        }
+    }
+    odd.sort_unstable();
+    odd.dedup();
+    odd
 }
 
 /// A line that names an error or a failure (the port's markers, and the
@@ -604,12 +817,18 @@ fn is_key_line(line: &str) -> bool {
     KEY_WORD.is_match(line)
 }
 
+/// A warning (not a failure).
+static WARNING: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?i)(?-u:\b)(warning|warn|deprecated|warnung|veraltet)(?-u:\b)")
+        .expect("valid")
+});
+
 /// The words of a finding.
 static KEY_WORD: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
         // ASCII word boundaries: the words are ASCII, and Unicode ones
         // would make the scan of a large log ten times slower.
-        r"(?i)error:|failed:|traceback \(most recent call last\)|assertionerror|exception:|(?-u:\b)(panicked|error|exception|fail|failed|rejected|denied|aborted|fehler|fehlgeschlagen|abgelehnt)(?-u:\b)",
+        r"(?i)error:|failed:|traceback \(most recent call last\)|assertionerror|exception:|http/[0-9.]+ [45][0-9][0-9]|(?-u:\b)(panicked|error|exception|fail|failed|rejected|denied|aborted|fehler|fehlgeschlagen|abgelehnt)(?-u:\b)",
     )
     .expect("valid")
 });
@@ -1028,6 +1247,61 @@ mod tests {
         l.push(format!("== {} passed, 1 failed ==", n - 1));
         l.push("[exit code 1]".into());
         l.join("\n")
+    }
+
+    // covers: FPL-02 (review 4)
+    #[test]
+    fn review_4_values_details_signals_and_the_budget() {
+        // A value that differs (not a counter) is an odd line (44).
+        let list: String = (0..500)
+            .map(|i| {
+                let v = if i == 251 { 0 } else { 30000 };
+                format!("config_{i:04}: timeout_ms = {v}\n")
+            })
+            .collect();
+        for budget in [600, 1000] {
+            let s = shorten(&meta("grep", false, Some("r1")), &list, budget);
+            assert!(s.contains("config_0251: timeout_ms = 0\n"), "{s}");
+        }
+        // Repeated diagnoses are details, not filler (45).
+        let mut log = String::new();
+        for n in 1..=5 {
+            log.push_str(&format!(
+                "FAILED test_{n}\nExpected: {}\nReceived: {}\n",
+                n * 10,
+                n * 10 + 1
+            ));
+        }
+        log.push_str(
+            &(0..300)
+                .map(|i| format!("cleanup shard={i:04} removed\n"))
+                .collect::<String>(),
+        );
+        log.push_str("exit status 1\n");
+        let s = shorten(&meta("bash", true, Some("r2")), &log, 1000);
+        assert!(
+            s.contains("Expected: 10") && s.contains("Received: 11"),
+            "{s}"
+        );
+        // The finding that is one, not the status that says there is none (46).
+        let line = format!(
+            "response: {} error: none {} ERROR code RATE_LIMIT retry_after=60 {}\n",
+            "x".repeat(700),
+            "y".repeat(1500),
+            "z".repeat(1000)
+        );
+        let log = format!(
+            "run checks\n{line}{}exit status 1\n",
+            "cleanup ok\n".repeat(300)
+        );
+        let s = shorten(&meta("bash", true, Some("r3")), &log, 1000);
+        assert!(s.contains("RATE_LIMIT retry_after=60"), "{s}");
+        // Never over the budget (48).
+        let mut grep: String = (0..100)
+            .map(|i| format!("src/workers/job_{i:03}.rs:48: timeout_ms = 30000\n"))
+            .collect();
+        grep.push_str("src/router.rs:214: timeout_ms = 0 // disables deadline\nsrc/router.rs:215: retries = 0\n");
+        assert!(chars(&shorten(&meta("grep", false, Some("r4")), &grep, 150)) <= 150);
     }
 
     // covers: FPL-02 (round 3 of the held-out cases)

@@ -172,13 +172,17 @@ fn holds(c: &Case, req: &str, p: &Passage) -> bool {
         })
 }
 
-/// The characters a passage costs as the model gets it: its text and its
-/// head – mark, document, page or sheet (`evidence::for_model`; review 3,
-/// finding 18: passages of other sizes cost other heads).
-fn delivered(p: &Passage) -> usize {
+/// The characters the `n`-th passage costs as the model gets it: its text,
+/// its head – mark, document, page or sheet – and the blank line before it
+/// (`evidence::for_model`; review 3/4, finding 18: passages of other sizes
+/// cost other heads). "passed (12 000)" stays the product's own budget of
+/// passage text (`select`), heads on top.
+fn delivered(p: &Passage, n: usize) -> usize {
     let src = ancilo_docs::source(&p.document, p.at.as_ref());
     let src = src.trim_start_matches('[').trim_end_matches(']');
-    p.text.chars().count() + "[D1] ".len() + src.chars().count() + "\n".len() + "\n\n".len()
+    let mark = format!("[D{n}] ");
+    let between = if n > 1 { "\n\n".len() } else { 0 };
+    between + mark.len() + src.chars().count() + "\n".len() + p.text.chars().count()
 }
 
 /// How many characters (as delivered, heads included) of the best-ranked
@@ -191,7 +195,7 @@ fn chars_to_hit(c: &Case, ranked: &[(usize, Passage)]) -> Option<usize> {
         let mut taken: Vec<Passage> = Vec::new();
         let mut hit = None;
         for (_, p) in ranked {
-            used += delivered(p);
+            used += delivered(p, taken.len() + 1);
             taken.push(p.clone());
             if holds(c, req, p) || joined(c, &taken).iter().any(|j| holds(c, req, j)) {
                 hit = Some(used);

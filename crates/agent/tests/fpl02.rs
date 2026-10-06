@@ -150,8 +150,20 @@ fn misses(c: &Case, text: &str) -> Vec<String> {
             .filter(|k| text.contains(k.as_str()))
             .map(|k| format!("kept {k:?}")),
     );
+    // What the text starts with: after Ancilo's own label, unless the case
+    // asks for the label itself.
+    let content = match text.split_once('\n') {
+        Some((first, rest))
+            if first.starts_with('[')
+                && first.contains("shortened from")
+                && !c.starts_with.as_deref().is_some_and(|s| s.starts_with('[')) =>
+        {
+            rest
+        }
+        _ => text,
+    };
     if let Some(s) = &c.starts_with
-        && !text.starts_with(s.as_str())
+        && !content.starts_with(s.as_str())
     {
         m.push(format!("does not start with {s:?}"));
     }

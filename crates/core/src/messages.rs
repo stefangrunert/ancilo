@@ -172,16 +172,20 @@ pub const MESSAGES: &[(&str, &str)] = &[
         "a total of “{what}” has no rows of its own above it – not checked",
     ),
     (
+        "check.maybe_missing",
+        "the task names {what} – not found in the file; please look whether it is needed",
+    ),
+    (
         "check.mixed_formats",
-        "“{what}” writes its numbers two ways ({a} and {b}) – one of them is read wrong",
+        "“{what}” writes its numbers two ways ({a} and {b}) – another program may read one of them otherwise",
     ),
     (
         "check.text_total",
-        "the text says the total is {shown}, but the table adds up to {sum}",
+        "the text names a total of {shown}, the table adds up to {sum} – please look whether they mean the same",
     ),
     (
         "check.missing_value",
-        "“{what}” is empty in a row that has the rest",
+        "“{what}” is empty in a row that has the rest – please look whether that is meant",
     ),
     (
         "check.product_wrong",
