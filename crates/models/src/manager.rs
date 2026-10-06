@@ -357,6 +357,10 @@ impl Drop for UseGuard {
     }
 }
 
+/// The smallest context a model is shrunk to (when it does not fit at the
+/// one it last ran with) before Ancilo answers with another model.
+const MIN_CTX: u64 = 8 * 1024;
+
 #[derive(Clone)]
 pub struct ModelManager {
     inner: Arc<Inner>,
@@ -2039,7 +2043,7 @@ impl ModelManager {
         // The memory comes back with a delay (the OS reports it late).
         self.wait_for_memory(&r.id, need, Duration::from_secs(15))
             .await;
-        if let Err(e) = self.ensure_running(&r.id, timeout).await {
+        if let Err(e) = self.ensure_running_with(&r.id, timeout, false).await {
             tracing::warn!(model = %r.id, error = %e.message(), "the larger context did not start – back to the old one");
             r.plan = old_plan;
             self.save(&r)?;
@@ -2047,7 +2051,7 @@ impl ModelManager {
                 .await;
             if running {
                 self.inner.restoring.lock().unwrap().insert(r.id.clone());
-                let back = self.ensure_running(&r.id, timeout).await;
+                let back = self.ensure_running_with(&r.id, timeout, false).await;
                 self.inner.restoring.lock().unwrap().remove(&r.id);
                 back?;
             }
@@ -2131,6 +2135,19 @@ impl ModelManager {
     /// demand; if memory is short, unloads the least recently used idle,
     /// unpinned models first. Never exceeds the memory budget.
     pub async fn ensure_running(&self, id: &str, timeout: Duration) -> Result<Endpoint> {
+        self.ensure_running_with(id, timeout, true).await
+    }
+
+    /// Like [`Self::ensure_running`]; `shrink`: when the model does not fit
+    /// now at the context it last ran with (a long session made it grow),
+    /// it starts with the largest smaller context that fits – a session
+    /// goes on, its older output gets shorter.
+    async fn ensure_running_with(
+        &self,
+        id: &str,
+        timeout: Duration,
+        shrink: bool,
+    ) -> Result<Endpoint> {
         if let Some(ep) = self.endpoint(id).await {
             return Ok(ep);
         }
@@ -2147,7 +2164,17 @@ impl ModelManager {
             if !starting {
                 // Makes room first (budget, memory free right now) – by
                 // unloading idle models if needed.
-                self.start_with(&r.id, None, true).await?;
+                match self.start_with(&r.id, None, true).await {
+                    Err(Error::InsufficientResources(why)) => {
+                        if !(shrink && self.shrink_to_fit(&r.id).await?) {
+                            return Err(Error::InsufficientResources(why));
+                        }
+                        self.start_with(&r.id, None, true).await?;
+                    }
+                    other => {
+                        other?;
+                    }
+                }
             }
         }
         let instance = self
@@ -2162,6 +2189,91 @@ impl ModelManager {
         self.endpoint(id)
             .await
             .ok_or_else(|| Error::unavailable(format!("'{id}' is not running")))
+    }
+
+    /// Whether `need` bytes for model `id` fit now: in the budget and in
+    /// the memory free right now (with what idle models would give back).
+    async fn fits_now(&self, id: &str, need: u64) -> bool {
+        let Ok(used) = self.used_bytes(Some(id)).await else {
+            return false;
+        };
+        let state = self.system_state();
+        let reclaimable = self.reclaimable(id).await;
+        used + need <= self.model_budget()
+            && resources::admit(&self.resource_settings(), &state, need, reclaimable).is_ok()
+    }
+
+    /// A model that does not fit now at the context it last ran with: the
+    /// largest smaller context that fits (halving, down to [`MIN_CTX`]) –
+    /// saved, and said. `false`: none fits.
+    async fn shrink_to_fit(&self, id: &str) -> Result<bool> {
+        let mut r = self.find(id)?;
+        let Some(file) = r.plan.files.first().map(|f| f.path.clone()) else {
+            return Ok(false);
+        };
+        let shape = r.meta.as_ref().map(ModelShape::from);
+        let wish = Wish {
+            context: ContextSize::Small,
+            quant: None,
+            file: Some(file),
+            remote_model: None,
+        };
+        let from = r.plan.ctx_tokens;
+        let mut ctx = from / 2;
+        while ctx >= MIN_CTX {
+            let plan = planner::plan_with_ctx(
+                &self.inner.hw,
+                &r.plan.files,
+                shape.as_ref(),
+                &wish,
+                ctx,
+                0,
+                self.reserve(),
+            )?;
+            if plan.fit != Fit::DoesNotFit && self.fits_now(id, plan.expected_ram_bytes).await {
+                let to = plan.ctx_tokens;
+                r.plan = plan;
+                self.save(&r)?;
+                tracing::info!(model = %id, from, to, "does not fit now – starts with a smaller context");
+                self.inner.bus.emit(
+                    "model.context_shrunk",
+                    Some(id),
+                    json!({"from": from, "to": to}),
+                );
+                return Ok(true);
+            }
+            ctx /= 2;
+        }
+        Ok(false)
+    }
+
+    /// Another local model to answer with while `id` does not fit: the most
+    /// capable one (the largest) that fits now – one already running always
+    /// does. Never a cloud model, never an embedding model.
+    pub async fn fallback_for(&self, id: &str) -> Option<String> {
+        let running: std::collections::HashSet<String> = self
+            .loaded()
+            .await
+            .into_iter()
+            .map(|(m, _, _)| m.id)
+            .collect();
+        let mut best: Option<(u64, String)> = None;
+        for r in self.records().ok()? {
+            if r.id == id
+                || r.embedding
+                || matches!(r.source, ModelSource::Remote { .. })
+                || !matches!(r.state, FileState::Ready)
+            {
+                continue;
+            }
+            if !running.contains(&r.id) && !self.fits_now(&r.id, r.plan.expected_ram_bytes).await {
+                continue;
+            }
+            if best.as_ref().is_none_or(|(size, _)| r.size_bytes > *size) {
+                best = Some((r.size_bytes, r.id.clone()));
+            }
+        }
+        best.map(|(_, id)| id)
     }
 
     /// Least recently used running model that is neither busy nor pinned.

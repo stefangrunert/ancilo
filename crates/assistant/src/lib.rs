@@ -1046,8 +1046,9 @@ impl Assistant {
             Some((bus.clone(), subject.clone())),
         )
         .await;
+        let (answer, model) = with_fallback(outcome.summary, model, outcome.fallback.as_ref());
         let out = AskOutput {
-            answer: outcome.summary,
+            answer,
             model,
             grounded,
             operations: tools.calls.lock().unwrap().clone(),
@@ -1437,9 +1438,10 @@ impl Assistant {
             Some(subject),
             json!({"answer": answer, "operations": 0, "pending": 0}),
         );
+        let (answer, model) = with_fallback(answer, model.to_string(), outcome.fallback.as_ref());
         Ok(AskOutput {
             answer,
-            model: model.to_string(),
+            model,
             grounded,
             operations: Vec::new(),
             pending: Vec::new(),
@@ -1751,6 +1753,28 @@ impl Assistant {
             .collect();
         v.sort_by_key(|a| a.created_at);
         v
+    }
+}
+
+/// An answer from another model than the one asked (it did not fit in
+/// memory now): the model that answered, and a note saying so.
+fn with_fallback(
+    answer: String,
+    model: String,
+    fallback: Option<&ancilo_gateway::Fallback>,
+) -> (String, String) {
+    match fallback {
+        Some(f) => (
+            format!(
+                "{answer}\n\n_{}_",
+                ancilo_core::msg(
+                    "model.fallback",
+                    &[("from", &f.from), ("to", &f.to), ("why", &f.why)]
+                )
+            ),
+            f.to.clone(),
+        ),
+        None => (answer, model),
     }
 }
 

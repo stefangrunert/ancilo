@@ -1931,6 +1931,7 @@ fn error_outcome(msg: &str) -> AgentOutcome {
         interventions: 0,
         generation_ms: 0,
         load_ms: 0,
+        fallback: None,
         messages: Vec::new(),
     }
 }

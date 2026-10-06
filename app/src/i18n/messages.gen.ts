@@ -5,6 +5,7 @@ export const messagesEn = {
   "msg.failed": "(failed: {why})",
   "msg.memory.short": "your computer is short of memory right now – close some programs, then try again",
   "msg.memory.need": "this model needs about {need} of memory, but only about {room} are free right now – close some programs or choose a smaller model",
+  "msg.model.fallback": "Note: {from} does not fit in memory right now ({why}), so {to} answered. Ancilo goes back to the chosen model as soon as there is room – or choose another model below.",
   "msg.model.no_room": "'{model}' cannot be loaded right now: {why}",
   "msg.model.others_loaded": "{message} – loaded now: {models}",
   "msg.model.over_budget": "'{model}' needs about {need}, but only {free} of {budget} are free. Stop another model first.",

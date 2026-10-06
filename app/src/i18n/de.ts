@@ -1,6 +1,7 @@
 import type { Key } from "./en";
 
 export const de: Record<Key, string> = {
+  "msg.model.fallback": "Hinweis: {from} passt gerade nicht in den Speicher ({why}), deshalb hat {to} geantwortet. Sobald wieder Platz ist, nimmt Ancilo wieder das gewählte Modell – oder wähle unten ein anderes.",
   "msg.check.unreadable": "Die Datei lässt sich nicht lesen: {why}",
   "msg.check.readable": "Die Datei öffnet sich und ist lesbar",
   "msg.check.empty": "Die Datei ist leer",

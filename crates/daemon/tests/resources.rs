@@ -544,3 +544,105 @@ steps:
     std::fs::remove_dir_all(&scripts).ok();
     env.stop().await;
 }
+
+/// Graceful, not stuck: a model that does not fit now at the context a long
+/// session made it grow to starts with a smaller one that fits – the session
+/// goes on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_model_that_does_not_fit_with_its_large_context_starts_with_a_smaller_one() {
+    let env = Env::start().await;
+    let v = env
+        .op(
+            "add_model",
+            json!({"address": "o/Long-GGUF", "start": false, "context": "large"}),
+        )
+        .await;
+    let id = v["id"].as_str().unwrap().to_string();
+    env.until("ready", || async { env.status(&id).await == "ready" })
+        .await;
+    // 128k tokens need 2 GiB; with 1 GiB of room only up to 32k fit.
+    env.computer(2, "normal", "nominal");
+    let mut events = env.d.as_ref().unwrap().bus.subscribe();
+    let project = env.home.scratch("project");
+    let s = env
+        .op("create_session", json!({"cwd": project, "model": id}))
+        .await;
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": s["id"], "text": "Say hello", "wait": true}),
+        )
+        .await;
+    let last = s["messages"].as_array().unwrap().last().unwrap()["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(!last.contains("failed"), "{s}");
+    let args = std::fs::read_to_string(&env.args).unwrap();
+    assert!(args.contains("--ctx-size\n32768"), "{args}");
+    let status = env.op("model_status", json!({"model": id})).await;
+    assert_eq!(status["ctx_tokens"], 32768, "{status}");
+    let mut shrunk = None;
+    while let Ok(e) = events.try_recv() {
+        if e.kind == "model.context_shrunk" {
+            shrunk = Some(e.data);
+        }
+    }
+    assert_eq!(shrunk.unwrap()["to"], 32768);
+    env.stop().await;
+}
+
+/// Graceful, not stuck, part two: the chosen model does not fit at all now
+/// (not even with a smaller context) – another local model answers, and the
+/// conversation says so.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn when_the_chosen_model_does_not_fit_another_one_answers_and_says_so() {
+    let env = Env::start().await;
+    let chosen = env.add("o/A-GGUF").await;
+    let other = env.add("o/B-GGUF").await;
+    env.op("start_model", json!({"model": other})).await;
+    env.until("B running", || async {
+        env.status(&other).await == "running"
+    })
+    .await;
+    // Kept loaded by the user: not made room from.
+    env.op("set_pinned", json!({"model": other, "pinned": true}))
+        .await;
+    // Now 300 MiB of room: the chosen one needs 608 MiB (its 4k context
+    // cannot get smaller), the other one runs already.
+    std::fs::write(
+        &env.probe,
+        json!({"available_bytes": GIB + 300 * 1024 * 1024, "pressure": "normal", "thermal": "nominal"})
+            .to_string(),
+    )
+    .unwrap();
+    let project = env.home.scratch("project");
+    let s = env
+        .op("create_session", json!({"cwd": project, "model": chosen}))
+        .await;
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": s["id"], "text": "Say hello", "wait": true}),
+        )
+        .await;
+    let texts: Vec<String> = s["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["text"].as_str().map(str::to_string))
+        .collect();
+    assert!(!texts.iter().any(|t| t.contains("failed")), "{s}");
+    let note = texts
+        .iter()
+        .find(|t| t.contains("does not fit in memory right now"))
+        .unwrap_or_else(|| panic!("no note: {s}"));
+    assert!(note.contains(&chosen) && note.contains(&other), "{note}");
+    assert_eq!(env.status(&chosen).await, "ready", "never loaded");
+    // Nothing fits and nothing runs: a plain refusal, as before.
+    env.op("stop_model", json!({"model": other})).await;
+    env.computer(0, "normal", "nominal");
+    let (ok, err) = env.call("start_model", json!({"model": chosen})).await;
+    assert!(!ok, "{err}");
+    env.stop().await;
+}

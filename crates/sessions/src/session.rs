@@ -1153,6 +1153,14 @@ impl Sessions {
                     history = o.messages.clone();
                 }
                 meta.web_used |= crate::tools::searched_web(&o.messages);
+                // Another model answered (the chosen one did not fit in
+                // memory now): said in the conversation, never silently.
+                if let Some(f) = &o.fallback {
+                    history.push(json!({"role": "assistant", "content": ancilo_core::msg(
+                        "model.fallback",
+                        &[("from", &f.from), ("to", &f.to), ("why", &f.why)],
+                    )}));
+                }
                 // A turn that failed (the model could not be loaded or did
                 // not answer) says why – otherwise it looks as if nothing
                 // happened.

@@ -88,6 +88,10 @@ pub struct AgentOutcome {
     /// Time spent waiting for the model to load.
     #[serde(default)]
     pub load_ms: u64,
+    /// The model did not fit in memory: another one answered (the first
+    /// time in this run).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<ancilo_gateway::Fallback>,
     /// The conversation after this run (history + this turn, no system
     /// prompt) – for chat sessions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -162,6 +166,7 @@ pub async fn run(
     }}));
     let (mut steps, mut calls, mut ptok, mut ctok) = (0u32, 0u32, 0u64, 0u64);
     let timing = std::sync::Mutex::new((0u32, 0u64, 0u64)); // interventions, generation, load
+    let fell_back: std::sync::Mutex<Option<ancilo_gateway::Fallback>> = std::sync::Mutex::new(None);
     let mut recent: Vec<String> = Vec::new();
     let mut warned_repeat = false;
     let mut shortened = 0usize;
@@ -184,6 +189,7 @@ pub async fn run(
             interventions,
             generation_ms,
             load_ms,
+            fallback: fell_back.lock().unwrap().clone(),
             messages: msgs.get(1..).map(<[Value]>::to_vec).unwrap_or_default(),
         }
     };
@@ -237,6 +243,17 @@ pub async fn run(
             r = gateway.chat(req, opts) => r,
         };
         if let Ok((_, rec)) = &reply {
+            if let Some(f) = &rec.fallback {
+                let mut fb = fell_back.lock().unwrap();
+                if fb.is_none() {
+                    *fb = Some(f.clone());
+                    emit(
+                        &events,
+                        "agent.model_fallback",
+                        json!({"from": f.from, "to": f.to}),
+                    );
+                }
+            }
             let mut t = timing.lock().unwrap();
             let (i, g, l) = *t;
             let intervened = matches!(

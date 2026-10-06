@@ -64,9 +64,22 @@ pub enum ChatReply {
     Stream(std::pin::Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>>),
 }
 
+/// A model that did not fit when it was asked, and the one that answered.
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct Fallback {
+    pub from: String,
+    pub to: String,
+    /// Why `from` did not fit (with the numbers).
+    pub why: String,
+}
+
 /// What happened to one call – for metrics and tests.
 #[derive(Debug, Clone, Default)]
 pub struct CallRecord {
+    /// Answered with another model: `from` did not fit in memory now.
+    pub fallback: Option<Fallback>,
     pub model: String,
     pub stages: Vec<String>,
     pub outcome: String,
@@ -475,7 +488,7 @@ impl Gateway {
     async fn chat_once(&self, mut req: Value, opts: CallOpts) -> Result<(ChatReply, CallRecord)> {
         let started = Instant::now();
         let requested = req["model"].as_str().unwrap_or_default().to_string();
-        let model = self.inner.manager.resolve_name(&requested)?;
+        let mut model = self.inner.manager.resolve_name(&requested)?;
         let mut rec = CallRecord {
             model: model.clone(),
             ..Default::default()
@@ -484,11 +497,46 @@ impl Gateway {
         rec.queue_ms = started.elapsed().as_millis() as u64;
         let guard = self.inner.manager.begin_use(&model);
         let load_started = Instant::now();
-        let ep = self
+        let mut fallback_guard = None;
+        let ep = match self
             .inner
             .manager
             .ensure_running(&model, self.inner.load_timeout)
-            .await?;
+            .await
+        {
+            Ok(ep) => ep,
+            // Does not fit now (not even with a smaller context): another
+            // local model answers – said, never silently – instead of the
+            // request failing. Back to the first as soon as it fits again.
+            Err(Error::InsufficientResources(why)) if !self.inner.manager.is_cloud(&model) => {
+                let Some(alt) = self.inner.manager.fallback_for(&model).await else {
+                    return Err(Error::InsufficientResources(why));
+                };
+                fallback_guard = Some(self.inner.manager.begin_use(&alt));
+                let ep = self
+                    .inner
+                    .manager
+                    .ensure_running(&alt, self.inner.load_timeout)
+                    .await
+                    .map_err(|_| Error::InsufficientResources(why.clone()))?;
+                tracing::warn!(from = %model, to = %alt, %why, "does not fit now – another model answers");
+                self.inner.bus.emit(
+                    "model.fallback",
+                    Some(&model),
+                    json!({"to": alt, "why": why}),
+                );
+                rec.fallback = Some(Fallback {
+                    from: model.clone(),
+                    to: alt.clone(),
+                    why,
+                });
+                rec.model = alt.clone();
+                model = alt;
+                ep
+            }
+            Err(e) => return Err(e),
+        };
+        let _fallback_guard = fallback_guard;
         let (base, key) = (ep.base.clone(), ep.key.clone());
         rec.load_ms = load_started.elapsed().as_millis() as u64;
         req["model"] = json!(ep.model);
