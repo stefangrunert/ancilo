@@ -253,7 +253,9 @@ impl Library {
             match self.extractor.read(&f.path, &dir).await {
                 Ok(doc) => {
                     self.store(&key, &f.rel, f.size, f.mtime, Some(&doc.parts), None)?;
-                    self.store_warnings(&key, &f.rel, &doc.warnings)?;
+                    // The file as read: a source from it can tell a later change.
+                    let hash = crate::evidence::file_hash(&f.path);
+                    self.store_read(&key, &f.rel, &doc.warnings, hash.as_deref())?;
                 }
                 Err(e) => self.store(&key, &f.rel, f.size, f.mtime, None, Some(&e.message()))?,
             }
@@ -283,12 +285,18 @@ impl Library {
 
     /// What to know about a document read (recognized text, cut off) – its
     /// sources show it.
-    fn store_warnings(&self, folder: &str, rel: &str, warnings: &[extract::Warning]) -> Result<()> {
+    fn store_read(
+        &self,
+        folder: &str,
+        rel: &str,
+        warnings: &[extract::Warning],
+        hash: Option<&str>,
+    ) -> Result<()> {
         let w = serde_json::to_string(warnings)?;
         self.db.with(|c| {
             c.execute(
-                "UPDATE library SET warnings = ?3 WHERE folder = ?1 AND path = ?2",
-                params![folder, rel, w],
+                "UPDATE library SET warnings = ?3, hash = ?4 WHERE folder = ?1 AND path = ?2",
+                params![folder, rel, w, hash],
             )
             .map(|_| ())
         })
@@ -375,24 +383,42 @@ impl Library {
     pub fn evidence(&self, folder: &Path, query: &str) -> Result<Vec<crate::evidence::Evidence>> {
         let docs = self.documents(folder)?;
         let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        let about: HashMap<String, (String, Vec<extract::Warning>)> = docs
+        let hashes = self.hashes(&canonical)?;
+        let about: HashMap<String, crate::evidence::About> = docs
             .iter()
-            .map(|(p, parts, w)| (p.clone(), (crate::evidence::revision(parts), w.clone())))
+            .map(|(p, parts, w)| {
+                (
+                    p.clone(),
+                    crate::evidence::About {
+                        document: p.clone(),
+                        origin: Some(crate::evidence::Origin::Folder {
+                            folder: canonical.clone(),
+                            path: p.clone(),
+                        }),
+                        revision: crate::evidence::revision(parts),
+                        warnings: w.clone(),
+                        file: hashes.get(p).cloned(),
+                    },
+                )
+            })
             .collect();
         let docs: Vec<(String, Vec<Part>)> =
             docs.into_iter().map(|(p, parts, _)| (p, parts)).collect();
         let passages = crate::select(&docs, query, PASSAGE_BUDGET, crate::SEGMENTER);
         Ok(crate::evidence::of(passages, |path| {
-            let (rev, warnings) = about.get(path).cloned().unwrap_or_default();
-            (
-                crate::evidence::Origin::Folder {
-                    folder: canonical.clone(),
-                    path: path.to_string(),
-                },
-                rev,
-                warnings,
-            )
+            about.get(path).cloned().unwrap_or_default()
         }))
+    }
+
+    /// The content hashes of a folder's files as they were read.
+    fn hashes(&self, folder: &Path) -> Result<HashMap<String, String>> {
+        let key = folder.display().to_string();
+        self.db.with(|c| {
+            let mut s =
+                c.prepare("SELECT path, hash FROM library WHERE folder = ?1 AND hash IS NOT NULL")?;
+            s.query_map(params![key], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect()
+        })
     }
 
     /// A document's text now, as last read (`None`: gone or unreadable).

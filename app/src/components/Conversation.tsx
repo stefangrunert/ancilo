@@ -233,7 +233,7 @@ function Reply({ m, live, onAsk, conversation }: { m: Message; live: Set<string>
   return (
     <div className={failed ? "reply failed" : "reply"}>
       <div data-testid="assistant-answer">
-        <Markdown text={text} onSource={evidence.length > 0 ? source.open : undefined} />
+        <Markdown text={text} onSource={evidence.length > 0 ? source.open : undefined} sources={evidence.map((e) => e.id)} />
       </div>
       {evidence.length > 0 && conversation && (
         <>

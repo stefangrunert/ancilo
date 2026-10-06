@@ -519,25 +519,27 @@ impl Attachments {
 
     /// The passages for a question as evidence (marks given by the caller).
     pub fn evidence(&self, ids: &[String], query: &str) -> Result<Vec<evidence::Evidence>> {
+        // Chosen by the attachment's id: two attachments may share a name.
         let mut docs = Vec::new();
         let mut about = std::collections::HashMap::new();
         for id in ids {
             let view = self.view(id)?;
             let parts = self.parts(id)?;
             about.insert(
-                view.name.clone(),
-                (
-                    id.clone(),
-                    evidence::revision(&parts),
-                    view.warnings.clone(),
-                ),
+                id.clone(),
+                evidence::About {
+                    document: view.name.clone(),
+                    origin: Some(evidence::Origin::Attachment { id: id.clone() }),
+                    revision: evidence::revision(&parts),
+                    warnings: view.warnings.clone(),
+                    file: None,
+                },
             );
-            docs.push((view.name, parts));
+            docs.push((id.clone(), parts));
         }
         let passages = select(&docs, query, PASSAGE_BUDGET, SEGMENTER);
-        Ok(evidence::of(passages, |name| {
-            let (id, rev, warnings) = about.get(name).cloned().unwrap_or_default();
-            (evidence::Origin::Attachment { id }, rev, warnings)
+        Ok(evidence::of(passages, |id| {
+            about.get(id).cloned().unwrap_or_default()
         }))
     }
 
@@ -838,6 +840,32 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    // covers: FPL-01 – two attachments of the same name keep their own
+    // origin and revision (review 1, finding 1).
+    #[tokio::test]
+    async fn attachments_of_the_same_name_keep_their_own_sources() {
+        let (_d, a) = store();
+        let first = a
+            .add_bytes("same.txt", b"FIRST UNIQUE words")
+            .await
+            .unwrap();
+        let second = a
+            .add_bytes("same.txt", b"SECOND UNIQUE words")
+            .await
+            .unwrap();
+        let e = a
+            .evidence(&[first.id.clone(), second.id.clone()], "unique")
+            .unwrap();
+        assert_eq!(e.len(), 2);
+        for (ev, id, text) in [(&e[0], &first.id, "FIRST"), (&e[1], &second.id, "SECOND")] {
+            assert!(ev.text.contains(text), "{ev:?}");
+            assert_eq!(ev.origin, evidence::Origin::Attachment { id: id.clone() });
+            assert_eq!(ev.document, "same.txt");
+            assert_eq!(ev.revision, evidence::revision(&a.current(id).unwrap()));
+        }
+        assert_ne!(e[0].revision, e[1].revision);
     }
 
     #[tokio::test]

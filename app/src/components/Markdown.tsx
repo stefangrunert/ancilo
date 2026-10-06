@@ -62,7 +62,7 @@ const components: Components = {
  * With `onSource`, a link to `#source-D3` (a checked source of an answer
  * from documents, see Sources) opens that source instead of leaving the app.
  */
-export const Markdown = memo(function Markdown({ text, onSource }: { text: string; onSource?: (id: string) => void }) {
+export const Markdown = memo(function Markdown({ text, onSource, sources }: { text: string; onSource?: (id: string) => void; sources?: string[] }) {
   const { t } = useI18n();
   const withSources = useMemo<Components>(
     () =>
@@ -71,6 +71,9 @@ export const Markdown = memo(function Markdown({ text, onSource }: { text: strin
             ...components,
             a: ({ href, children }) => {
               const id = href?.startsWith("#source-") ? href.slice("#source-".length) : null;
+              // Only a source of this very answer becomes a button; any other
+              // link to a source is its plain text.
+              if (id && !(sources ?? []).includes(id)) return <>{children}</>;
               if (!id) {
                 return (
                   <a href={href} target="_blank" rel="noreferrer noopener">
@@ -86,7 +89,7 @@ export const Markdown = memo(function Markdown({ text, onSource }: { text: strin
             },
           }
         : components,
-    [onSource, t],
+    [onSource, sources, t],
   );
   return (
     <div className="markdown">

@@ -98,15 +98,37 @@ fn variant(name: &str, c: &Case) -> String {
             .summary
         }
         "erweitert" => {
+            // As the agent does it: cut at the tool (the whole kept), then cut
+            // again later – the record says what the whole was.
             let meta = Meta {
                 tool: c.tool.clone(),
                 error: c.is_error,
                 id: Some("r1".into()),
+                cut: None,
             };
+            if !at_tool || c.output.chars().count() <= TOOL_LIMIT {
+                return results::shorten(&meta, &c.output, c.budget_chars);
+            }
+            let t = results::shorten(&meta, &c.output, TOOL_LIMIT);
+            let recorded = Meta {
+                cut: Some(results::cut_of(&c.output)),
+                ..meta
+            };
+            results::shorten(&recorded, &t, c.budget_chars)
+        }
+        // The cutter alone, on the very input the others get (the old clip
+        // at the tool) – to tell its part from the tool's (review 1, 18).
+        "erweitert@clip" => {
             let t = if at_tool {
-                results::shorten(&meta, &c.output, TOOL_LIMIT)
+                old_clip(&c.output)
             } else {
                 c.output.clone()
+            };
+            let meta = Meta {
+                tool: c.tool.clone(),
+                error: c.is_error,
+                id: Some("r1".into()),
+                cut: None,
             };
             results::shorten(&meta, &t, c.budget_chars)
         }
@@ -158,13 +180,13 @@ fn cases() -> (PathBuf, Vec<Case>) {
 #[test]
 fn what_survives_the_cut_bestand_port_erweitert() {
     let (path, cases) = cases();
-    let names = ["bestand", "port", "erweitert"];
+    let names = ["bestand", "port", "erweitert", "erweitert@clip"];
     let mut rows = Vec::new();
-    let mut passed = [0usize; 3];
+    let mut passed = [0usize; 4];
     println!("FPL-02 · {} · {} cases", path.display(), cases.len());
     println!(
-        "{:<10} {:<16} {:>6}  {:<9} {:<9} {:<9}",
-        "case", "group", "budget", names[0], names[1], names[2]
+        "{:<10} {:<16} {:>6}  {:<9} {:<9} {:<9} {:<9}",
+        "case", "group", "budget", names[0], names[1], names[2], names[3]
     );
     for c in &cases {
         let mut row = json!({"id": c.id, "group": c.group, "budget": c.budget_chars});
@@ -183,17 +205,17 @@ fn what_survives_the_cut_bestand_port_erweitert() {
             row[n] = json!({"passed": m.is_empty(), "misses": m, "chars": text.chars().count(), "text": text});
         }
         println!(
-            "{:<10} {:<16} {:>6}  {:<9} {:<9} {:<9}",
-            c.id, c.group, c.budget_chars, marks[0], marks[1], marks[2]
+            "{:<10} {:<16} {:>6}  {:<9} {:<9} {:<9} {:<9}",
+            c.id, c.group, c.budget_chars, marks[0], marks[1], marks[2], marks[3]
         );
         rows.push(row);
     }
     println!(
-        "passed:                            {:<9} {:<9} {:<9}",
-        passed[0], passed[1], passed[2]
+        "passed:                            {:<9} {:<9} {:<9} {:<9}",
+        passed[0], passed[1], passed[2], passed[3]
     );
     if let Ok(out) = std::env::var("FPL02_REPORT") {
-        let report = json!({"cases": path.display().to_string(), "passed": {"bestand": passed[0], "port": passed[1], "erweitert": passed[2]}, "rows": rows});
+        let report = json!({"cases": path.display().to_string(), "passed": {"bestand": passed[0], "port": passed[1], "erweitert": passed[2], "erweitert@clip": passed[3]}, "rows": rows});
         std::fs::write(out, serde_json::to_string_pretty(&report).unwrap()).unwrap();
     }
     // The development set is the bar for Ancilo now: every case.

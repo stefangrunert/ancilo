@@ -337,27 +337,13 @@ fn compact(history: &[Value]) -> Vec<Value> {
         .map(|(i, _)| i)
         .collect();
     let keep_from = user_turns.iter().rev().nth(1).copied().unwrap_or(0);
-    history
-        .iter()
-        .enumerate()
-        .map(|(i, m)| {
-            if i < keep_from
-                && m["role"] == "tool"
-                && let Some(c) = m["content"].as_str()
-                && c.chars().count() > OLDER_TOOL_OUTPUT_CHARS
-            {
-                let meta = ancilo_agent::results::meta_in(history, i);
-                let mut m = m.clone();
-                m["content"] = json!(ancilo_agent::results::shorten(
-                    &meta,
-                    c,
-                    OLDER_TOOL_OUTPUT_CHARS
-                ));
-                return m;
-            }
-            m.clone()
-        })
-        .collect()
+    let mut out = history.to_vec();
+    for i in 0..keep_from {
+        if out[i]["role"] == "tool" {
+            ancilo_agent::results::shorten_in(&mut out, i, OLDER_TOOL_OUTPUT_CHARS);
+        }
+    }
+    out
 }
 
 impl Sessions {
@@ -1483,7 +1469,10 @@ impl Sessions {
             }
         };
         let hash = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&bytes)[..8]);
-        let name = Path::new(rel).file_name().unwrap_or_default().to_os_string();
+        let name = Path::new(rel)
+            .file_name()
+            .unwrap_or_default()
+            .to_os_string();
         let extractor = self.inner.extractor.lock().unwrap().clone();
         let layout = match extractor {
             // The reader sees only its own place: the result goes there (the

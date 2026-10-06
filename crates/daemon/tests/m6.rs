@@ -994,8 +994,8 @@ steps:
 async fn chats_in_a_project_draw_on_its_documents() {
     let script = r#"
 steps:
-  - expect: { last_user_contains: "Eier", has_tools: false, any_message_contains: "[rezepte/kuchen.md]" }
-    respond: { text: "Für den Kuchen brauchst du drei Eier [rezepte/kuchen.md]." }
+  - expect: { last_user_contains: "Eier", has_tools: false, any_message_contains: "[D1] rezepte/kuchen.md" }
+    respond: { text: "Für den Kuchen brauchst du drei Eier [D1]." }
   - expect: { last_user_contains: "Eier", no_message_contains: "drei Eier" }
     respond: { text: "Das weiß ich nicht." }
 "#;
@@ -1034,7 +1034,44 @@ steps:
         .await;
     assert_eq!(r["grounded"], true, "{r}");
     assert_eq!(r["documents"], true, "{r}");
-    assert!(r["answer"].as_str().unwrap().contains("drei Eier"), "{r}");
+    assert!(
+        r["answer"].as_str().unwrap().contains("drei Eier [D1]"),
+        "{r}"
+    );
+    // Its source: the passage, from where, as it stood (FPL-01).
+    assert_eq!(r["evidence"][0]["document"], "rezepte/kuchen.md", "{r}");
+    assert_eq!(r["evidence"][0]["cited"], true, "{r}");
+    let opened = env
+        .op(
+            "open_evidence",
+            json!({"conversation": r["conversation"], "mark": "D1"}),
+        )
+        .await;
+    assert_eq!(opened["now"], "same", "{opened}");
+    assert!(
+        opened["evidence"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("drei Eier")
+    );
+    // The file changes – before Ancilo reads it again, the source says so
+    // and still shows what the answer had (review 1, finding 4).
+    let kuchen = docs.join("rezepte/kuchen.md");
+    let was = std::fs::read_to_string(&kuchen).unwrap();
+    std::fs::write(&kuchen, was.replace("drei Eier", "vier Eier")).unwrap();
+    let mark = json!({"conversation": r["conversation"], "mark": "D1"});
+    let opened = env.op("open_evidence", mark.clone()).await;
+    assert_eq!(opened["now"], "changed", "{opened}");
+    assert!(
+        opened["evidence"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("drei Eier")
+    );
+    std::fs::remove_file(&kuchen).unwrap();
+    let opened = env.op("open_evidence", mark).await;
+    assert_eq!(opened["now"], "gone", "{opened}");
+    std::fs::write(&kuchen, was).unwrap();
     let listed = env.op("list_conversations", json!({})).await;
     assert_eq!(
         listed[0]["folder"],

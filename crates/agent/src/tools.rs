@@ -908,6 +908,7 @@ impl Workspace {
             tool: "bash".into(),
             error: !out.status.success(),
             id: None,
+            cut: None,
         };
         let body = crate::results::shorten(&meta, &whole, MAX_OUTPUT_CHARS);
         let mut result = if out.status.success() {

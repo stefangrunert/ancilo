@@ -712,11 +712,25 @@ impl Assistant {
             .ok_or_else(|| Error::not_found(format!("no source {mark} in this conversation")))?;
         let now = match &e.origin {
             Origin::Attachment { id } => self.inner.documents.get().and_then(|d| d.current(id)),
-            Origin::Folder { folder, path } => self
-                .inner
-                .library
-                .get()
-                .and_then(|l| l.current(folder, path)),
+            Origin::Folder { folder, path } => {
+                // The file itself, now – not only what Ancilo read of it last.
+                let file = folder.join(path);
+                if !file.is_file() {
+                    return Ok(evidence::open(e, None));
+                }
+                if let Some(was) = &e.file
+                    && evidence::file_hash(&file).as_ref() != Some(was)
+                {
+                    if let Some(l) = self.inner.library.get() {
+                        l.refresh_soon(folder);
+                    }
+                    return Ok(evidence::changed(e));
+                }
+                self.inner
+                    .library
+                    .get()
+                    .and_then(|l| l.current(folder, path))
+            }
         };
         Ok(evidence::open(e, now.as_deref()))
     }

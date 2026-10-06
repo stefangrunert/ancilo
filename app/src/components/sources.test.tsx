@@ -34,6 +34,15 @@ function conversation(evidence: unknown[], dropped: string[] = []) {
 
 // covers: FPL-01 (sources in the chat)
 describe("Sources of an answer from documents", () => {
+  it("makes a button only of a source of this very answer", async () => {
+    const answer = { ...conversation([ev("D1")]), messages: [conversation([ev("D1")]).messages[0], { ...conversation([ev("D1")]).messages[1], text: "A [D1]. B [alt](#source-D5). C [x](#source-D1)." }] };
+    renderWithDaemon(<ConversationView id="c-1" />, { get_conversation: () => answer, pending_actions: () => [] });
+    const a = await screen.findByTestId("assistant-answer");
+    expect(within(a).getAllByRole("button")).toHaveLength(2);
+    expect(within(a).queryByTestId("mark-D5")).toBeNull();
+    expect(a).toHaveTextContent("B alt.");
+  });
+
   it("links only marks of passages the answer was given", () => {
     const e = [ev("D1"), ev("D2")];
     expect(linkEvidence("A [D1]. B [D2]. C [D9]. D [d1].", e as never)).toBe("A [1](#source-D1). B [2](#source-D2). C [D9]. D [1](#source-D1).");

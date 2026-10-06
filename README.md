@@ -58,7 +58,7 @@ ancilo ui                                 # open the app in the browser
 
 - [Getting started](docs/getting-started.md) · [Models](docs/models.md) · [The app](docs/app.md) · [Coding with a local model](docs/coding.md)
 - [Delegation from Claude Code and Codex](docs/delegation.md) · [Model API](docs/model-api.md) · [Comparing models](docs/comparing-models.md)
-- [Search](docs/search.md) · [Web search](docs/web-search.md) · [Assistant](docs/assistant.md) · [Troubleshooting](docs/troubleshooting.md) · [FAQ](docs/faq.md) · [Eval results](docs/evals.md)
+- [Search](docs/search.md) · [Web search](docs/web-search.md) · [Assistant](docs/assistant.md) · [Troubleshooting](docs/troubleshooting.md) · [FAQ](docs/faq.md) · [Eval results](docs/evals.md) · [Where the code comes from](docs/provenance.md)
 - [Privacy](PRIVACY.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 - Website: [ancilo.app](https://ancilo.app)
 

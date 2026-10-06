@@ -37,6 +37,10 @@ pub struct Evidence {
     pub origin: Origin,
     /// The document's text as it was read (hash) – to tell a later version.
     pub revision: String,
+    /// The file itself as it was read (hash; folder documents) – a change of
+    /// the file shows even before Ancilo reads it again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<Locator>,
     /// Which part (page, sheet) by position, and where in it.
@@ -64,29 +68,63 @@ pub fn revision(parts: &[Part]) -> String {
     hex::encode(&h.finalize()[..8])
 }
 
-/// Passages of one source made evidence (marks are given by [`number`]).
-pub fn of(
-    passages: Vec<Passage>,
-    origin: impl Fn(&str) -> (Origin, String, Vec<Warning>),
-) -> Vec<Evidence> {
+/// What is known about the document a passage came from.
+#[derive(Debug, Clone, Default)]
+pub struct About {
+    /// Its name as shown (in a folder: its path there).
+    pub document: String,
+    pub origin: Option<Origin>,
+    pub revision: String,
+    pub warnings: Vec<Warning>,
+    /// The file as it was read (hash) – to tell a change of the file itself.
+    pub file: Option<String>,
+}
+
+/// Passages made evidence; `about` tells, by the key each passage's
+/// document was chosen under (an attachment's id, a folder path), what
+/// document it is – never by its name, which two documents may share.
+/// Marks are given by [`number`].
+pub fn of(passages: Vec<Passage>, about: impl Fn(&str) -> About) -> Vec<Evidence> {
     passages
         .into_iter()
         .map(|p| {
-            let (origin, revision, warnings) = origin(&p.document);
+            let a = about(&p.document);
             Evidence {
                 id: String::new(),
-                document: p.document,
-                origin,
-                revision,
+                document: a.document,
+                origin: a.origin.unwrap_or(Origin::Attachment { id: String::new() }),
+                revision: a.revision,
+                file: a.file,
                 at: p.at,
                 part: p.part,
                 start: p.start,
                 text: p.text,
-                warnings,
+                warnings: a.warnings,
                 cited: false,
             }
         })
         .collect()
+}
+
+/// A file's content hash (as [`Evidence::file`] holds it); `None` when it
+/// cannot be read or is larger than any document Ancilo reads.
+pub fn file_hash(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > crate::extract::MAX_BYTES {
+        return None;
+    }
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = f.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Some(hex::encode(&h.finalize()[..16]))
 }
 
 /// Gives marks `D<after+1>`, `D<after+2>` … (after the conversation's last).
@@ -141,7 +179,59 @@ pub struct Marks {
 pub fn check(answer: &str, evidence: &mut [Evidence]) -> (String, Marks) {
     let mut marks = Marks::default();
     let mut out = String::with_capacity(answer.len());
-    let mut rest = answer;
+    // Code (fenced blocks, inline spans) is left exactly as written.
+    for (code, part) in code_spans(answer) {
+        if code {
+            out.push_str(part);
+        } else {
+            check_prose(part, evidence, &mut marks, &mut out);
+        }
+    }
+    (out, marks)
+}
+
+/// The answer cut into prose and code: fenced blocks (```) and inline
+/// spans (`…`) are code.
+fn code_spans(text: &str) -> Vec<(bool, &str)> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    let bytes = text.as_bytes();
+    while i < bytes.len() {
+        if text[i..].starts_with("```") {
+            // A fence: to the closing fence (or the end).
+            let close = text[i + 3..]
+                .find("```")
+                .map_or(text.len(), |e| i + 3 + e + 3);
+            out.push((false, &text[start..i]));
+            out.push((true, &text[i..close]));
+            start = close;
+            i = close;
+        } else if bytes[i] == b'`' {
+            let close = text[i + 1..]
+                .find(['`', '\n'])
+                .filter(|e| text.as_bytes()[i + 1 + e] == b'`')
+                .map(|e| i + 1 + e + 1);
+            match close {
+                Some(c) => {
+                    out.push((false, &text[start..i]));
+                    out.push((true, &text[i..c]));
+                    start = c;
+                    i = c;
+                }
+                None => i += 1,
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out.push((false, &text[start..]));
+    out.retain(|(_, s)| !s.is_empty());
+    out
+}
+
+fn check_prose(text: &str, evidence: &mut [Evidence], marks: &mut Marks, out: &mut String) {
+    let mut rest = text;
     while let Some(i) = rest.find('[') {
         out.push_str(&rest[..i]);
         let after = &rest[i + 1..];
@@ -154,10 +244,30 @@ pub fn check(answer: &str, evidence: &mut [Evidence]) -> (String, Marks) {
             continue;
         };
         let inner = &after[..end];
-        // A link's text (`[D3](…)`) is left as it is.
-        let is_link = after[end + 1..].starts_with('(');
+        let tail = &after[end + 1..];
+        // A link the model wrote: never a source – a link to a source
+        // (`#source-…`) becomes its plain text; others stay as written.
+        if let Some(target) = tail.strip_prefix('(')
+            && let Some(close) = target.find(')')
+        {
+            if target[..close]
+                .trim()
+                .to_ascii_lowercase()
+                .starts_with("#source-")
+            {
+                out.push_str(inner);
+            } else {
+                out.push('[');
+                out.push_str(inner);
+                out.push_str("](");
+                out.push_str(&target[..=close]);
+            }
+            rest = &target[close + 1..];
+            continue;
+        }
         let ids: Vec<&str> = inner.split([',', ';']).map(str::trim).collect();
-        if !is_link && ids.iter().all(|s| is_mark(s)) {
+        let mut kept = Vec::new();
+        if ids.iter().all(|s| is_mark(s)) {
             for id in ids {
                 let id = id.to_ascii_uppercase();
                 if let Some(e) = evidence.iter_mut().find(|e| e.id == id) {
@@ -165,30 +275,42 @@ pub fn check(answer: &str, evidence: &mut [Evidence]) -> (String, Marks) {
                     if !marks.cited.contains(&id) {
                         marks.cited.push(id.clone());
                     }
-                    out.push_str(&format!("[{id}]"));
+                    kept.push(id);
                 } else if !marks.unknown.contains(&id) {
                     marks.unknown.push(id);
                 }
             }
-        } else if !is_link && let Some(id) = by_source(inner, evidence) {
+            if kept.is_empty() {
+                // Taken out: with the space before it, where that leaves
+                // punctuation or the line's end next.
+                if out.ends_with(' ')
+                    && tail
+                        .chars()
+                        .next()
+                        .is_none_or(|c| c.is_whitespace() || ".,;:!?)".contains(c))
+                {
+                    out.pop();
+                }
+            }
+        } else if let Some(id) = by_source(inner, evidence) {
             if let Some(e) = evidence.iter_mut().find(|e| e.id == id) {
                 e.cited = true;
             }
             if !marks.cited.contains(&id) {
                 marks.cited.push(id.clone());
             }
-            out.push_str(&format!("[{id}]"));
+            kept.push(id);
         } else {
             out.push('[');
             out.push_str(inner);
             out.push(']');
         }
-        rest = &after[end + 1..];
+        for id in kept {
+            out.push_str(&format!("[{id}]"));
+        }
+        rest = tail;
     }
     out.push_str(rest);
-    // A mark taken out leaves no double space before punctuation.
-    let tidy = out.replace(" .", ".").replace(" ,", ",").replace("  ", " ");
-    (tidy, marks)
 }
 
 fn is_mark(s: &str) -> bool {
@@ -233,6 +355,16 @@ pub struct Opened {
 
 /// Around a passage, this much is shown on either side.
 const CONTEXT_CHARS: usize = 300;
+
+/// `e` opened when its document changed since (the passage as it was).
+pub fn changed(e: &Evidence) -> Opened {
+    Opened {
+        evidence: e.clone(),
+        now: Now::Changed,
+        before: None,
+        after: None,
+    }
+}
 
 /// Opens `e` against its document's text now (`None`: gone).
 pub fn open(e: &Evidence, now: Option<&[Part]>) -> Opened {
@@ -282,6 +414,7 @@ mod tests {
             document: doc.into(),
             origin: Origin::Attachment { id: "a-1".into() },
             revision: "r".into(),
+            file: None,
             at: Some(Locator::Page(page)),
             part: 0,
             start: Some(0),
@@ -302,6 +435,21 @@ mod tests {
         assert_eq!(m.cited, ["D1", "D2"]);
         assert_eq!(m.unknown, ["D7", "D9"]);
         assert!(e.iter().all(|e| e.cited));
+    }
+
+    #[test]
+    fn links_never_become_sources_and_code_stays_as_written() {
+        let mut e = vec![ev("D1", "Vertrag.pdf", 3)];
+        let (text, m) = check(
+            "Beleg [hier](#source-D999) und [dort](#SOURCE-D1), Web [x](https://a.de).\n```python\nif x:\n  print(x) [D9]\n```\nZeile mit Umbruch  \nund `code [D9]` [D7].",
+            &mut e,
+        );
+        assert_eq!(
+            text,
+            "Beleg hier und dort, Web [x](https://a.de).\n```python\nif x:\n  print(x) [D9]\n```\nZeile mit Umbruch  \nund `code [D9]`."
+        );
+        assert_eq!(m.unknown, ["D7"]);
+        assert!(!e[0].cited, "a link is not a citation");
     }
 
     #[test]

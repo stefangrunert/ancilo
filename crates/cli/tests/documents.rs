@@ -95,11 +95,17 @@ async fn results_are_looked_at_in_the_reader_and_checked_whole() {
             .any(|x| x.place.as_deref() == Some("Liste!B302") && x.message.contains("300")),
         "{f:#?}"
     );
-    assert_eq!(l.shown().sheets[0].rows.len(), ancilo_docs::preview::MAX_ROWS_SHOWN);
+    assert_eq!(
+        l.shown().sheets[0].rows.len(),
+        ancilo_docs::preview::MAX_ROWS_SHOWN
+    );
     // A broken file: said, nothing hangs.
     let broken = base.join("kaputt.xlsx");
     std::fs::write(&broken, b"PK not really").unwrap();
-    let e = ex.layout(&broken, &ex.workdir().unwrap()).await.unwrap_err();
+    let e = ex
+        .layout(&broken, &ex.workdir().unwrap())
+        .await
+        .unwrap_err();
     assert!(e.message().contains("cannot read"), "{}", e.message());
     assert_eq!(std::fs::read_dir(base.join("scratch")).unwrap().count(), 0);
 }

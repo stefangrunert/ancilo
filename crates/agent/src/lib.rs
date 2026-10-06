@@ -129,13 +129,11 @@ fn shorten_tool_outputs(messages: &mut [Value], cap: usize) -> bool {
         if messages[i]["role"] != "tool" {
             continue;
         }
-        if let Some(c) = messages[i]["content"].as_str()
-            && c.chars().count() > cap + SHORTENED.chars().count()
-        {
-            let meta = results::meta_in(messages, i);
-            let short = results::shorten(&meta, c, cap);
-            messages[i]["content"] = json!(short);
-            changed = true;
+        let long = messages[i]["content"]
+            .as_str()
+            .is_some_and(|c| c.chars().count() > cap + SHORTENED.chars().count());
+        if long {
+            changed |= results::shorten_in(messages, i, cap);
         }
     }
     changed
@@ -388,14 +386,19 @@ pub async fn run(
                     whole.as_deref().unwrap_or(&out.content),
                 )
             });
-            let meta = results::Meta {
+            let mut meta = results::Meta {
                 tool: name.clone(),
                 error: out.is_error,
                 id,
+                cut: None,
             };
-            // Shortened at its source: now it can say where the whole is.
-            if let (Some(whole), Some(_)) = (&whole, &meta.id) {
-                out.content = results::shorten(&meta, whole, tools::MAX_OUTPUT_CHARS);
+            if let Some(whole) = &whole {
+                // Shortened at its source: now it can say where the whole is …
+                if meta.id.is_some() {
+                    out.content = results::shorten(&meta, whole, tools::MAX_OUTPUT_CHARS);
+                }
+                // … and its record what the whole was.
+                meta.cut = Some(results::cut_of(whole));
             }
             emit(
                 &events,

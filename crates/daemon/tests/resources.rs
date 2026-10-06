@@ -421,7 +421,7 @@ steps:
   - respond: { tool_calls: [{ name: read_file, arguments: { path: "small.txt" } }] }
   - expect: { any_message_contains: "TAIL-OF-BIG" }
     respond: { http_error: { status: 400, message: "request (30000 tokens) exceeds the available context size (4096 tokens), try increasing it" } }
-  - expect: { no_message_contains: "TAIL-OF-BIG", any_message_contains: "shortened to fit the context" }
+  - expect: { no_message_contains: "   200\ta line of the big file", any_message_contains: "[read_file · shortened from 251 lines · read_result r1]" }
     respond: { text: "Done." }
 "#,
     )

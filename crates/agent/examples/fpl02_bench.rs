@@ -17,6 +17,7 @@ fn main() {
         tool: "bash".into(),
         error: true,
         id: Some("r1".into()),
+        cut: None,
     };
     let t = Instant::now();
     let _ = compress::summarise_log(&log);

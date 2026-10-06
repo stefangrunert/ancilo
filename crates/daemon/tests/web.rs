@@ -585,8 +585,8 @@ async fn a_chat_answers_from_an_attached_document_and_keeps_it_local() {
     let script = r#"
 steps:
   # The document's text goes along, with its source.
-  - expect: { last_user_contains: "Was kostet", any_message_contains: "[Mietvertrag.txt]", has_tools: false }
-    respond: { text: "Die Miete beträgt 950 Euro [Mietvertrag.txt]." }
+  - expect: { last_user_contains: "Was kostet", any_message_contains: "[D1] Mietvertrag.txt", has_tools: false }
+    respond: { text: "Die Miete beträgt 950 Euro [D1]." }
   # Web search set to search by itself: with a document too (one switch
   # for everything) – only the query goes out.
   - expect: { any_message_contains: "Classify the user's last message" }
@@ -647,7 +647,8 @@ steps:
             json!({"prompt": "Was kostet die Miete?", "remember": true, "kind": "chat", "attachments": [doc["id"]]}),
         )
         .await;
-    assert_eq!(r["answer"], "Die Miete beträgt 950 Euro [Mietvertrag.txt].");
+    assert_eq!(r["answer"], "Die Miete beträgt 950 Euro [D1].");
+    assert_eq!(r["evidence"][0]["document"], "Mietvertrag.txt", "{r}");
     assert_eq!(r["documents"], true);
     let c = r["conversation"].as_str().unwrap().to_string();
     let conv = env.op("get_conversation", json!({"id": c})).await;
