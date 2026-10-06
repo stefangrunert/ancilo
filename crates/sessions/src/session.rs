@@ -1378,15 +1378,11 @@ impl Sessions {
                 "the results are not the ones you saw anymore – look at them again".into(),
             ));
         }
-        let expected: HashMap<String, String> = snapshot
+        // Exactly the files of that look, each with its content then.
+        let results: Vec<(String, String)> = snapshot
             .into_iter()
+            .filter(|(c, _)| c.kind != crate::workcopy::ChangeKind::Deleted)
             .filter_map(|(c, h)| Some((c.path, h?)))
-            .collect();
-        let results: Vec<String> = copy
-            .changes()?
-            .into_iter()
-            .filter(|c| c.kind != crate::workcopy::ChangeKind::Deleted)
-            .map(|c| c.path)
             .collect();
         if results.is_empty() {
             return Err(Error::invalid("there is nothing to save yet"));
@@ -1406,28 +1402,36 @@ impl Sessions {
         }
         let work = copy.work();
         let mut files = Vec::new();
-        for rel in &results {
-            let expect = version.and(expected.get(rel).map(String::as_str));
-            match crate::workcopy::save_copy_as(&work.join(rel), &dir, expect) {
+        // Nothing half saved: whatever fails, what this call saved goes again.
+        let undo = |files: &[PathBuf]| {
+            for f in files {
+                std::fs::remove_file(f).ok();
+            }
+        };
+        for (rel, hash) in &results {
+            match crate::workcopy::save_copy_as(&work.join(rel), &dir, Some(hash)) {
                 Ok(f) => files.push(f),
                 Err(e) => {
-                    // Nothing half saved: what this call saved goes again.
-                    for f in &files {
-                        std::fs::remove_file(f).ok();
-                    }
+                    undo(&files);
                     return Err(e);
                 }
             }
         }
         // Saved: they are part of the task's own place now.
-        copy.apply(Some(&results), None)?;
+        let paths: Vec<String> = results.iter().map(|(p, _)| p.clone()).collect();
         let saved = Saved {
             dir,
-            files,
+            files: files.clone(),
             at: Utc::now(),
         };
         meta.saved = Some(saved.clone());
-        self.save(&meta, &history)?;
+        if let Err(e) = copy
+            .apply(Some(&paths), None)
+            .and_then(|_| self.save(&meta, &history))
+        {
+            undo(&files);
+            return Err(e);
+        }
         self.inner.bus.emit(
             "session.saved",
             Some(id),
@@ -1480,25 +1484,10 @@ impl Sessions {
         // Read once – and only the content the version was made of: what
         // is shown and checked is exactly that (else the caller says so).
         let path = work.join(rel);
-        let read = tokio::task::spawn_blocking(move || -> std::result::Result<Vec<u8>, String> {
-            let len = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
-            if len > ancilo_docs::extract::MAX_BYTES {
-                return Err(ancilo_core::msg(
-                    "doc.too_large",
-                    &[
-                        (
-                            "name",
-                            &path.file_name().unwrap_or_default().to_string_lossy(),
-                        ),
-                        ("mb", &(ancilo_docs::extract::MAX_BYTES / 1024 / 1024)),
-                    ],
-                ));
-            }
-            std::fs::read(&path).map_err(|e| e.to_string())
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|r| r);
+        let read = tokio::task::spawn_blocking(move || ancilo_docs::extract::read_bounded(&path))
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r);
         let bytes = match read {
             Ok(b) => b,
             Err(e) => return Ok((String::new(), None, ancilo_docs::preview::unreadable(&e))),

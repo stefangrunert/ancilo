@@ -574,6 +574,7 @@ export const de: Record<Key, string> = {
   "check.keepNow": "So behalten, wie sie jetzt sind?",
   "check.saveNow": "So speichern, wie sie jetzt sind?",
   "check.limit.not_all_checked": "Von „{sheet}“ wurden nur die ersten {checked} von {total} Zeilen geprüft – der Rest nicht.",
+  "check.changedWhileAsking": "Die Ergebnisse haben sich geändert, seit Ancilo gefragt hat – schließe dies und sieh sie dir noch einmal an.",
   "check.look": "Ansehen",
   "check.ok": "geprüft",
   "check.warnings": "{n} Hinweis(e)",

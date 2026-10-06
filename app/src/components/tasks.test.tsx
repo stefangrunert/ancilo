@@ -193,6 +193,29 @@ describe("A task", () => {
     await waitFor(() => expect(calls.find((c) => c.op === "apply_changes")?.input).toMatchObject({ version: "v2" }));
   });
 
+  // covers: FPL-03 (review 2, finding 23)
+  it("a question asked for one version cannot be confirmed for another", async () => {
+    let version = "v1";
+    const s = () => task({ changes_version: version, changes: [{ path: "Kosten.xlsx", added: 0, removed: 0, runs: false, change: "added" }] });
+    const { calls, queryClient } = renderWithDaemon(<TaskView id="s-1" />, {
+      get_session: s,
+      get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }),
+      check_results: () => ({ version, files: [{ path: "Kosten.xlsx", file: "aa", worst: "error", errors: 1, warnings: 0 }] }),
+      apply_changes: () => ({ files: [] }),
+      list_sessions: () => [],
+    });
+    const card = await screen.findByTestId("task-changes");
+    await waitFor(() => expect(within(card).getByRole("button", { name: "Keep" })).toBeEnabled());
+    await userEvent.click(within(card).getByRole("button", { name: "Keep" }));
+    expect(await screen.findByTestId("anyway")).toBeEnabled();
+    // The task changes the results while the question is open.
+    version = "v2";
+    await queryClient.invalidateQueries({ queryKey: ["get_session"] });
+    await waitFor(() => expect(screen.getByTestId("anyway")).toBeDisabled());
+    expect(screen.getByRole("dialog")).toHaveTextContent("changed since you were asked");
+    expect(calls.find((c) => c.op === "apply_changes")).toBeUndefined();
+  });
+
   it("a preview of an earlier version says so and offers the new one – never swaps it", async () => {
     let version = "v1";
     function Harness() {

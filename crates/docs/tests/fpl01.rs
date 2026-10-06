@@ -90,7 +90,8 @@ fn misses(c: &Case, picked: &[Passage]) -> Vec<String> {
 
 /// Passages next to each other in the same part, as one: a requirement
 /// across their border is there when both are (review 1, finding 18). Made
-/// from the part's own text, so the overlap is not doubled.
+/// from the part's own text, so the overlap is not doubled – and only over
+/// whitespace between them (review 2, finding 27).
 fn joined(c: &Case, picked: &[Passage]) -> Vec<Passage> {
     let mut sorted: Vec<&Passage> = picked.iter().collect();
     sorted.sort_by_key(|p| (p.document.clone(), p.part, p.start.unwrap_or(0)));
@@ -98,14 +99,26 @@ fn joined(c: &Case, picked: &[Passage]) -> Vec<Passage> {
         let d = c.documents.iter().find(|d| d.name == p.document)?;
         Some(d.parts.get(p.part)?.text.chars().collect())
     };
-    // Where a passage ends in the part: after its last line there (a
-    // paragraph passage is shorter than its place – lines trimmed).
+    // Where a passage stands in the part: from its start, line by line in
+    // order (a paragraph passage has its lines trimmed: only whitespace may
+    // lie between them). Not found so: it stays on its own.
     let span = |p: &Passage, chars: &[char]| -> Option<(usize, usize)> {
         let start = p.start?;
-        let last: Vec<char> = p.text.lines().last()?.trim().chars().collect();
-        let at = (start..=chars.len().saturating_sub(last.len()))
-            .find(|&i| chars[i..i + last.len()] == last[..])?;
-        Some((start, at + last.len()))
+        let mut at = start;
+        for line in p.text.lines() {
+            let line: Vec<char> = line.trim().chars().collect();
+            if line.is_empty() {
+                continue;
+            }
+            while at < chars.len() && chars[at].is_whitespace() {
+                at += 1;
+            }
+            if chars.get(at..at + line.len())? != line.as_slice() {
+                return None;
+            }
+            at += line.len();
+        }
+        Some((start, at))
     };
     let mut out: Vec<Passage> = Vec::new();
     let mut end = 0usize;
@@ -122,7 +135,9 @@ fn joined(c: &Case, picked: &[Passage]) -> Vec<Passage> {
             && last.document == p.document
             && last.part == p.part
             && let Some(from) = last.start
-            && start <= end + 2
+            // Overlapping, or apart by whitespace only: nothing between them
+            // is taken from the document that no passage holds.
+            && (start <= end || chars[end..start].iter().all(|c| c.is_whitespace()))
         {
             end = end.max(stop);
             last.text = chars[from..end].iter().collect();
@@ -288,4 +303,50 @@ fn which_segmentation_keeps_what_the_question_needs() {
         let names: Vec<&str> = vs.iter().map(|v| v.0).collect();
         std::fs::write(out, serde_json::to_string_pretty(&json!({"cases": path.display().to_string(), "variants": names, "passed": passed, "within_2000": to_hit.iter().map(|v| within(v, 2000)).collect::<Vec<_>>(), "within_4000": to_hit.iter().map(|v| within(v, 4000)).collect::<Vec<_>>(), "median_chars_to_hit": medians, "rows": rows})).unwrap()).unwrap();
     }
+}
+
+// covers: FPL-01 (the measure itself, review 2 finding 27)
+#[test]
+fn joining_passages_neither_makes_up_nor_loses_text() {
+    let case = |text: &str| Case {
+        id: "m".into(),
+        group: String::new(),
+        documents: vec![Doc {
+            name: "d.txt".into(),
+            parts: vec![RawPart {
+                page: None,
+                sheet: None,
+                text: text.into(),
+            }],
+        }],
+        question: String::new(),
+        required: Vec::new(),
+        required_locator: Vec::new(),
+    };
+    let at = |start: usize, text: &str| Passage {
+        document: "d.txt".into(),
+        at: None,
+        part: 0,
+        start: Some(start),
+        text: text.into(),
+    };
+    // What lies between two passages is in neither.
+    let c = case("ABnoCD");
+    let j = joined(&c, &[at(0, "AB"), at(4, "CD")]);
+    assert!(
+        !j.iter().any(|p| holds(&c, "no", p)),
+        "{:?}",
+        j.iter().map(|p| &p.text).collect::<Vec<_>>()
+    );
+    // Overlapping passages of repeated lines cover all they hold.
+    let text = "repeated text line\n".repeat(80) + "needle";
+    let c = case(&text);
+    let chars: Vec<char> = text.chars().collect();
+    let cut = |a: usize, b: usize| at(a, &chars[a..b].iter().collect::<String>());
+    let j = joined(&c, &[cut(0, 683), cut(589, 1272), cut(1178, chars.len())]);
+    assert!(j.iter().any(|p| p.text == text), "the whole text is held");
+    // Apart by whitespace only: one.
+    let c = case("Frist von drei\n\nMonaten");
+    let j = joined(&c, &[at(0, "Frist von drei"), at(16, "Monaten")]);
+    assert!(j.iter().any(|p| holds(&c, "drei Monaten", p)));
 }

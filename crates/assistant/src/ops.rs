@@ -114,7 +114,7 @@ pub fn register(registry: &mut Registry, assistant: Assistant) {
             .summary("A source of an answer from documents ([D3]): the passage the answer had, and whether its document changed since")
             .handler(move |_ctx, i: EvidenceRef| {
                 let a = a.clone();
-                async move { a.open_evidence(&i.conversation, &i.mark) }
+                async move { a.open_evidence(&i.conversation, &i.mark).await }
             }),
     );
     let a = assistant.clone();

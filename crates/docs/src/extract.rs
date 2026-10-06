@@ -15,6 +15,30 @@ use serde::{Deserialize, Serialize};
 
 /// Files larger than this are not read.
 pub const MAX_BYTES: u64 = 50 * 1024 * 1024;
+
+/// A file read whole, but never more than [`MAX_BYTES`] (a file that grows
+/// while it is read is not read into memory without end).
+pub fn read_bounded(path: &std::path::Path) -> std::result::Result<Vec<u8>, String> {
+    use std::io::Read;
+    let f = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    f.take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_BYTES {
+        return Err(ancilo_core::msg(
+            "doc.too_large",
+            &[
+                (
+                    "name",
+                    &path.file_name().unwrap_or_default().to_string_lossy(),
+                ),
+                ("mb", &(MAX_BYTES / 1024 / 1024)),
+            ],
+        ));
+    }
+    Ok(bytes)
+}
 /// Text kept of one document (characters).
 pub const MAX_CHARS: usize = 1_000_000;
 /// Rows kept of one sheet.

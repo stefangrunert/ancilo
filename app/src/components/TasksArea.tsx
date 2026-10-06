@@ -255,17 +255,19 @@ function ChangeLine({ c, check, onLook }: { c: Change; check?: Parameters<typeof
   );
 }
 
-/** Keep anyway? Asked when the checks found something wrong. */
-function AnywayDialog({ open, text, label, onYes, onNo }: { open: boolean; text: string; label: string; onYes: () => void; onNo: () => void }) {
+/** Keep anyway? Asked when the checks found something wrong (or what was
+ * looked at is older). Bound to the version it was opened for: if the
+ * results change meanwhile, it cannot be confirmed – look again. */
+function AnywayDialog({ open, text, label, current, onYes, onNo }: { open: boolean; text: string; label: string; current: boolean; onYes: () => void; onNo: () => void }) {
   const { t } = useI18n();
   return (
     <Dialog open={open} title={t("confirm.title")} onClose={onNo}>
-      <p>{text}</p>
+      <p>{current ? text : t("check.changedWhileAsking")}</p>
       <div className="row end">
         <button type="button" className="secondary" onClick={onNo}>
           {t("confirm.no")}
         </button>
-        <button type="button" data-testid="anyway" onClick={onYes}>
+        <button type="button" data-testid="anyway" disabled={!current} onClick={onYes}>
           {label}
         </button>
       </div>
@@ -282,7 +284,8 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
   const [dropping, setDropping] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [looking, setLooking] = useState<string | null>(null);
-  const [anyway, setAnyway] = useState(false);
+  // The version the question was asked for (null: not asking).
+  const [anyway, setAnyway] = useState<string | null>(null);
   const act = async (f: () => Promise<unknown>) => {
     try {
       await f();
@@ -296,7 +299,7 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
   const checks = useChecks(s.id, s.changes_version, s.changes.length > 0 && !running);
   const looked = useLooked();
   // Kept is what was checked and shown – the daemon refuses anything newer.
-  const keep = () => void act(() => client.op("apply_changes", { session: s.id, paths: null, version: checks.data?.version ?? null }, true));
+  const keep = (version: string | null | undefined) => void act(() => client.op("apply_changes", { session: s.id, paths: null, version: version ?? null }, true));
   const askFirst = problems(checks.data) > 0 || looked.olderThan(checks.data?.version);
   if (s.changes.length === 0) {
     if (!s.applied || running) return null;
@@ -339,7 +342,7 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
         ))}
       </ul>
       <div className="row">
-        <button type="button" data-testid="keep" disabled={!checks.ready} title={checks.ready ? undefined : t("check.checking")} onClick={() => (askFirst ? setAnyway(true) : keep())}>
+        <button type="button" data-testid="keep" disabled={!checks.ready} title={checks.ready ? undefined : t("check.checking")} onClick={() => (askFirst ? setAnyway(checks.data?.version ?? null) : keep(checks.data?.version))}>
           {t("task.keep")}
         </button>
         <button type="button" className="secondary" onClick={() => setDropping(true)}>
@@ -364,13 +367,15 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
         </div>
       </Dialog>
       <AnywayDialog
-        open={anyway}
+        open={anyway !== null}
+        current={checks.ready && checks.data?.version === anyway}
         text={[looked.olderThan(checks.data?.version) ? t("check.changedSinceLooked") : "", problems(checks.data) > 0 ? t("check.keepAnyway", { n: problems(checks.data) }) : t("check.keepNow")].filter(Boolean).join(" ")}
         label={t("task.keep")}
-        onNo={() => setAnyway(false)}
+        onNo={() => setAnyway(null)}
         onYes={() => {
-          setAnyway(false);
-          keep();
+          const v = anyway;
+          setAnyway(null);
+          keep(v);
         }}
       />
       <ResultPreview session={s.id} path={looking} current={s.changes_version} onClose={() => setLooking(null)} onSeen={looked.seen} />
@@ -387,7 +392,8 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
   const refresh = useRefresh();
   const choose = useChooseFolder();
   const [looking, setLooking] = useState<string | null>(null);
-  const [anyway, setAnyway] = useState<null | { dir: string | null }>(null);
+  // Where to save, and the version the question was asked for.
+  const [anyway, setAnyway] = useState<null | { dir: string | null; version: string | null }>(null);
   const act = async (f: () => Promise<unknown>) => {
     try {
       await f();
@@ -401,9 +407,11 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
   const looked = useLooked();
   // Saved is what was checked and shown – the daemon refuses anything newer.
   const version = checks.data?.version ?? null;
-  const save = (dir: string | null) => void act(() => client.op("save_results", { session: s.id, ...(dir ? { dir } : {}), ...(version ? { version } : {}) }));
+  const save = (dir: string | null, v: string | null) => void act(() => client.op("save_results", { session: s.id, ...(dir ? { dir } : {}), ...(v ? { version: v } : {}) }));
   const askFirst = problems(checks.data) > 0 || looked.olderThan(version);
-  const trySave = (dir: string | null) => (askFirst ? setAnyway({ dir }) : save(dir));
+  // The version is taken when the click happens – a folder chosen later
+  // does not move it on.
+  const trySave = (dir: string | null, v: string | null) => (askFirst ? setAnyway({ dir, version: v }) : save(dir, v));
   if (s.status === "running") return null;
   if (s.changes.length === 0) {
     if (!s.saved) return null;
@@ -447,7 +455,7 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
         ))}
       </ul>
       <div className="row">
-        <button type="button" data-testid="save" disabled={!checks.ready} title={checks.ready ? undefined : t("check.checking")} onClick={() => trySave(null)}>
+        <button type="button" data-testid="save" disabled={!checks.ready} title={checks.ready ? undefined : t("check.checking")} onClick={() => trySave(null, version)}>
           {t("results.save")}
         </button>
         <button
@@ -455,8 +463,9 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
           className="secondary"
           disabled={!checks.ready}
           onClick={async () => {
+            const v = version;
             const dir = await choose();
-            if (dir) trySave(dir);
+            if (dir) trySave(dir, v);
           }}
         >
           {t("results.elsewhere")}
@@ -464,13 +473,14 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
       </div>
       <AnywayDialog
         open={anyway !== null}
+        current={checks.ready && checks.data?.version === anyway?.version}
         text={[looked.olderThan(version) ? t("check.changedSinceLooked") : "", problems(checks.data) > 0 ? t("check.saveAnyway", { n: problems(checks.data) }) : t("check.saveNow")].filter(Boolean).join(" ")}
         label={t("results.save")}
         onNo={() => setAnyway(null)}
         onYes={() => {
-          const dir = anyway?.dir ?? null;
+          const a = anyway;
           setAnyway(null);
-          save(dir);
+          if (a) save(a.dir, a.version);
         }}
       />
       <ResultPreview session={s.id} path={looking} current={s.changes_version} onClose={() => setLooking(null)} onSeen={looked.seen} />

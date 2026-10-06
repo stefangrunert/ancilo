@@ -250,11 +250,20 @@ impl Library {
                 self.emit(folder);
             }
             let dir = self.extractor.workdir()?;
+            // The file as read: a source from it can tell a later change. A
+            // file that changed while it was read has no hash to go by.
+            let hash_of = |p: PathBuf| async move {
+                tokio::task::spawn_blocking(move || crate::evidence::file_hash(&p))
+                    .await
+                    .ok()
+                    .flatten()
+            };
+            let before = hash_of(f.path.clone()).await;
             match self.extractor.read(&f.path, &dir).await {
                 Ok(doc) => {
+                    let after = hash_of(f.path.clone()).await;
+                    let hash = before.filter(|b| after.as_ref() == Some(b));
                     self.store(&key, &f.rel, f.size, f.mtime, Some(&doc.parts), None)?;
-                    // The file as read: a source from it can tell a later change.
-                    let hash = crate::evidence::file_hash(&f.path);
                     self.store_read(&key, &f.rel, &doc.warnings, hash.as_deref())?;
                 }
                 Err(e) => self.store(&key, &f.rel, f.size, f.mtime, None, Some(&e.message()))?,
@@ -440,6 +449,19 @@ impl Library {
         serde_json::from_str(&parts?).ok()
     }
 
+    /// A file found changed although its size and time say not: it is read
+    /// again on the next pass.
+    pub fn invalidate(&self, folder: &Path, path: &str) {
+        let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        let key = folder.display().to_string();
+        let _ = self.db.with(|c| {
+            c.execute(
+                "UPDATE library SET mtime = -1 WHERE folder = ?1 AND path = ?2",
+                params![key, path],
+            )
+        });
+    }
+
     /// The project is gone from the list: its text goes too.
     pub fn forget(&self, folder: &Path) -> Result<()> {
         let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
@@ -535,5 +557,30 @@ mod tests {
         );
         l.forget(&folder).unwrap();
         assert_eq!(l.status(&folder).unwrap().read, 0);
+    }
+
+    // covers: FPL-01 (a source's file changed)
+    #[tokio::test]
+    async fn a_file_found_changed_is_read_again_even_under_the_same_size_and_time() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("Docs");
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("kuchen.md");
+        std::fs::write(&file, "drei Eier").unwrap();
+        let l = lib(tmp.path());
+        l.refresh(&folder).await.unwrap();
+        let time = std::fs::metadata(&file).unwrap().modified().unwrap();
+        std::fs::write(&file, "vier Eier").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+        l.refresh(&folder).await.unwrap();
+        assert!(l.passages(&folder, "Eier").unwrap()[0].contains("drei"));
+        l.invalidate(&folder, "kuchen.md");
+        l.refresh(&folder).await.unwrap();
+        assert!(l.passages(&folder, "Eier").unwrap()[0].contains("vier"));
     }
 }

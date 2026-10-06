@@ -697,7 +697,7 @@ impl Assistant {
 
     /// A mark of an answer opened: the passage as the answer had it, and how
     /// its document stands now (unchanged, changed since, gone).
-    pub fn open_evidence(
+    pub async fn open_evidence(
         &self,
         conversation: &str,
         mark: &str,
@@ -718,13 +718,20 @@ impl Assistant {
                 if !file.is_file() {
                     return Ok(evidence::open(e, None));
                 }
-                if let Some(was) = &e.file
-                    && evidence::file_hash(&file).as_ref() != Some(was)
-                {
-                    if let Some(l) = self.inner.library.get() {
-                        l.refresh_soon(folder);
+                if let Some(was) = &e.file {
+                    let f = file.clone();
+                    let now = tokio::task::spawn_blocking(move || evidence::file_hash(&f))
+                        .await
+                        .ok()
+                        .flatten();
+                    if now.as_ref() != Some(was) {
+                        // Changed under the same size and time too: read again.
+                        if let Some(l) = self.inner.library.get() {
+                            l.invalidate(folder, path);
+                            l.refresh_soon(folder);
+                        }
+                        return Ok(evidence::changed(e));
                     }
-                    return Ok(evidence::changed(e));
                 }
                 self.inner
                     .library

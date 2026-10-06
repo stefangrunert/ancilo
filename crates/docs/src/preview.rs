@@ -113,17 +113,7 @@ pub fn shown(path: &str) -> bool {
 
 /// The layout of a file in the sandboxed reader (`preview-document`).
 pub fn layout_file(path: &Path) -> Result<Layout> {
-    let meta = std::fs::metadata(path).map_err(|e| Error::invalid(e.to_string()))?;
-    if meta.len() > MAX_BYTES {
-        return Err(Error::invalid(msg(
-            "doc.too_large",
-            &[
-                ("name", &path.display()),
-                ("mb", &(MAX_BYTES / 1024 / 1024)),
-            ],
-        )));
-    }
-    let bytes = std::fs::read(path).map_err(|e| Error::invalid(e.to_string()))?;
+    let bytes = crate::extract::read_bounded(path).map_err(Error::invalid)?;
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     layout(&name, &bytes)
 }
@@ -380,8 +370,9 @@ fn text(bytes: &[u8]) -> Layout {
 fn word(name: &str, bytes: &[u8]) -> Result<Layout> {
     let bad = |e: String| Error::invalid(format!("cannot read the Word file {name} ({e})"));
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| bad(e.to_string()))?;
-    // A Word package names its parts; without that it is no Word file.
-    if zip.by_name("[Content_Types].xml").is_err() {
+    // A Word package names its parts and where its document starts; without
+    // that Word does not open it.
+    if zip.by_name("[Content_Types].xml").is_err() || zip.by_name("_rels/.rels").is_err() {
         return Err(bad("it is not a complete Word document".into()));
     }
     let entry = zip
@@ -416,11 +407,22 @@ fn word_blocks(xml: &str) -> std::result::Result<Vec<Block>, String> {
     let mut table: Vec<Vec<String>> = Vec::new();
     let mut row: Vec<String> = Vec::new();
     let mut cell = String::new();
-    // Every element closed again by the end – else the file broke off.
+    // Every element closed again by the end – else the file broke off – and
+    // one root, the document.
     let mut open = 0i64;
+    let mut roots = 0;
     loop {
         let event = reader.read_event().map_err(|e| e.to_string())?;
         match &event {
+            Event::Start(e) | Event::Empty(e) if open == 0 => {
+                roots += 1;
+                if roots > 1 || e.local_name().into_inner() != "document" {
+                    return Err("it is not a Word document".into());
+                }
+                if matches!(event, Event::Start(_)) {
+                    open += 1;
+                }
+            }
             Event::Start(_) => open += 1,
             Event::End(_) => open -= 1,
             _ => {}
@@ -489,7 +491,7 @@ fn word_blocks(xml: &str) -> std::result::Result<Vec<Block>, String> {
             _ => {}
         }
     }
-    if open != 0 {
+    if open != 0 || roots == 0 {
         return Err("the document breaks off in the middle".into());
     }
     Ok(blocks)
@@ -655,7 +657,15 @@ pub fn check(l: &Layout, task: &str) -> Vec<Finding> {
     }
     // A total the task asks for.
     let tables = tables(l);
-    let has_total = tables.iter().any(|t| t.rows.iter().any(is_total_row));
+    // A total row without a number ("wird ergänzt") is no total; one with a
+    // formula is (Ancilo keeps formulas as text – said below, not changed).
+    let has_total = tables.iter().any(|t| {
+        t.rows.iter().any(|r| {
+            is_total_row(r)
+                && (0..r.cells.len())
+                    .any(|c| value(r, c).is_some() || r.cells[c].trim_start().starts_with('='))
+        })
+    });
     if w.total && !has_total {
         out.push(find(
             CheckArea::Complete,
@@ -832,13 +842,73 @@ pub struct Wanted {
 }
 
 static TOTAL_WORD: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-    regex::Regex::new(r"(?i)\b(summe|gesamtsumme|gesamtbetrag|insgesamt|total|sum)\b")
-        .expect("valid")
+    regex::Regex::new(
+        r"(?i)\b(summe|gesamtsumme|gesamtbetrag|teilsumme|teilsummen|zwischensumme|zwischensummen|insgesamt|total|totals|subtotal|subtotals|sum)\b",
+    )
+    .expect("valid")
 });
-static NEG: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-    regex::Regex::new(r"(?i)\b(ohne|kein|keine|keinen|keiner|nicht|weg|entferne|streiche|no|without|not|remove|drop|exclude)\b")
-        .expect("valid")
-});
+/// Words that take back what directly follows them ("ohne Datum", "keine
+/// Summe", "no total", "remove the date").
+const NO_BEFORE: &[&str] = &[
+    "ohne", "kein", "keine", "keinen", "keiner", "no", "without", "entferne", "entfernt",
+    "streiche", "lösche", "remove", "drop", "exclude", "delete", "omit",
+];
+/// Words that take back what directly precedes them ("Datum weg", "Datum
+/// entfernen").
+const NO_AFTER: &[&str] = &[
+    "weg",
+    "entfernen",
+    "streichen",
+    "löschen",
+    "weglassen",
+    "removed",
+    "dropped",
+];
+/// Words that turn a taking back around ("nicht Datum entfernen", "don't
+/// remove the date").
+const NOT: &[&str] = &["nicht", "not", "don't", "do not", "never", "nie", "niemals"];
+/// Words skipped between a "no" and what it takes back.
+const FILLER: &[&str] = &[
+    "den", "der", "die", "das", "dem", "des", "the", "a", "an", "ein", "eine", "einen", "spalte",
+    "spalten", "column", "columns", "any",
+];
+
+fn words_of(s: &str) -> Vec<String> {
+    s.split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// Whether the text before something takes it back: a "no" right before it
+/// (articles between are fine), not itself turned around by a "not".
+fn no_before(before: &str) -> bool {
+    let words = words_of(before);
+    let mut it = words
+        .iter()
+        .rev()
+        .skip_while(|w| FILLER.contains(&w.as_str()));
+    let Some(w) = it.next() else {
+        return false;
+    };
+    NO_BEFORE.contains(&w.as_str()) && !it.next().is_some_and(|n| NOT.contains(&n.as_str()))
+}
+
+/// Whether the text after something takes it back ("Datum weg"), unless a
+/// "not" came right before it ("nicht Datum entfernen").
+fn no_after(before: &str, after: &str) -> bool {
+    let next = words_of(after);
+    let prev = words_of(before);
+    next.first().is_some_and(|w| NO_AFTER.contains(&w.as_str()))
+        && !prev.last().is_some_and(|w| NOT.contains(&w.as_str()))
+}
+
+/// Whether `name` stands in `text` as whole words.
+fn has_words(text: &str, name: &str) -> bool {
+    let (t, n) = (words_of(text), words_of(name));
+    !n.is_empty() && t.windows(n.len()).any(|w| w == n.as_slice())
+}
+
 static LIST: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
         r"(?i)\b(spalten?|spaltenüberschriften|columns?|column headers|felder|fields|überschriften|abschnitten|abschnitte|sections|headings)\b\s*(?:[:\-–]|für|for|namens|named|wie|like)?\s*([^.;!?\n]+)",
@@ -866,15 +936,11 @@ pub fn wanted(task: &str) -> Wanted {
         }
     };
     for sentence in task.split(['.', ';', '!', '?', '\n']) {
-        let negated = |at: usize| {
-            // A "no" within the four words before `at`.
-            let before = &sentence[..at];
-            let words: Vec<&str> = before.split_whitespace().rev().take(4).collect();
-            words.iter().any(|w| NEG.is_match(w))
-        };
         for m in QUOTED.captures_iter(sentence) {
             let text = clean(&m[1]);
-            if negated(m.get(0).map_or(0, |x| x.start())) {
+            let at = m.get(0).map_or(0, |x| x.start());
+            let end = m.get(0).map_or(0, |x| x.end());
+            if no_before(&sentence[..at]) || no_after(&sentence[..at], &sentence[end..]) {
                 w.terms.retain(|t| !t.text.eq_ignore_ascii_case(&text));
             } else {
                 add(&mut w, text, Need::Quoted);
@@ -895,7 +961,8 @@ pub fn wanted(task: &str) -> Wanted {
             } else {
                 Need::Column
             };
-            let list_negated = negated(m.get(1).map_or(0, |x| x.start()));
+            // "ohne Spalten …": the whole list is taken back.
+            let list_negated = no_before(&sentence[..m.get(1).map_or(0, |x| x.start())]);
             for item in m[2].split([',', '/', '&']).flat_map(|p| {
                 p.split(" und ")
                     .flat_map(|q| q.split(" and "))
@@ -907,46 +974,64 @@ pub fn wanted(task: &str) -> Wanted {
                     .map(str::to_string)
                     .collect::<Vec<_>>()
             }) {
-                let words: Vec<&str> = item.split_whitespace().collect();
-                let item_negated = words.first().is_some_and(|w| NEG.is_match(w));
-                let words: Vec<&str> = words
+                let all: Vec<&str> = item.split_whitespace().collect();
+                let lower = |w: &&str| w.to_lowercase();
+                // "…, nicht Datum", "…, ohne Steuer": this one is not wanted.
+                let item_negated = all.first().is_some_and(|w| {
+                    let w = lower(w);
+                    NO_BEFORE.contains(&w.as_str()) || NOT.contains(&w.as_str())
+                });
+                let item_after = all
+                    .last()
+                    .is_some_and(|w| NO_AFTER.contains(&lower(w).as_str()));
+                let words: Vec<&str> = all
                     .into_iter()
-                    .filter(|w| !STOP.contains(&w.to_lowercase().as_str()) && !NEG.is_match(w))
+                    .filter(|w| {
+                        let w = lower(w);
+                        !STOP.contains(&w.as_str())
+                            && !NO_BEFORE.contains(&w.as_str())
+                            && !NO_AFTER.contains(&w.as_str())
+                            && !NOT.contains(&w.as_str())
+                    })
                     .collect();
                 // A column name is a few words; more is a sentence going on.
                 if !(1..=3).contains(&words.len()) || words[0].starts_with(['„', '"']) {
                     continue;
                 }
                 let text = clean(&words.join(" "));
-                // A total has its own rule (a total row), not a column.
-                if TOTAL_WORD.is_match(&text) && words.len() == 1 {
+                // A total has its own rule (a total row), never a column.
+                if TOTAL_WORD.is_match(&text) {
                     continue;
                 }
-                if list_negated || item_negated {
+                if list_negated || item_negated || item_after {
                     w.terms.retain(|t| !t.text.eq_ignore_ascii_case(&text));
                 } else {
                     add(&mut w, text, need);
                 }
             }
         }
-        // "Datum weg", "remove the date": what an earlier sentence asked
-        // for is taken back.
-        if NEG.is_match(sentence) {
-            let lower = sentence.to_lowercase();
-            let near_no = |t: &Term| {
-                let tl = t.text.to_lowercase();
-                lower.find(&tl).is_some_and(|at| {
-                    let before: Vec<&str> = lower[..at].split_whitespace().rev().take(3).collect();
-                    let after: Vec<&str> =
-                        lower[at + tl.len()..].split_whitespace().take(2).collect();
-                    before.iter().chain(&after).any(|w| NEG.is_match(w))
-                })
-            };
-            w.terms.retain(|t| !near_no(t));
-        }
+        // "Lass Datum weg", "remove the date", "ohne Datum": what an earlier
+        // sentence asked for is taken back – only by such a taking back,
+        // never by any "nicht" nearby ("Datum ist nicht optional").
+        let lower = sentence.to_lowercase();
+        w.terms.retain(|t| {
+            let tl = t.text.to_lowercase();
+            !lower.match_indices(&tl).any(|(at, _)| {
+                let end = at + tl.len();
+                let whole = !lower[..at]
+                    .chars()
+                    .next_back()
+                    .is_some_and(char::is_alphanumeric)
+                    && !lower[end..]
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_alphanumeric);
+                whole && (no_before(&lower[..at]) || no_after(&lower[..at], &lower[end..]))
+            })
+        });
         if let Some(m) = TOTAL_WORD.find(sentence) {
-            let after: Vec<&str> = sentence[m.end()..].split_whitespace().take(1).collect();
-            w.total = !(negated(m.start()) || after.iter().any(|x| NEG.is_match(x)));
+            w.total = !(no_before(&sentence[..m.start()])
+                || no_after(&sentence[..m.start()], &sentence[m.end()..]));
         }
     }
     w
@@ -965,7 +1050,8 @@ const STOP: &[&str] = &[
 /// Whether `t` is where it belongs in `l`.
 fn present(l: &Layout, t: &Term) -> bool {
     let want = t.text.to_lowercase();
-    let has = |s: &str| s.to_lowercase().contains(&want);
+    // Whole words: an "Update" column is no "Date" column.
+    let has = |s: &str| has_words(s, &t.text);
     match t.need {
         Need::Quoted => has(&all_text(l)),
         Need::Column => {
@@ -1106,16 +1192,32 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
     if t.rows.len() < 2 {
         return (0, 0);
     }
-    let header = &t.rows[0].cells;
+    // The header: the first row with two cells or more (a title above it
+    // does not count); the data below it.
+    let Some(h) = t
+        .rows
+        .iter()
+        .take(3)
+        .position(|r| r.cells.iter().filter(|c| !c.trim().is_empty()).count() >= 2)
+    else {
+        return (0, 0);
+    };
+    let header = &t.rows[h].cells;
+    let first = h + 1;
     let cols = t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
-    // A total: against the rows since the last total, all rows since the
-    // header, or the totals before it (a grand total of subtotals).
-    let mut seg_from = 1usize;
+    // A total: a subtotal against the rows of its group; a grand total
+    // against all rows (or the subtotals and what came after them); a plain
+    // "Summe"/"Total" against any of these.
+    let mut seg_from = first;
     let mut totals: Vec<Vec<Num>> = vec![Vec::new(); cols];
-    for (ri, r) in t.rows.iter().enumerate().skip(1) {
-        if !is_total_row(r) {
+    let mut after_sub: Vec<usize> = vec![first; cols];
+    // Per column: each total with what it may add up to.
+    type Check = (u32, Num, Vec<Vec<Num>>);
+    let mut per_col: Vec<Vec<Check>> = vec![Vec::new(); cols];
+    for (ri, r) in t.rows.iter().enumerate().skip(first) {
+        let Some(kind) = total_kind(r) else {
             continue;
-        }
+        };
         for (c, col_totals) in totals.iter_mut().enumerate() {
             let Some(total) = value(r, c) else {
                 continue;
@@ -1123,51 +1225,78 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
             let data = |from: usize| -> Vec<Num> {
                 t.rows[from..ri]
                     .iter()
-                    .filter(|x| !is_total_row(x))
+                    .filter(|x| total_kind(x).is_none())
                     .filter_map(|x| value(x, c))
                     .collect()
             };
             let seg = data(seg_from);
-            let all = data(1);
-            let before = col_totals.clone();
-            col_totals.push(total);
-            let candidates: Vec<&Vec<Num>> = [&seg, &all, &before]
-                .into_iter()
-                .filter(|v| !v.is_empty())
-                .collect();
-            if candidates.is_empty() {
-                continue;
+            let all = data(first);
+            let mut subs_then = col_totals.clone();
+            subs_then.extend(data(after_sub[c]));
+            let candidates: Vec<Vec<Num>> = match kind {
+                Total::Sub => vec![seg],
+                Total::Grand => vec![all, subs_then],
+                Total::Any => vec![seg, all, subs_then],
             }
-            checked += 1;
-            let right = candidates.iter().any(|cand| {
-                [Way::De, Way::En]
-                    .iter()
-                    .any(|&way| close(cand.iter().map(|n| n.get(way)).sum(), total.get(way)))
-            });
-            if !right {
-                wrong += 1;
-                let what = header
-                    .get(c)
-                    .filter(|h| !h.trim().is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| column_letter(c));
-                let sum: f64 = candidates[0].iter().map(|n| n.get(Way::De)).sum();
-                out.push(find(
-                    CheckArea::Numbers,
-                    CheckLevel::Error,
-                    msg(
-                        "check.total_wrong",
-                        &[
-                            ("what", &what),
-                            ("shown", &show(total.get(Way::De))),
-                            ("sum", &show(sum)),
-                        ],
-                    ),
-                    Some(t.at(r.number, c)),
-                ));
+            .into_iter()
+            .filter(|v| !v.is_empty())
+            .collect();
+            if kind == Total::Sub {
+                col_totals.push(total);
+                after_sub[c] = ri + 1;
+            }
+            if !candidates.is_empty() {
+                per_col[c].push((r.number, total, candidates));
             }
         }
         seg_from = ri + 1;
+    }
+    // One way of reading a column's numbers for all its totals: the way
+    // under which the fewest are wrong (1,250 is either 1.25 or 1250 – the
+    // same in every row of one column).
+    for (c, checks) in per_col.iter().enumerate() {
+        if checks.is_empty() {
+            continue;
+        }
+        let wrong_in = |way: Way| -> Vec<&Check> {
+            checks
+                .iter()
+                .filter(|(_, total, cands)| {
+                    !cands
+                        .iter()
+                        .any(|cand| close(cand.iter().map(|n| n.get(way)).sum(), total.get(way)))
+                })
+                .collect()
+        };
+        let (de, en) = (wrong_in(Way::De), wrong_in(Way::En));
+        let (way, bad) = if en.len() < de.len() {
+            (Way::En, en)
+        } else {
+            (Way::De, de)
+        };
+        checked += checks.len();
+        wrong += bad.len();
+        for (row, total, cands) in bad {
+            let what = header
+                .get(c)
+                .filter(|h| !h.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| column_letter(c));
+            let sum: f64 = cands[0].iter().map(|n| n.get(way)).sum();
+            out.push(find(
+                CheckArea::Numbers,
+                CheckLevel::Error,
+                msg(
+                    "check.total_wrong",
+                    &[
+                        ("what", &what),
+                        ("shown", &show(total.get(way))),
+                        ("sum", &show(sum)),
+                    ],
+                ),
+                Some(t.at(*row, c)),
+            ));
+        }
     }
     // Quantity × price = amount, row by row.
     let col = |re: &regex::Regex| header.iter().position(|h| re.is_match(h.trim()));
@@ -1175,7 +1304,7 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
         && q != a
         && p != a
     {
-        for r in t.rows.iter().skip(1).filter(|r| !is_total_row(r)) {
+        for r in t.rows.iter().skip(first).filter(|r| !is_total_row(r)) {
             if let (Some(qv), Some(pv), Some(av)) = (value(r, q), value(r, p), value(r, a)) {
                 checked += 1;
                 let right = [Way::De, Way::En]
@@ -1205,14 +1334,48 @@ fn check_numbers(t: &Table, out: &mut Vec<Finding>) -> (usize, usize) {
     (checked, wrong)
 }
 
+/// What kind of total a row is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Total {
+    /// Of its group ("Teilsumme", "Subtotal").
+    Sub,
+    /// Of everything ("Gesamtsumme", "Grand total").
+    Grand,
+    /// Either ("Summe", "Total").
+    Any,
+}
+
+fn total_kind(r: &Row) -> Option<Total> {
+    let label = r.cells.iter().find(|c| TOTAL_LABEL.is_match(c.trim()))?;
+    let l = label.trim().to_lowercase();
+    Some(
+        if ["teilsumme", "zwischensumme", "subtotal", "sub-total"]
+            .iter()
+            .any(|w| l.starts_with(w))
+        {
+            Total::Sub
+        } else if [
+            "gesamtsumme",
+            "endsumme",
+            "grand total",
+            "gesamtbetrag",
+            "insgesamt",
+        ]
+        .iter()
+        .any(|w| l.starts_with(w))
+        {
+            Total::Grand
+        } else {
+            Total::Any
+        },
+    )
+}
+
 /// A row that is a total: its label says so – only the word (and a
 /// "netto", a currency, a colon), not a row that merely starts with it
 /// ("Total service").
 fn is_total_row(r: &Row) -> bool {
-    r.cells
-        .iter()
-        .take(3)
-        .any(|c| TOTAL_LABEL.is_match(c.trim()))
+    r.cells.iter().any(|c| TOTAL_LABEL.is_match(c.trim()))
 }
 
 static TOTAL_LABEL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
@@ -1573,6 +1736,65 @@ mod tests {
     }
 
     #[test]
+    fn review_2_one_reading_of_numbers_per_column() {
+        // 3.75 needs 1,250 = 1.25; 8250 needs 1,250 = 1250: not both.
+        let e = csv(
+            "Item,Amount\nA,\"1,250\"\nB,\"2,500\"\nSubtotal,3.75\nC,\"4,500\"\nGrand total,8250",
+            "",
+        );
+        assert_eq!(errors(&e).len(), 1, "{e:#?}");
+        // One reading for all: fine.
+        let e = csv(
+            "Item,Amount\nA,\"1,250\"\nB,\"2,500\"\nSubtotal,3750\nC,\"4,500\"\nGrand total,8250",
+            "",
+        );
+        assert!(errors(&e).is_empty(), "{e:#?}");
+    }
+
+    #[test]
+    fn review_2_a_total_label_anywhere_in_its_row() {
+        let e = csv(
+            "Nr,Datum,Notiz,Art,Betrag\n1,1.1.,x,A,10\n2,2.1.,y,B,20\n,,,Summe,40",
+            "",
+        );
+        assert_eq!(errors(&e).len(), 1, "{e:#?}");
+    }
+
+    #[test]
+    fn review_2_only_a_real_taking_back_takes_back() {
+        let names = |t: &str| required(t);
+        assert_eq!(
+            names("Spalten Datum und Betrag. Datum ist nicht optional."),
+            ["Datum", "Betrag"]
+        );
+        assert_eq!(
+            names("Spalten Datum und Steuer. Nicht Datum entfernen."),
+            ["Datum", "Steuer"]
+        );
+        assert!(wanted("Ohne Steuer muss die Summe stimmen.").total);
+        assert_eq!(
+            names("Spalte Datum. Keine Summe, aber Spalte Betrag."),
+            ["Datum", "Betrag"]
+        );
+        assert!(!wanted("Spalte Datum. Keine Summe, aber Spalte Betrag.").total);
+        // Real ones still do.
+        assert_eq!(names("Spalten Name, Datum. Entferne das Datum."), ["Name"]);
+        assert_eq!(
+            names("Spalten Name, Datum und Steuer. Datum entfernen, Steuer weg."),
+            ["Name"]
+        );
+        assert_eq!(
+            names("Spalten Firma, Betrag, nicht Datum."),
+            ["Firma", "Betrag"]
+        );
+        assert!(!wanted("Without a total.").total);
+        // Columns are whole words: an "Update" column is no "Date" column.
+        let e = csv("Name,Update\nA,x", "columns Name and Date");
+        assert_eq!(errors(&e).len(), 1, "{e:#?}");
+        assert!(errors(&csv("Name,Date (UTC)\nA,x", "columns Name and Date")).is_empty());
+    }
+
+    #[test]
     fn review_1_a_word_file_that_breaks_off_is_not_readable() {
         use std::io::Write;
         let mut buf = std::io::Cursor::new(Vec::new());
@@ -1584,6 +1806,9 @@ mod tests {
             )
             .unwrap();
             z.write_all(b"<Types/>").unwrap();
+            z.start_file("_rels/.rels", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            z.write_all(b"<Relationships/>").unwrap();
             z.start_file(
                 "word/document.xml",
                 zip::write::SimpleFileOptions::default(),
@@ -1608,6 +1833,55 @@ mod tests {
             z.finish().unwrap();
         }
         assert!(layout("b.docx", buf.get_ref()).is_err());
+    }
+
+    #[test]
+    fn review_2_a_word_package_is_whole_with_one_document() {
+        use std::io::Write;
+        let pack = |parts: &[(&str, &str)]| {
+            let mut buf = std::io::Cursor::new(Vec::new());
+            {
+                let mut z = zip::ZipWriter::new(&mut buf);
+                for (name, body) in parts {
+                    z.start_file(*name, zip::write::SimpleFileOptions::default())
+                        .unwrap();
+                    z.write_all(body.as_bytes()).unwrap();
+                }
+                z.finish().unwrap();
+            }
+            buf.into_inner()
+        };
+        let doc = "<w:document xmlns:w=\"w\"><w:body><w:p><w:r><w:t>Test</w:t></w:r></w:p></w:body></w:document>";
+        let whole = [
+            ("[Content_Types].xml", "<Types/>"),
+            ("_rels/.rels", "<Relationships/>"),
+            ("word/document.xml", doc),
+        ];
+        assert!(layout("a.docx", &pack(&whole)).is_ok());
+        // Without where the document starts.
+        assert!(layout("a.docx", &pack(&[whole[0], whole[2]])).is_err());
+        // Two roots, or a root that is no document.
+        let two = format!("{doc}{doc}");
+        assert!(
+            layout(
+                "a.docx",
+                &pack(&[whole[0], whole[1], ("word/document.xml", &two)])
+            )
+            .is_err()
+        );
+        let other = [
+            whole[0],
+            whole[1],
+            ("word/document.xml", "<w:body xmlns:w=\"w\"></w:body>"),
+        ];
+        assert!(layout("a.docx", &pack(&other)).is_err());
+        assert!(
+            layout(
+                "a.docx",
+                &pack(&[whole[0], whole[1], ("word/document.xml", "")])
+            )
+            .is_err()
+        );
     }
 
     #[test]

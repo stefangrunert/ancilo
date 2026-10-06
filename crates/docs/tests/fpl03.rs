@@ -113,6 +113,8 @@ fn docx(blocks: &[Value]) -> Vec<u8> {
         let o = zip::write::SimpleFileOptions::default();
         z.start_file("[Content_Types].xml", o).unwrap();
         z.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>"#).unwrap();
+        z.start_file("_rels/.rels", o).unwrap();
+        z.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#).unwrap();
         z.start_file("word/document.xml", o).unwrap();
         z.write_all(doc.as_bytes()).unwrap();
         z.finish().unwrap();

@@ -71,9 +71,10 @@ export const Markdown = memo(function Markdown({ text, onSource, sources }: { te
             ...components,
             a: ({ href, children }) => {
               const id = href?.startsWith("#source-") ? href.slice("#source-".length) : null;
-              // Only a source of this very answer becomes a button; any other
-              // link to a source is its plain text.
-              if (id && !(sources ?? []).includes(id)) return <>{children}</>;
+              // Only a mark of this very answer becomes a button – its text
+              // is the mark's number, as Ancilo wrote it; any other link to
+              // a source (made up, by reference …) is its plain text.
+              if (id && (!(sources ?? []).includes(id) || textOf(children) !== id.replace(/^D/i, ""))) return <>{children}</>;
               if (!id) {
                 return (
                   <a href={href} target="_blank" rel="noreferrer noopener">

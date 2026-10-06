@@ -110,19 +110,22 @@ pub fn of(passages: Vec<Passage>, about: impl Fn(&str) -> About) -> Vec<Evidence
 /// cannot be read or is larger than any document Ancilo reads.
 pub fn file_hash(path: &std::path::Path) -> Option<String> {
     use std::io::Read;
-    let meta = std::fs::metadata(path).ok()?;
-    if !meta.is_file() || meta.len() > crate::extract::MAX_BYTES {
-        return None;
-    }
-    let mut f = std::fs::File::open(path).ok()?;
+    let max = crate::extract::MAX_BYTES;
+    let mut f = std::fs::File::open(path).ok()?.take(max + 1);
     let mut h = Sha256::new();
     let mut buf = vec![0u8; 64 * 1024];
+    let mut read = 0u64;
     loop {
         let n = f.read(&mut buf).ok()?;
         if n == 0 {
             break;
         }
+        read += n as u64;
         h.update(&buf[..n]);
+    }
+    // Too large to be read as a document: no hash to compare with.
+    if read > max {
+        return None;
     }
     Some(hex::encode(&h.finalize()[..16]))
 }
@@ -180,15 +183,36 @@ pub fn check(answer: &str, evidence: &mut [Evidence]) -> (String, Marks) {
     let mut marks = Marks::default();
     let mut out = String::with_capacity(answer.len());
     // Code (fenced blocks, inline spans) is left exactly as written.
-    for (code, part) in code_spans(answer) {
-        if code {
+    let spans = code_spans(answer);
+    // Link definitions to a source ("[ref]: #source-D1") go: a link of the
+    // model is never a source, written inline or by reference.
+    let mut refs: Vec<String> = Vec::new();
+    let prose: Vec<(bool, String)> = spans
+        .iter()
+        .map(|(code, part)| {
+            if *code {
+                return (true, (*part).to_string());
+            }
+            let kept = SOURCE_DEF.replace_all(part, |c: &regex::Captures| {
+                refs.push(c[1].trim().to_lowercase());
+                ""
+            });
+            (false, kept.into_owned())
+        })
+        .collect();
+    for (code, part) in &prose {
+        if *code {
             out.push_str(part);
         } else {
-            check_prose(part, evidence, &mut marks, &mut out);
+            check_prose(part, evidence, &mut marks, &refs, &mut out);
         }
     }
     (out, marks)
 }
+
+static SOURCE_DEF: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?im)^ {0,3}\[([^\]\n]+)\]:[ \t]*<?#source-[^\n]*(?:\n|$)").expect("valid")
+});
 
 /// The answer cut into prose and code: fenced blocks (```) and inline
 /// spans (`…`) are code.
@@ -226,7 +250,13 @@ fn code_spans(text: &str) -> Vec<(bool, &str)> {
     out
 }
 
-fn check_prose(text: &str, evidence: &mut [Evidence], marks: &mut Marks, out: &mut String) {
+fn check_prose(
+    text: &str,
+    evidence: &mut [Evidence],
+    marks: &mut Marks,
+    refs: &[String],
+    out: &mut String,
+) {
     let mut rest = text;
     while let Some(i) = rest.find('[') {
         out.push_str(&rest[..i]);
@@ -241,6 +271,21 @@ fn check_prose(text: &str, evidence: &mut [Evidence], marks: &mut Marks, out: &m
         };
         let inner = &after[..end];
         let tail = &after[end + 1..];
+        // "[text][ref]", "[ref][]" to a source definition taken out: its text.
+        if let Some(r) = tail.strip_prefix('[')
+            && let Some(close) = r.find(']').filter(|c| !r[..*c].contains('\n'))
+        {
+            let label = if r[..close].trim().is_empty() {
+                inner
+            } else {
+                &r[..close]
+            };
+            if refs.contains(&label.trim().to_lowercase()) {
+                out.push_str(inner);
+                rest = &r[close + 1..];
+                continue;
+            }
+        }
         // A link the model wrote: never a source – a link to a source
         // (`#source-…`) becomes its plain text; others stay as written.
         if let Some(target) = tail.strip_prefix('(')
@@ -431,6 +476,24 @@ mod tests {
         assert_eq!(m.cited, ["D1", "D2"]);
         assert_eq!(m.unknown, ["D7", "D9"]);
         assert!(e.iter().all(|e| e.cited));
+    }
+
+    #[test]
+    fn review_2_a_link_to_a_source_by_reference_is_its_text() {
+        let mut ev = vec![ev("D1", "a.txt", 1)];
+        let (out, marks) = check(
+            "Claim [proof][ref] and [other][].\n\n[ref]: #source-D1\n  [Other]: <#source-D1>\n",
+            &mut ev,
+        );
+        assert!(!out.contains("#source-"), "{out}");
+        assert!(out.starts_with("Claim proof and other."), "{out}");
+        assert!(marks.cited.is_empty());
+        // Other references stay.
+        let (out, _) = check("See [docs][d].\n\n[d]: https://a.de\n", &mut ev);
+        assert!(
+            out.contains("[docs][d]") && out.contains("[d]: https://a.de"),
+            "{out}"
+        );
     }
 
     #[test]

@@ -519,6 +519,7 @@ export const en = {
   "check.keepNow": "Keep them as they are now?",
   "check.saveNow": "Save them as they are now?",
   "check.limit.not_all_checked": "Only the first {checked} of {total} rows of “{sheet}” were checked – the rest was not.",
+  "check.changedWhileAsking": "The results have changed since you were asked – close this and look at them again.",
   "check.look": "Look at it",
   "check.ok": "checked",
   "check.warnings": "{n} note(s)",

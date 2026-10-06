@@ -298,12 +298,27 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
     }
     // Its first line – the command, what it was about – always, where room
     // allows (a finding there has no error word to be found by).
-    let first = (!small)
-        .then(|| all.iter().position(|l| !is_marker(l)))
-        .flatten();
+    // In a small room only when it is short (a third of the room).
+    let first = all
+        .iter()
+        .position(|l| !is_marker(l))
+        .filter(|&f| f + 1 < all.len())
+        .filter(|&f| !small || chars(plain(all[f])) <= room / 3);
+    // Shown already: the first line – and, when it names a failure, the
+    // detail after it.
+    let mut shown: Vec<usize> = Vec::new();
     if let Some(f) = first {
         out.push_str(head(plain(all[f]), (room / 6).clamp(40, 200)));
         out.push('\n');
+        shown.push(f);
+        if is_key_line(all[f])
+            && let Some(next) = all.get(f + 1).filter(|l| !is_marker(l))
+            && !is_key_line(next)
+            && f + 1 < all.len() - 1
+        {
+            out.push_str(&format!("  {}\n", squeeze(plain(next), 200)));
+            shown.push(f + 1);
+        }
     }
     // The end: half the room – in a small one only the last line (the
     // exit code, the verdict).
@@ -323,24 +338,44 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
         tail_from = i;
     }
     // The findings before the end.
-    let mut distinct = std::collections::HashSet::new();
+    let mut distinct: std::collections::HashSet<&str> =
+        shown.iter().map(|&i| plain(all[i])).collect();
     let keys: Vec<usize> = (0..tail_from)
-        .filter(|&i| Some(i) != first && !is_marker(all[i]) && is_key_line(all[i]))
+        .filter(|i| !shown.contains(i) && !is_marker(all[*i]) && is_key_line(all[*i]))
         .filter(|&i| distinct.insert(plain(all[i])))
         .collect();
     let mut skip = keys.clone();
-    skip.extend(first);
+    skip.extend(shown.iter().copied());
     let rare = off_pattern(&all[..tail_from], &skip);
     let keys_set: std::collections::HashSet<usize> = keys.iter().copied().collect();
     // From both ends of the log, then those in between; then the odd ones.
-    let mut order = Vec::new();
-    let (mut a, mut b) = (0usize, keys.len());
+    // One of each kind of finding first (a schema error among two hundred
+    // missing values), then from both ends of the log, then the odd lines.
+    let kind = |i: usize| -> String {
+        plain(all[i])
+            .chars()
+            .filter(|c| !c.is_ascii_digit())
+            .take(40)
+            .collect()
+    };
+    let mut kinds = std::collections::HashSet::new();
+    let mut order: Vec<usize> = keys
+        .iter()
+        .copied()
+        .filter(|&i| kinds.insert(kind(i)))
+        .collect();
+    let rest: Vec<usize> = keys
+        .iter()
+        .copied()
+        .filter(|i| !order.contains(i))
+        .collect();
+    let (mut a, mut b) = (0usize, rest.len());
     while a < b {
-        order.push(keys[a]);
+        order.push(rest[a]);
         a += 1;
         if a < b {
             b -= 1;
-            order.push(keys[b]);
+            order.push(rest[b]);
         }
     }
     order.extend(rare.iter().copied());
@@ -349,14 +384,15 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
     let mut used = 0;
     let mut left_out = 0;
     for i in order {
-        let mut entry = vec![(i, format!("! {}", head(plain(all[i]), 200)))];
+        let mut entry = vec![(i, format!("! {}", squeeze(plain(all[i]), 200)))];
         // The detail after a finding (not one of the findings itself).
         if i + 1 < tail_from
             && !keys_set.contains(&(i + 1))
             && !picked.contains_key(&(i + 1))
-            && Some(i + 1) != first
+            && !shown.contains(&(i + 1))
+            && !distinct_shown(&shown, &all, i + 1)
         {
-            entry.push((i + 1, format!("  {}", head(plain(all[i + 1]), 200))));
+            entry.push((i + 1, format!("  {}", squeeze(plain(all[i + 1]), 200))));
         }
         let cost: usize = entry
             .iter()
@@ -423,6 +459,21 @@ fn log_body(text: &str, room: usize, signals: Option<&str>) -> String {
         return last(&out, room).to_string();
     }
     out
+}
+
+/// Whether line `i` reads as one shown already (an earlier cut's copy).
+fn distinct_shown(shown: &[usize], all: &[&str], i: usize) -> bool {
+    shown.iter().any(|&s| plain(all[s]) == plain(all[i]))
+}
+
+/// A long line in `cap` characters: its start (what kind of line) and its
+/// end (where a diagnosis usually ends: the reason, the field).
+fn squeeze(line: &str, cap: usize) -> String {
+    if chars(line) <= cap {
+        return line.to_string();
+    }
+    let front = cap / 3;
+    format!("{} … {}", head(line, front), last(line, cap - front - 3))
 }
 
 /// A line as found, without what an earlier cut put before it.
@@ -669,7 +720,8 @@ pub fn definition() -> Value {
             "id": {"type": "string", "description": "The result's id, e.g. \"r3\""},
             "query": {"type": "string", "description": "Only lines containing this text (case-insensitive)"},
             "from_line": {"type": "integer", "description": "First line to show (1 = the start; negative: from the end)"},
-            "lines": {"type": "integer", "description": "How many lines (default 150, at most 400)"}
+            "lines": {"type": "integer", "description": "How many lines (default 150, at most 400)"},
+            "from_char": {"type": "integer", "description": "In a very long line (with from_line): the character to start at"}
         }, "required": ["id"]}
     }})
 }
@@ -683,6 +735,8 @@ struct ReadArgs {
     from_line: Option<i64>,
     #[serde(default)]
     lines: Option<usize>,
+    #[serde(default)]
+    from_char: Option<usize>,
 }
 
 /// Runs `read_result`: (text, is_error).
@@ -710,22 +764,37 @@ pub fn read(store: &ResultStore, args: &Value) -> (String, bool) {
     let room = READ_MAX_CHARS - 300;
     let mut out = String::new();
     if let Some(q) = a.query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
-        let q = head(q, MAX_QUERY_CHARS).to_lowercase();
+        // Searched as given – a query too long is refused, never cut.
+        if chars(q) > MAX_QUERY_CHARS {
+            return (
+                format!("the query is too long – at most {MAX_QUERY_CHARS} characters"),
+                true,
+            );
+        }
+        let find = regex::RegexBuilder::new(&regex::escape(q))
+            .case_insensitive(true)
+            .build()
+            .expect("an escaped query");
+        // From a line on (paging through many hits).
+        let from = a.from_line.filter(|n| *n > 0).map_or(0, |n| n as usize - 1);
         let hits: Vec<(usize, &str)> = lines
             .iter()
             .enumerate()
-            .filter(|(_, l)| l.to_lowercase().contains(&q))
+            .filter(|(_, l)| find.is_match(l))
             .map(|(i, l)| (i, *l))
             .collect();
         out.push_str(&format!(
             "{label} {} lines contain {:?}\n",
             hits.len(),
-            head(&q, 60)
+            head(q, 60)
         ));
-        for (i, l) in hits.iter().take(READ_MAX_LINES) {
-            let row = format!("{:>6}\t{}\n", i + 1, around(l, Some(&q)));
-            if chars(&out) + chars(&row) > room {
-                out.push_str("… (more – narrow the query or use from_line)\n");
+        for (shown, (i, l)) in hits.iter().filter(|(i, _)| *i >= from).enumerate() {
+            let row = format!("{:>6}\t{}\n", i + 1, around(l, Some(&find)));
+            if shown >= READ_MAX_LINES || chars(&out) + chars(&row) > room {
+                out.push_str(&format!(
+                    "… more – query with from_line {} for the next ones\n",
+                    i + 1
+                ));
                 break;
             }
             out.push_str(&row);
@@ -741,7 +810,12 @@ pub fn read(store: &ResultStore, args: &Value) -> (String, bool) {
     let end = (start + count).min(total);
     out.push_str(&format!("{label} lines {}–{end}\n", start + 1));
     for (i, l) in lines[start..end].iter().enumerate() {
-        let row = format!("{:>6}\t{}\n", start + i + 1, around(l, None));
+        let text = match a.from_char.filter(|_| i == 0) {
+            // A part of a very long line, from a character on.
+            Some(c) => window(l, c),
+            None => around(l, None),
+        };
+        let row = format!("{:>6}\t{text}\n", start + i + 1);
         if chars(&out) + chars(&row) > room {
             out.push_str(&format!(
                 "… (more from line {} – use from_line)\n",
@@ -768,23 +842,36 @@ const LINE_CHARS: usize = 500;
 
 /// A line as `read_result` shows it: whole when short; a long one around
 /// the first match of `query` (else its start) – with what was left out said.
-fn around(line: &str, query: Option<&str>) -> String {
+fn around(line: &str, query: Option<&regex::Regex>) -> String {
     let n = chars(line);
     if n <= LINE_CHARS {
         return line.to_string();
     }
+    // Where the match is in the line itself (in characters).
     let at = query
-        .and_then(|q| line.to_lowercase().find(q))
-        .map(|b| line.to_lowercase()[..b].chars().count())
+        .and_then(|q| q.find(line))
+        .map(|m| line[..m.start()].chars().count())
         .unwrap_or(0);
-    let from = at.saturating_sub(LINE_CHARS / 3);
+    window(line, at.saturating_sub(LINE_CHARS / 3))
+}
+
+/// [`LINE_CHARS`] characters of a line from `from` on, with what was left
+/// out said (and how to read on).
+fn window(line: &str, from: usize) -> String {
+    let n = chars(line);
+    let from = from.min(n);
     let to = (from + LINE_CHARS).min(n);
     let part: String = line.chars().skip(from).take(to - from).collect();
     format!(
-        "{}{part}{} [characters {}–{to} of {n}]",
+        "{}{part}{} [characters {}–{to} of {n}{}]",
         if from > 0 { "…" } else { "" },
         if to < n { "…" } else { "" },
-        from + 1
+        from + 1,
+        if to < n {
+            format!("; from_char {to} reads on")
+        } else {
+            String::new()
+        }
     )
 }
 
@@ -993,7 +1080,7 @@ mod tests {
             }
         }
         log.push_str("[exit code 0]");
-        for budget in [600, 800, 2000] {
+        for budget in [150, 200, 300, 600, 800, 2000] {
             let s = shorten(&meta("bash", false, Some("r1")), &log, budget);
             assert!(
                 s.contains("pending invoice 123 must be paid"),
@@ -1062,9 +1149,44 @@ mod tests {
         assert!(found.contains("CRUCIAL finding"), "{found}");
         assert!(found.contains("[characters "), "{found}");
         let (plain, _) = read(&store, &json!({"id": "r1"}));
-        assert!(plain.contains("of 1515]"), "{plain}");
-        let (long, _) = read(&store, &json!({"id": "r1", "query": "a".repeat(15_000)}));
-        assert!(chars(&long) <= READ_MAX_CHARS, "{}", chars(&long));
+        assert!(
+            plain.contains("of 1515; from_char 500 reads on]"),
+            "{plain}"
+        );
+        let (long, err) = read(&store, &json!({"id": "r1", "query": "a".repeat(15_000)}));
+        assert!(err && chars(&long) <= READ_MAX_CHARS, "{}", chars(&long));
+        // Searched as given: a query that is not there finds nothing (review 2, 28).
+        let (none, _) = read(
+            &store,
+            &json!({"id": "r1", "query": format!("{}ABSENT", "a".repeat(150))}),
+        );
+        assert!(none.contains(" 0 lines contain"), "{none}");
+        // A long line read on from a character (review 2, 8).
+        let (on, _) = read(
+            &store,
+            &json!({"id": "r1", "from_line": 1, "from_char": 1000}),
+        );
+        assert!(
+            on.contains("[characters 1001–1500 of 1515; from_char 1500 reads on]"),
+            "{on}"
+        );
+        // Case mapping that changes length moves no window (review 2, 21).
+        let odd = format!("{}CRUCIAL", "İ".repeat(600));
+        store.keep("bash", &json!({}), false, &format!("{odd}\nx\n"));
+        let (hit, _) = read(&store, &json!({"id": "r2", "query": "crucial"}));
+        assert!(hit.contains("CRUCIAL"), "{hit}");
+        // Paging through many hits.
+        let hits: String = (0..500).map(|i| format!("hit {i}\n")).collect();
+        store.keep("bash", &json!({}), false, &hits);
+        let (next, _) = read(
+            &store,
+            &json!({"id": "r3", "query": "hit", "from_line": 401}),
+        );
+        assert!(
+            next.contains("   401\thit 400") && !next.contains("hit 399\n"),
+            "{}",
+            &next[..200]
+        );
         let many: String = (0..2000)
             .map(|i| format!("{i} {}\n", "x".repeat(400)))
             .collect();
