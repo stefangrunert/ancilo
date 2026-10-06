@@ -196,9 +196,9 @@ fn code_spans(text: &str) -> Vec<(bool, &str)> {
     let mut out = Vec::new();
     let mut start = 0;
     let mut i = 0;
-    let bytes = text.as_bytes();
-    while i < bytes.len() {
-        if text[i..].starts_with("```") {
+    while i < text.len() {
+        let rest = &text[i..];
+        if rest.starts_with("```") {
             // A fence: to the closing fence (or the end).
             let close = text[i + 3..]
                 .find("```")
@@ -207,22 +207,18 @@ fn code_spans(text: &str) -> Vec<(bool, &str)> {
             out.push((true, &text[i..close]));
             start = close;
             i = close;
-        } else if bytes[i] == b'`' {
-            let close = text[i + 1..]
-                .find(['`', '\n'])
-                .filter(|e| text.as_bytes()[i + 1 + e] == b'`')
-                .map(|e| i + 1 + e + 1);
-            match close {
-                Some(c) => {
-                    out.push((false, &text[start..i]));
-                    out.push((true, &text[i..c]));
-                    start = c;
-                    i = c;
-                }
-                None => i += 1,
-            }
+        } else if rest.starts_with('`')
+            && let Some(e) = rest[1..].find(['`', '\n'])
+            && rest[1 + e..].starts_with('`')
+        {
+            let close = i + 1 + e + 1;
+            out.push((false, &text[start..i]));
+            out.push((true, &text[i..close]));
+            start = close;
+            i = close;
         } else {
-            i += 1;
+            // On to the next character (never into one).
+            i += rest.chars().next().map_or(1, char::len_utf8);
         }
     }
     out.push((false, &text[start..]));
@@ -450,6 +446,16 @@ mod tests {
         );
         assert_eq!(m.unknown, ["D7"]);
         assert!(!e[0].cited, "a link is not a citation");
+    }
+
+    #[test]
+    fn umlauts_and_code_never_break_the_check() {
+        let mut e = vec![ev("D1", "Brücke.pdf", 1)];
+        let (t, _) = check(
+            "Für Größe `ü` und ```\nä```, Übergabe [D1] – fünf [D2].",
+            &mut e,
+        );
+        assert_eq!(t, "Für Größe `ü` und ```\nä```, Übergabe [D1] – fünf.");
     }
 
     #[test]

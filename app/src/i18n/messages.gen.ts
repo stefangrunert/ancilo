@@ -40,6 +40,7 @@ export const messagesEn = {
   "msg.check.unreadable": "the file cannot be read: {why}",
   "msg.check.readable": "the file opens and can be read",
   "msg.check.empty": "the file is empty",
+  "msg.check.partly": "only the first {checked} of {total} rows of “{sheet}” were checked – the rest was not",
   "msg.check.header_only": "the table has a header row but no rows below it",
   "msg.check.missing": "not in the file, though the task asks for it: {what}",
   "msg.check.has": "has what the task names: {what}",

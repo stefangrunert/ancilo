@@ -42,6 +42,7 @@ describe("A task", () => {
       get_session: () => s,
       get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }),
       apply_changes: () => ({ files: [] }),
+      check_results: () => ({ version: "v-1", files: [] }),
       discard_changes: () => ({ files: [] }),
       list_sessions: () => [],
     });
@@ -55,6 +56,7 @@ describe("A task", () => {
     expect(calls.some((c) => c.op === "discard_changes")).toBe(false);
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Drop" }));
     await waitFor(() => expect(calls.find((c) => c.op === "discard_changes")?.input).toEqual({ session: "s-1", paths: null }));
+    await waitFor(() => expect(within(card).getByRole("button", { name: "Keep" })).toBeEnabled());
     await userEvent.click(within(card).getByRole("button", { name: "Keep" }));
     await waitFor(() => expect(calls.find((c) => c.op === "apply_changes")).toMatchObject({ input: { session: "s-1", paths: null, version: "v-1" }, confirmed: true }));
     // No access mode: a task works on its own – the folder changes only when kept.
@@ -86,6 +88,7 @@ describe("A task", () => {
         s = task({ free: true, changes: [], saved: where });
         return where;
       },
+      check_results: () => ({ version: "v-9", files: [] }),
       open_document: () => ({ opened: true }),
       show_in_finder: () => ({ opened: true }),
       list_sessions: () => [],
@@ -95,8 +98,9 @@ describe("A task", () => {
     // No folder of the task anywhere, nothing to keep.
     expect(screen.queryByTitle("/home/.ancilo/tasks/x")).toBeNull();
     expect(within(card).queryByRole("button", { name: "Keep" })).toBeNull();
+    await waitFor(() => expect(within(card).getByRole("button", { name: "Save to Documents" })).toBeEnabled());
     await userEvent.click(within(card).getByRole("button", { name: "Save to Documents" }));
-    await waitFor(() => expect(calls.find((c) => c.op === "save_results")?.input).toEqual({ session: "s-1" }));
+    await waitFor(() => expect(calls.find((c) => c.op === "save_results")?.input).toEqual({ session: "s-1", version: "v-9" }));
     const saved = await screen.findByTestId("task-saved");
     expect(saved).toHaveTextContent("Saved 1 file(s) in “Documents”.");
     await userEvent.click(within(saved).getByRole("button", { name: "Open" }));
@@ -148,6 +152,45 @@ describe("A task", () => {
     expect(calls.find((c) => c.op === "save_results")).toBeUndefined();
     await userEvent.click(await screen.findByTestId("anyway"));
     await waitFor(() => expect(calls.find((c) => c.op === "save_results")?.input).toEqual({ session: "s-1", version: "v1" }));
+  });
+
+  // covers: FPL-03 (review 1, finding 2)
+  it("keeps only with the checks of the results there are now – and asks when what was looked at is older", async () => {
+    let version = "v1";
+    let fail = true;
+    const s = () => task({ changes_version: version, changes: [{ path: "Kosten.xlsx", added: 0, removed: 0, runs: false, change: "added" }] });
+    const { calls, queryClient } = renderWithDaemon(<TaskView id="s-1" />, {
+      get_session: s,
+      get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }),
+      check_results: () => {
+        if (fail) throw { code: "conflict", message: "the results changed while they were read – look again" };
+        return { version, files: [{ path: "Kosten.xlsx", file: "aa", worst: "ok", errors: 0, warnings: 0 }] };
+      },
+      preview_result: () => ({ path: "Kosten.xlsx", version, file: "aa", findings: [], layout: { kind: "spreadsheet", sheets: [{ name: "S", total_rows: 1, rows: [{ number: 1, cells: [version] }] }] } }),
+      apply_changes: () => ({ files: [] }),
+      list_sessions: () => [],
+    });
+    const card = await screen.findByTestId("task-changes");
+    // The checks failed: no keeping on nothing.
+    await screen.findByText(/changed while they were read/);
+    expect(within(card).getByRole("button", { name: "Keep" })).toBeDisabled();
+    fail = false;
+    await queryClient.invalidateQueries({ queryKey: ["check_results"] });
+    await waitFor(() => expect(within(card).getByRole("button", { name: "Keep" })).toBeEnabled());
+    // Looked at v1 …
+    await userEvent.click(within(card).getByRole("button", { name: "Look at it" }));
+    await within(await screen.findByTestId("result-preview")).findByText("v1");
+    await userEvent.click(within(screen.getByTestId("result-preview")).getByRole("button", { name: "Close" }));
+    // … the task changes them to v2 and they are checked again.
+    version = "v2";
+    await queryClient.invalidateQueries({ queryKey: ["get_session"] });
+    await waitFor(() => expect(within(card).getByRole("button", { name: "Keep" })).toBeEnabled());
+    await waitFor(() => expect(calls.filter((c) => c.op === "check_results").length).toBeGreaterThan(2));
+    await userEvent.click(within(card).getByRole("button", { name: "Keep" }));
+    expect(await screen.findByText(/changed since you looked at them/)).toBeInTheDocument();
+    expect(calls.find((c) => c.op === "apply_changes")).toBeUndefined();
+    await userEvent.click(screen.getByTestId("anyway"));
+    await waitFor(() => expect(calls.find((c) => c.op === "apply_changes")?.input).toMatchObject({ version: "v2" }));
   });
 
   it("a preview of an earlier version says so and offers the new one – never swaps it", async () => {

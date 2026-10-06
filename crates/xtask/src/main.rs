@@ -1154,11 +1154,9 @@ mod tests {
 
     fn relative_links(markdown: &str) -> Vec<String> {
         let mut links = Vec::new();
-        let mut rest = markdown;
-        while let Some(i) = rest.find("](") {
-            rest = &rest[i + 2..];
-            let end = rest.find(')').unwrap_or(rest.len());
-            let target = rest[..end].split('#').next().unwrap_or_default().trim();
+        // Outside code: `[text](…)` in backticks is no link.
+        for (_, found) in super::links(markdown) {
+            let target = found.split('#').next().unwrap_or_default().trim();
             if !target.is_empty()
                 && !target.contains("://")
                 && !target.starts_with("mailto:")

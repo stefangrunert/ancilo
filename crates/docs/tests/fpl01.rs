@@ -69,6 +69,7 @@ pub fn variants() -> Vec<(&'static str, Segmenter)> {
 
 /// What a selection misses of a case (empty: everything needed is there).
 fn misses(c: &Case, picked: &[Passage]) -> Vec<String> {
+    let picked = &joined(c, picked);
     let mut out = Vec::new();
     for req in &c.required {
         let n = norm(req);
@@ -84,6 +85,57 @@ fn misses(c: &Case, picked: &[Passage]) -> Vec<String> {
             out.push(format!("{req:?} not from where the case says it is"));
         }
     }
+    out
+}
+
+/// Passages next to each other in the same part, as one: a requirement
+/// across their border is there when both are (review 1, finding 18). Made
+/// from the part's own text, so the overlap is not doubled.
+fn joined(c: &Case, picked: &[Passage]) -> Vec<Passage> {
+    let mut sorted: Vec<&Passage> = picked.iter().collect();
+    sorted.sort_by_key(|p| (p.document.clone(), p.part, p.start.unwrap_or(0)));
+    let text_of = |p: &Passage| -> Option<Vec<char>> {
+        let d = c.documents.iter().find(|d| d.name == p.document)?;
+        Some(d.parts.get(p.part)?.text.chars().collect())
+    };
+    // Where a passage ends in the part: after its last line there (a
+    // paragraph passage is shorter than its place – lines trimmed).
+    let span = |p: &Passage, chars: &[char]| -> Option<(usize, usize)> {
+        let start = p.start?;
+        let last: Vec<char> = p.text.lines().last()?.trim().chars().collect();
+        let at = (start..=chars.len().saturating_sub(last.len()))
+            .find(|&i| chars[i..i + last.len()] == last[..])?;
+        Some((start, at + last.len()))
+    };
+    let mut out: Vec<Passage> = Vec::new();
+    let mut end = 0usize;
+    for p in sorted {
+        let Some(chars) = text_of(p) else {
+            out.push(p.clone());
+            continue;
+        };
+        let Some((start, stop)) = span(p, &chars) else {
+            out.push(p.clone());
+            continue;
+        };
+        if let Some(last) = out.last_mut()
+            && last.document == p.document
+            && last.part == p.part
+            && let Some(from) = last.start
+            && start <= end + 2
+        {
+            end = end.max(stop);
+            last.text = chars[from..end].iter().collect();
+            continue;
+        }
+        end = stop;
+        out.push(Passage {
+            text: chars[start..stop].iter().collect(),
+            ..p.clone()
+        });
+    }
+    // Each passage on its own, too.
+    out.extend(picked.iter().cloned());
     out
 }
 
@@ -112,10 +164,12 @@ fn chars_to_hit(c: &Case, ranked: &[(usize, Passage)]) -> Option<usize> {
     let mut worst = 0;
     for req in &c.required {
         let mut used = 0;
+        let mut taken: Vec<Passage> = Vec::new();
         let mut hit = None;
         for (_, p) in ranked {
             used += p.text.chars().count();
-            if holds(c, req, p) {
+            taken.push(p.clone());
+            if holds(c, req, p) || joined(c, &taken).iter().any(|j| holds(c, req, j)) {
                 hit = Some(used);
                 break;
             }
@@ -226,6 +280,10 @@ fn which_segmentation_keeps_what_the_question_needs() {
         print!(" {:>13}", m.map_or("–".to_string(), |m| m.to_string()));
     }
     println!();
+    // Ancilo's own way passes every development case – a regression fails.
+    if std::env::var("FPL01_CASES").is_err() {
+        assert_eq!(passed[0], cases.len(), "bestand lost a development case");
+    }
     if let Ok(out) = std::env::var("FPL01_REPORT") {
         let names: Vec<&str> = vs.iter().map(|v| v.0).collect();
         std::fs::write(out, serde_json::to_string_pretty(&json!({"cases": path.display().to_string(), "variants": names, "passed": passed, "within_2000": to_hit.iter().map(|v| within(v, 2000)).collect::<Vec<_>>(), "within_4000": to_hit.iter().map(|v| within(v, 4000)).collect::<Vec<_>>(), "median_chars_to_hit": medians, "rows": rows})).unwrap()).unwrap();

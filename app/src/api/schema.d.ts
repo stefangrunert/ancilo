@@ -3175,6 +3175,11 @@ export interface components {
             cited: boolean;
             /** @description The document's name (in a folder: its path there). */
             document: string;
+            /**
+             * @description The file itself as it was read (hash; folder documents) – a change of
+             *     the file shows even before Ancilo reads it again.
+             */
+            file?: string | null;
             /** @description The mark (`D3`) – unique in its conversation. */
             id: string;
             origin: components["schemas"]["Origin"];
@@ -3373,6 +3378,14 @@ export interface components {
         } | {
             /** @constant */
             kind: "not_shown";
+        } | {
+            /** Format: uint */
+            checked: number;
+            /** @constant */
+            kind: "not_all_checked";
+            sheet: string;
+            /** Format: uint */
+            total: number;
         };
         /** @description A loaded model in the resource view. */
         LoadedView: {
@@ -3702,6 +3715,11 @@ export interface components {
             cells: string[];
             /** Format: uint32 */
             number: number;
+            /**
+             * @description The cells that are numbers in the file itself (a spreadsheet's number
+             *     cells) – read as such, not from their text.
+             */
+            values?: (number | null)[];
         };
         Run: {
             /** Format: uint64 */
@@ -3861,7 +3879,10 @@ export interface components {
         };
         SheetView: {
             name: string;
-            /** @description Rows with content (their number in the sheet), the first ones. */
+            /**
+             * @description Rows with content (their number in the sheet) – all of them as read;
+             *     the first ones once [`Layout::shown`].
+             */
             rows: components["schemas"]["Row"][];
             /**
              * Format: uint

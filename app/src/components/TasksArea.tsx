@@ -11,7 +11,7 @@ import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
 import { WebSwitch } from "./WebSearch";
 import { Dialog, ErrorNote } from "./ui";
-import { CheckBadge, problems, ResultPreview, useChecks } from "./ResultPreview";
+import { CheckBadge, problems, ResultPreview, useChecks, useLooked } from "./ResultPreview";
 import { previewKindFor } from "../state/preview";
 
 type Session = OpOutput<"get_session">;
@@ -294,8 +294,10 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
   };
   const running = s.status === "running";
   const checks = useChecks(s.id, s.changes_version, s.changes.length > 0 && !running);
+  const looked = useLooked();
   // Kept is what was checked and shown – the daemon refuses anything newer.
-  const keep = () => void act(() => client.op("apply_changes", { session: s.id, paths: null, version: checks.data?.version ?? s.changes_version ?? null }, true));
+  const keep = () => void act(() => client.op("apply_changes", { session: s.id, paths: null, version: checks.data?.version ?? null }, true));
+  const askFirst = problems(checks.data) > 0 || looked.olderThan(checks.data?.version);
   if (s.changes.length === 0) {
     if (!s.applied || running) return null;
     return (
@@ -337,7 +339,7 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
         ))}
       </ul>
       <div className="row">
-        <button type="button" data-testid="keep" onClick={() => (problems(checks.data) > 0 ? setAnyway(true) : keep())}>
+        <button type="button" data-testid="keep" disabled={!checks.ready} title={checks.ready ? undefined : t("check.checking")} onClick={() => (askFirst ? setAnyway(true) : keep())}>
           {t("task.keep")}
         </button>
         <button type="button" className="secondary" onClick={() => setDropping(true)}>
@@ -363,7 +365,7 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
       </Dialog>
       <AnywayDialog
         open={anyway}
-        text={t("check.keepAnyway", { n: problems(checks.data) })}
+        text={[looked.olderThan(checks.data?.version) ? t("check.changedSinceLooked") : "", problems(checks.data) > 0 ? t("check.keepAnyway", { n: problems(checks.data) }) : t("check.keepNow")].filter(Boolean).join(" ")}
         label={t("task.keep")}
         onNo={() => setAnyway(false)}
         onYes={() => {
@@ -371,7 +373,8 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
           keep();
         }}
       />
-      <ResultPreview session={s.id} path={looking} current={s.changes_version} onClose={() => setLooking(null)} />
+      <ResultPreview session={s.id} path={looking} current={s.changes_version} onClose={() => setLooking(null)} onSeen={looked.seen} />
+      <ErrorNote error={checks.error} />
     </div>
   );
 }
@@ -395,10 +398,12 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
     }
   };
   const checks = useChecks(s.id, s.changes_version, s.changes.length > 0 && s.status !== "running");
+  const looked = useLooked();
   // Saved is what was checked and shown – the daemon refuses anything newer.
-  const version = checks.data?.version ?? s.changes_version ?? null;
+  const version = checks.data?.version ?? null;
   const save = (dir: string | null) => void act(() => client.op("save_results", { session: s.id, ...(dir ? { dir } : {}), ...(version ? { version } : {}) }));
-  const trySave = (dir: string | null) => (problems(checks.data) > 0 ? setAnyway({ dir }) : save(dir));
+  const askFirst = problems(checks.data) > 0 || looked.olderThan(version);
+  const trySave = (dir: string | null) => (askFirst ? setAnyway({ dir }) : save(dir));
   if (s.status === "running") return null;
   if (s.changes.length === 0) {
     if (!s.saved) return null;
@@ -442,12 +447,13 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
         ))}
       </ul>
       <div className="row">
-        <button type="button" data-testid="save" onClick={() => trySave(null)}>
+        <button type="button" data-testid="save" disabled={!checks.ready} title={checks.ready ? undefined : t("check.checking")} onClick={() => trySave(null)}>
           {t("results.save")}
         </button>
         <button
           type="button"
           className="secondary"
+          disabled={!checks.ready}
           onClick={async () => {
             const dir = await choose();
             if (dir) trySave(dir);
@@ -458,7 +464,7 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
       </div>
       <AnywayDialog
         open={anyway !== null}
-        text={t("check.saveAnyway", { n: problems(checks.data) })}
+        text={[looked.olderThan(version) ? t("check.changedSinceLooked") : "", problems(checks.data) > 0 ? t("check.saveAnyway", { n: problems(checks.data) }) : t("check.saveNow")].filter(Boolean).join(" ")}
         label={t("results.save")}
         onNo={() => setAnyway(null)}
         onYes={() => {
@@ -467,7 +473,8 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
           save(dir);
         }}
       />
-      <ResultPreview session={s.id} path={looking} current={s.changes_version} onClose={() => setLooking(null)} />
+      <ResultPreview session={s.id} path={looking} current={s.changes_version} onClose={() => setLooking(null)} onSeen={looked.seen} />
+      <ErrorNote error={checks.error} />
     </div>
   );
 }

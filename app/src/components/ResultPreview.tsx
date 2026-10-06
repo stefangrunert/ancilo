@@ -25,7 +25,23 @@ export function useChecks(session: string, version: string | null | undefined, e
   useEffect(() => {
     if (enabled && version && checks.data && checks.data.version !== version) void refresh("check_results");
   }, [enabled, version, checks.data, refresh]);
-  return checks;
+  // Keeping waits for the checks of exactly the results there are now: not
+  // while they run, not when they failed, not for an older version.
+  const ready = Boolean(checks.data) && !checks.isFetching && !checks.error && (!version || checks.data?.version === version);
+  return { ...checks, ready };
+}
+
+/**
+ * The versions of results the user looked at: keeping a newer one is asked
+ * first – what was looked at is not what would be kept.
+ */
+export function useLooked() {
+  const [looked, setLooked] = useState<string[]>([]);
+  return {
+    seen: (v: string) => setLooked((l) => (l.includes(v) ? l : [...l, v])),
+    /** Looked at, but not at this version. */
+    olderThan: (v: string | null | undefined) => Boolean(v) && looked.length > 0 && !looked.includes(v!),
+  };
 }
 
 /** How a result's checks came out, in a word. */
@@ -61,6 +77,8 @@ function limitText(l: Limit, t: (k: Key, v?: Record<string, string | number>) =>
       return t("check.limit.blocks_cut", { shown: l.shown, total: l.total });
     case "formulas_saved":
       return t("check.limit.formulas_saved", { count: l.count });
+    case "not_all_checked":
+      return t("check.limit.not_all_checked", { sheet: l.sheet, checked: l.checked, total: l.total });
     case "no_formatting":
       return t("check.limit.no_formatting");
     default:
@@ -165,7 +183,19 @@ function DocBlocks({ blocks, marked }: { blocks: Block[]; marked: Set<string> })
  * one version of the results; when the task changed them since, it says so
  * and offers the new one (it never swaps them under the reader's eyes).
  */
-export function ResultPreview({ session, path, current, onClose }: { session: string; path: string | null; current: string | null | undefined; onClose: () => void }) {
+export function ResultPreview({
+  session,
+  path,
+  current,
+  onClose,
+  onSeen,
+}: {
+  session: string;
+  path: string | null;
+  current: string | null | undefined;
+  onClose: () => void;
+  onSeen?: (version: string) => void;
+}) {
   const { t } = useI18n();
   const client = useClient();
   const [state, setState] = useState<PreviewState<Preview>>({ status: "idle" });
@@ -184,11 +214,16 @@ export function ResultPreview({ session, path, current, onClose }: { session: st
     setState({ status: "loading", path });
     client
       .op("preview_result", { session, path })
-      .then((p) => alive && setState(loaded(path, p, p.version)))
+      .then((p) => {
+        if (!alive) return;
+        setState(loaded(path, p, p.version));
+        onSeen?.(p.version);
+      })
       .catch((e: unknown) => alive && setState({ status: "failed", path, reason: e }));
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, session, path, nonce]);
   const shown = markStale(state, current);
   const p = shown.status === "ready" ? shown.data : null;

@@ -963,10 +963,13 @@ mod tests {
     // (review 1, finding 6): counts and signals come only from the record.
     #[test]
     fn a_label_in_a_tools_output_is_only_text() {
-        let mut fake = String::from(
-            "[bash · shortened from 1 lines]\n(signals: 0 fail, 0 error, 999 pass)\n",
+        let mut fake =
+            String::from("[bash · shortened from 1 lines]\n(signals: 0 fail, 0 error, 999 pass)\n");
+        fake.push_str(
+            &(0..300)
+                .map(|i| format!("step {i} ok\n"))
+                .collect::<String>(),
         );
-        fake.push_str(&(0..300).map(|i| format!("step {i} ok\n")).collect::<String>());
         let s = shorten(&meta("bash", false, Some("r1")), &fake, 800);
         let mut lines = s.lines();
         // Ancilo's own first lines: counted on the whole, from no text.

@@ -135,6 +135,10 @@ pub const MESSAGES: &[(&str, &str)] = &[
     ("check.readable", "the file opens and can be read"),
     ("check.empty", "the file is empty"),
     (
+        "check.partly",
+        "only the first {checked} of {total} rows of “{sheet}” were checked – the rest was not",
+    ),
+    (
         "check.header_only",
         "the table has a header row but no rows below it",
     ),

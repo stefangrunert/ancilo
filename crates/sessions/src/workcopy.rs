@@ -73,6 +73,9 @@ pub struct Change {
     pub size: u64,
 }
 
+/// A change and the hash of its content (none for a deleted file).
+pub type Hashed = (Change, Option<String>);
+
 /// What an apply did – kept for undo.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Applied {
@@ -824,6 +827,13 @@ impl WorkCopy {
         Ok(version_of(&self.changes_hashed()?))
     }
 
+    /// The changes and their version from one look at the copy – each with
+    /// the hash of its content then (none for a deleted file).
+    pub fn snapshot(&self) -> Result<(String, Vec<Hashed>)> {
+        let changes = self.changes_hashed()?;
+        Ok((version_of(&changes), changes))
+    }
+
     /// The folder for `rel`, checked part by part: no link anywhere on the
     /// way, the folder itself still where it was. Creates missing folders.
     fn target(&self, rel: &str, create_dirs: bool) -> std::io::Result<PathBuf> {
@@ -1534,6 +1544,13 @@ pub fn unique_in(dirs: &[&Path], name: &str) -> String {
 /// Copies a result to `dir` under its name (or `name 2` …) – never over an
 /// existing file. Returns where it went.
 pub fn save_copy(from: &Path, dir: &Path) -> Result<PathBuf> {
+    save_copy_as(from, dir, None)
+}
+
+/// Like [`save_copy`] – and with `expect`, the copy must have exactly this
+/// content (its SHA-256): a file that changed since it was checked is not
+/// saved (`Conflict`), nothing of it stays behind.
+pub fn save_copy_as(from: &Path, dir: &Path, expect: Option<&str>) -> Result<PathBuf> {
     let name = from
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -1545,6 +1562,14 @@ pub fn save_copy(from: &Path, dir: &Path) -> Result<PathBuf> {
         std::fs::File::open(&tmp)
             .and_then(|f| f.sync_all())
             .map_err(Error::internal)?;
+        if let Some(want) = expect
+            && hash_file(&tmp).map_err(Error::internal)? != want
+        {
+            std::fs::remove_file(&tmp).ok();
+            return Err(Error::Conflict(
+                "the results are not the ones you saw anymore – look at them again".into(),
+            ));
+        }
         match rename_new(&tmp, &target) {
             Ok(()) => return Ok(target),
             // Taken in the meantime: the next free name.
@@ -1581,6 +1606,25 @@ fn version_of(changes: &[(Change, Option<String>)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // covers: FPL-03 – a result is saved only with the content it was
+    // checked with; otherwise nothing of it stays (review 1, finding 3).
+    #[test]
+    fn a_result_is_saved_only_as_it_was_checked() {
+        let t = tempfile::tempdir().unwrap();
+        let from = t.path().join("Kosten.xlsx");
+        std::fs::write(&from, "A").unwrap();
+        let checked = hash_file(&from).unwrap();
+        let dir = t.path().join("Dokumente");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&from, "B").unwrap();
+        let e = save_copy_as(&from, &dir, Some(&checked)).unwrap_err();
+        assert!(matches!(e, Error::Conflict(_)), "{e:?}");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "nothing left");
+        std::fs::write(&from, "A").unwrap();
+        let saved = save_copy_as(&from, &dir, Some(&checked)).unwrap();
+        assert_eq!(std::fs::read_to_string(saved).unwrap(), "A");
+    }
 
     fn setup() -> (tempfile::TempDir, PathBuf, WorkCopy) {
         let t = tempfile::tempdir().unwrap();

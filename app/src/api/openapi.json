@@ -1347,6 +1347,13 @@
             "description": "The document's name (in a folder: its path there).",
             "type": "string"
           },
+          "file": {
+            "description": "The file itself as it was read (hash; folder documents) – a change of\nthe file shows even before Ancilo reads it again.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "description": "The mark (`D3`) – unique in its conversation.",
             "type": "string"
@@ -2094,6 +2101,35 @@
             },
             "required": [
               "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Only the first rows of a sheet were checked (and shown).",
+            "properties": {
+              "checked": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "kind": {
+                "const": "not_all_checked",
+                "type": "string"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "total": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "sheet",
+              "checked",
+              "total"
             ],
             "type": "object"
           }
@@ -3171,6 +3207,17 @@
             "format": "uint32",
             "minimum": 0,
             "type": "integer"
+          },
+          "values": {
+            "description": "The cells that are numbers in the file itself (a spreadsheet's number\ncells) – read as such, not from their text.",
+            "items": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -3703,7 +3750,7 @@
             "type": "string"
           },
           "rows": {
-            "description": "Rows with content (their number in the sheet), the first ones.",
+            "description": "Rows with content (their number in the sheet) – all of them as read;\nthe first ones once [`Layout::shown`].",
             "items": {
               "$ref": "#/components/schemas/Row"
             },

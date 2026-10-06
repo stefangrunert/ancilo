@@ -247,6 +247,10 @@ struct Inner {
     extractor: Mutex<Option<Arc<ancilo_docs::Extractor>>>,
 }
 
+/// A task's results at one moment: the version, the copy's place, and each
+/// result with the hash of its content then.
+type Results = (String, PathBuf, Vec<(String, String)>);
+
 /// A task's result looked at before keeping it (FPL-03).
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ResultPreview {
@@ -1364,14 +1368,20 @@ impl Sessions {
         let Changes::Folder { copy, .. } = &meta.changes else {
             return Err(Error::invalid("this task has no results"));
         };
-        // Saved is what the user saw (and what was checked) – nothing newer.
+        // Saved is what the user saw (and what was checked) – nothing newer:
+        // the version, and every copy against the content it had then.
+        let (now, snapshot) = copy.snapshot()?;
         if let Some(v) = version
-            && copy.version()? != v
+            && now != v
         {
             return Err(Error::Conflict(
                 "the results are not the ones you saw anymore – look at them again".into(),
             ));
         }
+        let expected: HashMap<String, String> = snapshot
+            .into_iter()
+            .filter_map(|(c, h)| Some((c.path, h?)))
+            .collect();
         let results: Vec<String> = copy
             .changes()?
             .into_iter()
@@ -1397,7 +1407,17 @@ impl Sessions {
         let work = copy.work();
         let mut files = Vec::new();
         for rel in &results {
-            files.push(crate::workcopy::save_copy(&work.join(rel), &dir)?);
+            let expect = version.and(expected.get(rel).map(String::as_str));
+            match crate::workcopy::save_copy_as(&work.join(rel), &dir, expect) {
+                Ok(f) => files.push(f),
+                Err(e) => {
+                    // Nothing half saved: what this call saved goes again.
+                    for f in &files {
+                        std::fs::remove_file(f).ok();
+                    }
+                    return Err(e);
+                }
+            }
         }
         // Saved: they are part of the task's own place now.
         copy.apply(Some(&results), None)?;
@@ -1432,17 +1452,16 @@ impl Sessions {
 
     /// The files of a task's changes that can be looked at, and the
     /// version of exactly these changes.
-    fn results_of(meta: &Meta) -> Result<(String, PathBuf, Vec<String>)> {
+    fn results_of(meta: &Meta) -> Result<Results> {
         let Changes::Folder { copy, .. } = &meta.changes else {
             return Err(Error::invalid("only a task's results can be looked at"));
         };
-        let version = copy.version()?;
-        let files = copy
-            .changes()?
+        let (version, changes) = copy.snapshot()?;
+        let files = changes
             .into_iter()
-            .filter(|c| c.kind != crate::workcopy::ChangeKind::Deleted)
-            .map(|c| c.path)
-            .filter(|p| ancilo_docs::preview::shown(p))
+            .filter(|(c, _)| c.kind != crate::workcopy::ChangeKind::Deleted)
+            .filter(|(c, _)| ancilo_docs::preview::shown(&c.path))
+            .filter_map(|(c, h)| Some((c.path, h?)))
             .collect();
         Ok((version, copy.work(), files))
     }
@@ -1451,24 +1470,46 @@ impl Sessions {
         &self,
         work: &Path,
         rel: &str,
+        expect: &str,
         task: &str,
-    ) -> (
+    ) -> Result<(
         String,
         Option<ancilo_docs::preview::Layout>,
         Vec<ancilo_docs::preview::Finding>,
-    ) {
-        // Read once: what is hashed is what is shown and checked.
-        let bytes = match std::fs::read(work.join(rel)) {
-            Ok(b) => b,
-            Err(e) => {
-                return (
-                    String::new(),
-                    None,
-                    ancilo_docs::preview::unreadable(&e.to_string()),
-                );
+    )> {
+        // Read once – and only the content the version was made of: what
+        // is shown and checked is exactly that (else the caller says so).
+        let path = work.join(rel);
+        let read = tokio::task::spawn_blocking(move || -> std::result::Result<Vec<u8>, String> {
+            let len = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
+            if len > ancilo_docs::extract::MAX_BYTES {
+                return Err(ancilo_core::msg(
+                    "doc.too_large",
+                    &[
+                        (
+                            "name",
+                            &path.file_name().unwrap_or_default().to_string_lossy(),
+                        ),
+                        ("mb", &(ancilo_docs::extract::MAX_BYTES / 1024 / 1024)),
+                    ],
+                ));
             }
+            std::fs::read(&path).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+        let bytes = match read {
+            Ok(b) => b,
+            Err(e) => return Ok((String::new(), None, ancilo_docs::preview::unreadable(&e))),
         };
-        let hash = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&bytes)[..8]);
+        let full = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&bytes));
+        if full != expect {
+            return Err(Error::Conflict(
+                "the results changed while they were read – look again".into(),
+            ));
+        }
+        let hash = full[..16].to_string();
         let name = Path::new(rel)
             .file_name()
             .unwrap_or_default()
@@ -1486,13 +1527,13 @@ impl Sessions {
             },
             None => ancilo_docs::preview::layout(&name.to_string_lossy(), &bytes),
         };
-        match layout {
+        Ok(match layout {
             Ok(l) => {
                 let findings = ancilo_docs::preview::check(&l, task);
                 (hash, Some(l.shown()), findings)
             }
             Err(e) => (hash, None, ancilo_docs::preview::unreadable(&e.message())),
-        }
+        })
     }
 
     /// A result of a task looked at (FPL-03): how it looks inside and what
@@ -1502,9 +1543,9 @@ impl Sessions {
         let (meta, history) = self.load(id)?;
         let (version, work, files) = Self::results_of(&meta)?;
         // Only a result of this task – never another path.
-        let rel = files
+        let (rel, expect) = files
             .iter()
-            .find(|f| f.as_str() == path)
+            .find(|(f, _)| f.as_str() == path)
             .ok_or_else(|| {
                 Error::not_found(format!(
                     "{path} is not a result of this task that can be shown"
@@ -1512,14 +1553,8 @@ impl Sessions {
             })?
             .clone();
         let task = Self::task_words(&history);
-        let (file, layout, findings) = self.look_at(&work, &rel, &task).await;
-        // Changed while it was read: what was shown would not be what is kept.
-        let (after, _, _) = Self::results_of(&self.load(id)?.0)?;
-        if after != version {
-            return Err(Error::Conflict(
-                "the results changed while they were read – look again".into(),
-            ));
-        }
+        // Bound to the version: the bytes shown are those it was made of.
+        let (file, layout, findings) = self.look_at(&work, &rel, &expect, &task).await?;
         Ok(ResultPreview {
             path: rel,
             version,
@@ -1536,8 +1571,8 @@ impl Sessions {
         let (version, work, files) = Self::results_of(&meta)?;
         let task = Self::task_words(&history);
         let mut out = Vec::new();
-        for rel in files {
-            let (file, _, findings) = self.look_at(&work, &rel, &task).await;
+        for (rel, expect) in files {
+            let (file, _, findings) = self.look_at(&work, &rel, &expect, &task).await?;
             let count = |l: CheckLevel| findings.iter().filter(|f| f.level == l).count();
             out.push(ResultCheck {
                 worst: findings
@@ -1550,12 +1585,6 @@ impl Sessions {
                 path: rel,
                 file,
             });
-        }
-        let (after, _, _) = Self::results_of(&self.load(id)?.0)?;
-        if after != version {
-            return Err(Error::Conflict(
-                "the results changed while they were read – look again".into(),
-            ));
         }
         Ok(ResultChecks {
             version,
