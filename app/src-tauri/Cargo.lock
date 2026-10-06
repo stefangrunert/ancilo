@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-app"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ancilo-core",
  "base64 0.23.1",
@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "ancilo-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "chrono",
  "dirs 6.0.0",

@@ -2,9 +2,12 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
-## 0.5.0 – 2026-10-06
+## 0.5.1 – 2026-10-06
 
 - **A model that does not fit no longer stops a conversation**: when the chosen model does not fit in memory right now – after a long session made its context grow, or because other programs took the room – Ancilo first starts it with a smaller context that fits; if even that is too large, the most capable other local model that fits answers, and the conversation says so ("Qwen3.6-35B does not fit in memory right now … so Qwen3.5-4B answered"). It goes back to the chosen model as soon as there is room. Only when nothing fits at all does it ask you to close programs.
+
+## 0.5.0 – 2026-10-06
+
 - **Sources you can open**: an answer from your documents puts a small numbered mark after what it took from them – a click shows the very passage the answer had, with file, page or sheet and the text around it. Ancilo numbers the passages and checks the marks: a source the AI made up is taken out, and the answer says so. If the file changed since, the source says that too and still shows what the answer had.
 - **Look at a task's results before keeping them**: tables and Word documents a task wrote are checked – does the file open, is what you asked for there (the columns you named, a total), do the totals and amounts add up – and *Look at it* shows the file with its rows and columns, a wrong cell marked. A *problem* is only what is sure; what Ancilo can only suppose (an empty cell, a total in the text that differs) is a *note* and never blocks a good file. *Keep* and *Save* take exactly the version you saw; if the task changed it since, Ancilo checks again first. The checks say what they cannot do: whether the content is right.
 - **Long tasks keep what matters**: when a task's earlier tool output has to get shorter, a test run keeps its failures and its verdict (before: only its start – the failing test was the first thing to go), a list its first rows, a file its start and any line that stands out; each says whether the step failed. The whole output stays with the conversation, and the AI can read it again (`read_result`). With a small model (Qwen3.5 4B) on long multi-step tasks, 11 of 12 runs came out right instead of 7 of 12; on outputs Ancilo had never seen, the shortened text kept what mattered in 10 of 12 cases (before: 0).
