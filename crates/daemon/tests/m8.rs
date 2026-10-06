@@ -1504,3 +1504,102 @@ fallback: { text: "Fertig: nichts zu tun." }
     assert_eq!(last, "Fertig: nichts zu tun.", "{s}");
     env.stop().await;
 }
+
+// covers: FPL-02 – a long result keeps its failure through the cut between
+// turns, stays whole in its session (also after a restart) and is read
+// there again; another session cannot read it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn long_results_keep_their_failure_and_are_read_again_in_their_session() {
+    // 3000 lines, one failing check in the middle, the verdict at the end.
+    let check = "python3 -c \"import sys\nfor i in range(3000):\n    print('check_%04d ... FAILED: total 12.49 != 12.50' % i if i == 1700 else 'check_%04d ... ok' % i)\nprint('== 2999 passed, 1 failed ==')\nsys.exit(1)\"";
+    let script = format!(
+        r#"
+steps:
+  - respond: {{ tool_calls: [{{ name: bash, arguments: {{ command: {check:?} }} }}] }}
+  - expect: {{ any_message_contains: "check_1700 ... FAILED" }}
+    respond: {{ text: "One check failed." }}
+  - respond: {{ tool_calls: [{{ name: read_file, arguments: {{ path: "src/lib.rs" }} }}] }}
+  - respond: {{ text: "It returns 42." }}
+  - respond: {{ text: "Noted." }}
+  - expect: {{ any_message_contains: "[bash · FAILED · shortened from 3002 lines · read_result r1]" }}
+    respond: {{ tool_calls: [{{ name: read_result, arguments: {{ id: "r1", query: "failed" }} }}] }}
+  - expect: {{ any_message_contains: "1701\tcheck_1700 ... FAILED: total 12.49 != 12.50" }}
+    respond: {{ text: "check_1700 failed: total 12.49 != 12.50." }}
+"#
+    );
+    let after_restart = r#"
+steps:
+  - expect: { offers_tool: read_result }
+    respond: { tool_calls: [{ name: read_result, arguments: { id: "r1", from_line: -1 } }] }
+  - expect: { any_message_contains: "[exit code 1]" }
+    respond: { text: "Still there after the restart." }
+  - respond: { tool_calls: [{ name: read_result, arguments: { id: "r1" } }] }
+  - expect: { any_message_contains: "there is no result r1 in this conversation" }
+    respond: { text: "Not mine." }
+"#;
+    let (mut env, _, _) = Env::start(&[("Chat-Q8_0", &script)]).await;
+    let dir = project(&env);
+    let s = env
+        .op("create_session", json!({"cwd": dir, "permission": "shell"}))
+        .await;
+    let id = s["id"].as_str().unwrap().to_string();
+    for (text, answer) in [
+        ("Run the checks", "One check failed."),
+        ("What does old_name return?", "It returns 42."),
+        ("Thanks", "Noted."),
+        // Two turns later the check run is cut – by what it is: its failure
+        // and its end stay, and the cut names where the whole of it is.
+        (
+            "Which check failed?",
+            "check_1700 failed: total 12.49 != 12.50.",
+        ),
+    ] {
+        let s = env
+            .op(
+                "send_message",
+                json!({"session": id, "text": text, "wait": true}),
+            )
+            .await;
+        let last = s["messages"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(last["text"], answer, "{s}");
+    }
+    // The whole result is kept with the session – and survives a restart.
+    env.set_scripts(&[("Chat-Q8_0", after_restart)]);
+    env.restart().await;
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "And the verdict?", "wait": true}),
+        )
+        .await;
+    assert_eq!(
+        s["messages"].as_array().unwrap().last().unwrap()["text"],
+        "Still there after the restart."
+    );
+    // Another session does not get it.
+    let other = env
+        .op("create_session", json!({"cwd": dir, "permission": "shell"}))
+        .await;
+    let s = env
+        .op(
+            "send_message",
+            json!({"session": other["id"], "text": "Show r1", "wait": true}),
+        )
+        .await;
+    assert_eq!(
+        s["messages"].as_array().unwrap().last().unwrap()["text"],
+        "Not mine."
+    );
+    // Deleting the session deletes its results.
+    let results = env
+        .home
+        .paths
+        .home()
+        .join("sessions")
+        .join(&id)
+        .join("results");
+    assert!(results.join("r1.json").exists());
+    env.op("delete_session", json!({"session": id})).await;
+    assert!(!results.exists());
+    env.stop().await;
+}

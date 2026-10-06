@@ -291,7 +291,13 @@ fn simplify(history: &[Value]) -> Vec<ChatMessage> {
         .collect()
 }
 
-/// Older tool outputs are cut so long sessions keep fitting the context.
+/// How long an older tool output may stay (before the latest two turns).
+const OLDER_TOOL_OUTPUT_CHARS: usize = 800;
+
+/// Older tool outputs are cut so long sessions keep fitting the context –
+/// by what they are: a log keeps its errors and its end, a listing its first
+/// rows (`ancilo_agent::results`). The whole of a long one stays in the
+/// session's results, and the cut names it.
 fn compact(history: &[Value]) -> Vec<Value> {
     let user_turns: Vec<usize> = history
         .iter()
@@ -307,12 +313,14 @@ fn compact(history: &[Value]) -> Vec<Value> {
             if i < keep_from
                 && m["role"] == "tool"
                 && let Some(c) = m["content"].as_str()
-                && c.len() > 800
+                && c.chars().count() > OLDER_TOOL_OUTPUT_CHARS
             {
+                let meta = ancilo_agent::results::meta_in(history, i);
                 let mut m = m.clone();
-                m["content"] = json!(format!(
-                    "{}… (shortened)",
-                    c.chars().take(800).collect::<String>()
+                m["content"] = json!(ancilo_agent::results::shorten(
+                    &meta,
+                    c,
+                    OLDER_TOOL_OUTPUT_CHARS
                 ));
                 return m;
             }
@@ -1237,6 +1245,10 @@ impl Sessions {
             history,
             local_only: true,
             think: true,
+            // Long results stay whole with the session (and go with it).
+            results: Some(ancilo_agent::ResultStore::at(
+                &self.inner.dir.join(&meta.id).join("results"),
+            )),
         };
         Ok(ancilo_agent::run(
             &self.inner.gateway,

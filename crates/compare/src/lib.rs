@@ -1216,6 +1216,7 @@ impl Comparer {
             history: Vec::new(),
             local_only: true,
             think: true,
+            results: Some(ancilo_agent::ResultStore::in_memory()),
         };
         let limit = cancel.child_token();
         let timer = {

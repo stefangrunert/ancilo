@@ -90,32 +90,40 @@ fn git_status(dir: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// One run of a task; returns the run and the session's turns count.
+/// One run of a task: its verdict (with the session's turns count) and
+/// the session as it was last seen.
 async fn run_task(
     api: &Api<'_>,
     dir: &Path,
     task: &Task,
     model: &str,
-) -> std::result::Result<u64, String> {
+) -> (std::result::Result<u64, String>, Value) {
     let s = api
         .op(
             "create_session",
             json!({"cwd": dir, "model": model, "permission": task.permission.as_deref().unwrap_or("shell"), "title": task.id}),
         )
-        .await?;
-    let id = s["id"].as_str().ok_or("no session id")?.to_string();
+        .await;
+    let s = match s {
+        Ok(s) => s,
+        Err(e) => return (Err(e), Value::Null),
+    };
+    let Some(id) = s["id"].as_str().map(String::from) else {
+        return (Err("no session id".into()), Value::Null);
+    };
+    let last = std::sync::Mutex::new(Value::Null);
     let result = async {
-        let mut last = Value::Null;
         for text in &task.turns {
             api.op("send_message", json!({"session": id, "text": text}))
                 .await?;
             let begin = Instant::now();
             loop {
-                last = api.op("get_session", json!({"session": id})).await?;
-                if last["status"] != "running" {
+                let now = api.op("get_session", json!({"session": id})).await?;
+                *last.lock().unwrap() = now.clone();
+                if now["status"] != "running" {
                     break;
                 }
-                if let Some(a) = last["approvals"].as_array().and_then(|a| a.first()) {
+                if let Some(a) = now["approvals"].as_array().and_then(|a| a.first()) {
                     return Err(format!(
                         "asked for approval: {} {}",
                         a["tool"], a["arguments"]
@@ -135,6 +143,7 @@ async fn run_task(
         }
         // Always through the operation: it reports what it could not apply.
         api.op("apply_changes", json!({"session": id})).await?;
+        let last = last.lock().unwrap().clone();
         let summary = last["messages"]
             .as_array()
             .and_then(|m| {
@@ -150,7 +159,8 @@ async fn run_task(
     }
     .await;
     let _ = api.op("delete_session", json!({"session": id})).await;
-    result
+    let session = last.into_inner().unwrap();
+    (result, session)
 }
 
 /// Runs the suite through the session operations of a running Ancilo.
@@ -187,8 +197,24 @@ pub async fn run(
                 std::fs::canonicalize(&dir).map_err(|e| Error::internal(e.to_string()))?
             };
             let begin = Instant::now();
-            let verdict = run_task(&api, &dir, task, model).await;
+            let (verdict, session) = run_task(&api, &dir, task, model).await;
+            let calls: Vec<&str> = session["messages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|m| m["tool_calls"].as_array())
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
             runs.push(Run {
+                tool_calls: Some(calls.len() as u64),
+                reread: Some(
+                    calls
+                        .iter()
+                        .filter(|c| c.starts_with("read_result("))
+                        .count() as u64,
+                ),
+                transcript: session.get("messages").cloned(),
                 passed: verdict.is_ok(),
                 status: if verdict.is_ok() {
                     "done".into()

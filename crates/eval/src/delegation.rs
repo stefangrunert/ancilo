@@ -128,6 +128,9 @@ pub struct Check {
     pub command: Option<String>,
     /// The task summary must contain this text (case-insensitive).
     pub summary_contains: Option<String>,
+    /// The task summary must not contain this text (case-insensitive) – a
+    /// claim that would be wrong, such as a success that was none.
+    pub summary_not_contains: Option<String>,
     /// These files must be byte-identical afterwards.
     pub unchanged: Option<Vec<String>>,
 }
@@ -158,6 +161,15 @@ pub struct Run {
     pub tokens: Option<u64>,
     pub duration_ms: u64,
     pub failure: Option<String>,
+    /// Tool calls over all turns, and how many of them read an earlier
+    /// result again (`read_result`) – coding eval only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reread: Option<u64>,
+    /// The conversation as the session shows it (coding eval, for the record).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -275,6 +287,11 @@ pub fn check(
         {
             return Err(format!("summary lacks {s:?}"));
         }
+        if let Some(s) = &c.summary_not_contains
+            && summary.to_lowercase().contains(&s.to_lowercase())
+        {
+            return Err(format!("summary claims {s:?}"));
+        }
         for path in c.unchanged.iter().flatten() {
             let now = std::fs::read_to_string(dir.join(path)).unwrap_or_default();
             if Some(&now) != files.get(path) {
@@ -328,6 +345,9 @@ pub async fn run(
                 tokens: result["tokens"].as_u64(),
                 duration_ms: begin.elapsed().as_millis() as u64,
                 failure: verdict.err(),
+                tool_calls: None,
+                reread: None,
+                transcript: None,
             });
             std::fs::remove_dir_all(&dir).ok();
         }

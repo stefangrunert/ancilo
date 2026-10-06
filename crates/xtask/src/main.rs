@@ -858,6 +858,23 @@ fn npm_components(root: &Path) -> Result<Vec<Component>> {
 /// Everything shipped: the CLI and daemon (`ancilo`), the native app
 /// (`app/src-tauri`, macOS only – its own workspace: Tauri, WebKit glue,
 /// plugins) and the web UI's npm packages. A crate in both is listed once.
+/// Code ported from other projects: folder under `third_party/ported`, and
+/// what it is.
+const PORTED: &[(&str, &str)] = &[
+    (
+        "atomic-agent",
+        "Atomic Agent (AtomicBot-ai/atomic-agent, result compressor, MIT) – crates/agent/src/compress.rs",
+    ),
+    (
+        "langchain-textsplitters",
+        "@langchain/textsplitters 0.0.0 (RecursiveCharacterTextSplitter, MIT) – crates/docs/src/split.rs",
+    ),
+    (
+        "anything-llm",
+        "AnythingLLM (Mintplex-Labs/anything-llm, TextSplitter, MIT) – crates/docs/src/split.rs",
+    ),
+];
+
 fn notices(root: &Path) -> Result<String> {
     let mut all = rust_components(&root.join("Cargo.toml"), "ancilo", None)?;
     all.extend(rust_components(
@@ -885,7 +902,20 @@ fn notices(root: &Path) -> Result<String> {
     for c in &all {
         s.push_str(&format!("{} {} – {}\n", c.name, c.version, c.license));
     }
+    // Code translated from other projects (third_party/ported).
+    s.push_str("\nPorted source code (translated to Rust)\n");
+    let ported = root.join("third_party/ported");
+    let mut ported_texts = Vec::new();
+    for (dir, what) in PORTED {
+        s.push_str(&format!("{what}\n"));
+        let text = std::fs::read_to_string(ported.join(dir).join("LICENSE"))
+            .with_context(|| format!("third_party/ported/{dir}/LICENSE"))?;
+        ported_texts.push((what, text));
+    }
     s.push_str("\n\nLicense texts\n=============\n");
+    for (what, text) in ported_texts {
+        s.push_str(&format!("\n---- {what} ----\n\n{}\n", text.trim_end()));
+    }
     let mut printed = BTreeSet::new();
     for c in &all {
         for text in &c.texts {
@@ -1269,6 +1299,10 @@ mod tests {
         ] {
             assert!(text.contains(&format!("\n{name}")), "{name} missing");
         }
+        // Ported code names its origin, with its license text.
+        assert!(text.contains("Atomic Agent (AtomicBot-ai/atomic-agent"));
+        assert!(text.contains("Copyright (c) 2026 Atomic Bot"));
+        assert!(text.contains("Copyright (c) 2023 LangChain"));
         // Dev-only packages are not shipped.
         assert!(!text.contains("\nvitest "));
         assert!(!text.contains("\ninsta "));

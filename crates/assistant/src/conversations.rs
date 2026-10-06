@@ -84,6 +84,13 @@ pub struct ConversationMessage {
     /// The answer drew on the user's documents.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub documents: bool,
+    /// The passages the answer was given, each with its mark (`[D3]` in the
+    /// text) and where it stands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<ancilo_docs::evidence::Evidence>,
+    /// Marks the model made up (no such passage): taken out of the text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped_marks: Vec<String>,
 }
 
 /// What became of a web search.
@@ -150,6 +157,8 @@ impl ConversationMessage {
             web: None,
             attachments: Vec::new(),
             documents: false,
+            evidence: Vec::new(),
+            dropped_marks: Vec::new(),
         }
     }
 

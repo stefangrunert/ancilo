@@ -6,9 +6,11 @@
 //! Only the text is kept, never a copy of the file. A conversation that saw
 //! a document stays with the AI on this computer (see the assistant).
 
+pub mod evidence;
 pub mod extract;
 pub mod library;
 pub mod ocr;
+pub mod split;
 pub mod write;
 
 use std::collections::HashSet;
@@ -468,37 +470,193 @@ impl Attachments {
         Ok(choose(&docs, query, PASSAGE_BUDGET))
     }
 
+    /// The passages for a question as evidence (marks given by the caller).
+    pub fn evidence(&self, ids: &[String], query: &str) -> Result<Vec<evidence::Evidence>> {
+        let mut docs = Vec::new();
+        let mut about = std::collections::HashMap::new();
+        for id in ids {
+            let view = self.view(id)?;
+            let parts = self.parts(id)?;
+            about.insert(
+                view.name.clone(),
+                (
+                    id.clone(),
+                    evidence::revision(&parts),
+                    view.warnings.clone(),
+                ),
+            );
+            docs.push((view.name, parts));
+        }
+        let passages = select(&docs, query, PASSAGE_BUDGET, SEGMENTER);
+        Ok(evidence::of(passages, |name| {
+            let (id, rev, warnings) = about.get(name).cloned().unwrap_or_default();
+            (evidence::Origin::Attachment { id }, rev, warnings)
+        }))
+    }
+
+    /// An attachment's text now (`None`: deleted).
+    pub fn current(&self, id: &str) -> Option<Vec<Part>> {
+        self.parts(id).ok()
+    }
+
     /// The reader, for a [`library::Library`] to share.
     pub fn extractor(&self) -> Arc<Extractor> {
         self.extractor.clone()
     }
 }
 
-/// Text of documents (name, parts) for a question: all of it when it fits
-/// `budget`, else the passages that fit `query` best, in document order –
-/// each headed by its source.
-pub fn choose(docs: &[(String, Vec<Part>)], query: &str, budget: usize) -> Vec<String> {
-    let mut chunks: Vec<(String, String)> = Vec::new();
-    let mut whole: Vec<(String, String)> = Vec::new();
+/// How a document's text is cut into passages to choose from, and what
+/// besides their words finds them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Segmenter {
+    pub cut: Cut,
+    pub header: Header,
+}
+
+/// Where passages are cut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cut {
+    /// Paragraphs joined to about 700 characters (Ancilo's way, as web
+    /// pages are cut – `ancilo_web::rank::passages`), kept line by line.
+    Paragraphs,
+    /// LangChain's recursive splitter as AnythingLLM uses it ([`split`]).
+    Recursive { size: usize, overlap: usize },
+}
+
+/// How a passage's document name and page or sheet count when choosing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Header {
+    /// Not at all.
+    None,
+    /// AnythingLLM: written before every chunk – each word of the name
+    /// counts in every passage of the document.
+    Prepend,
+    /// Ancilo: the names are scored on their own (a word all names share
+    /// counts little) and lift only passages that fit by their own words.
+    Boost,
+}
+
+/// A passage chosen for a question, and where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Passage {
+    pub document: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Locator>,
+    /// Which part of the document (page, sheet) – by position.
+    pub part: usize,
+    /// Where it starts in that part's text (characters) – when it is the
+    /// text as it stands there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<usize>,
+    pub text: String,
+}
+
+/// How much a fitting name lifts a passage, against its own words.
+const HEADER_WEIGHT: f64 = 0.5;
+
+/// What a passage is found by, besides its text: its document's name and
+/// where in it (`Verträge/Miete 2025.pdf`, sheet `2024` → words to match).
+fn header(name: &str, at: Option<&Locator>) -> String {
+    let words: String = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    match at {
+        Some(Locator::Page(n)) => format!("{words} page {n}"),
+        Some(Locator::Sheet(s)) => format!("{words} sheet {s}"),
+        None => words,
+    }
+}
+
+/// The passages of documents (name, parts) for a question: all of it when
+/// it fits `budget`, else the passages that fit `query` best, in document
+/// order.
+pub fn select(
+    docs: &[(String, Vec<Part>)],
+    query: &str,
+    budget: usize,
+    seg: Segmenter,
+) -> Vec<Passage> {
+    let whole: Vec<Passage> = docs
+        .iter()
+        .flat_map(|(name, parts)| {
+            parts.iter().enumerate().map(move |(i, p)| Passage {
+                document: name.clone(),
+                at: p.at.clone(),
+                part: i,
+                start: Some(p.text.chars().take_while(|c| c.is_whitespace()).count()),
+                text: p.text.trim().to_string(),
+            })
+        })
+        .collect();
+    let total: usize = whole.iter().map(|p| p.text.chars().count()).sum();
+    if total <= budget {
+        return whole.into_iter().filter(|p| !p.text.is_empty()).collect();
+    }
+    let mut picked: Vec<(usize, Passage)> = Vec::new();
+    let mut used = 0;
+    for (i, p) in ranked(docs, query, seg) {
+        let n = p.text.chars().count();
+        if used + n > budget {
+            continue;
+        }
+        used += n;
+        picked.push((i, p));
+    }
+    picked.sort_by_key(|(i, _)| *i);
+    picked.into_iter().map(|(_, p)| p).collect()
+}
+
+/// All passages of the documents, best for `query` first (with the
+/// position each has in the documents) – where [`select`] takes them from.
+pub fn ranked(docs: &[(String, Vec<Part>)], query: &str, seg: Segmenter) -> Vec<(usize, Passage)> {
+    let mut chunks: Vec<Passage> = Vec::new();
+    let mut found_by: Vec<String> = Vec::new();
+    let mut heads: Vec<String> = Vec::new();
     for (name, parts) in docs {
-        for p in parts {
-            let label = source(name, p.at.as_ref());
-            for c in ancilo_web::rank::passages(&p.text) {
-                chunks.push((label.clone(), c));
+        for (i, p) in parts.iter().enumerate() {
+            let head = header(name, p.at.as_ref());
+            let cuts: Vec<(Option<usize>, String)> = match seg.cut {
+                Cut::Paragraphs => paragraphs(&p.text),
+                Cut::Recursive { size, overlap } => split::Splitter::new(size, overlap)
+                    .chunks(&p.text)
+                    .into_iter()
+                    .map(|c| (Some(c.start), c.text))
+                    .collect(),
+            };
+            for (start, text) in cuts {
+                found_by.push(if seg.header == Header::Prepend {
+                    format!("{head}\n{text}")
+                } else {
+                    text.clone()
+                });
+                heads.push(head.clone());
+                chunks.push(Passage {
+                    document: name.clone(),
+                    at: p.at.clone(),
+                    part: i,
+                    start,
+                    text,
+                });
             }
-            whole.push((label, p.text.clone()));
         }
     }
-    let total: usize = whole.iter().map(|(_, t)| t.chars().count()).sum();
-    if total <= budget {
-        return whole
-            .into_iter()
-            .filter(|(_, t)| !t.trim().is_empty())
-            .map(|(l, t)| format!("{l}\n{}", t.trim()))
-            .collect();
+    let mut scores = ancilo_web::rank::scores(&found_by, query);
+    if seg.header == Header::Boost {
+        // The names, each once: how well each fits the question – a word
+        // in every name ("pdf", "Angebot" in all offers) counts little.
+        let mut names: Vec<String> = heads.clone();
+        names.sort();
+        names.dedup();
+        let fit = ancilo_web::rank::scores(&names, query);
+        for (i, h) in heads.iter().enumerate() {
+            if scores[i] > 0.0
+                && let Ok(n) = names.binary_search(h)
+            {
+                scores[i] += HEADER_WEIGHT * fit[n];
+            }
+        }
     }
-    let texts: Vec<String> = chunks.iter().map(|(_, t)| t.clone()).collect();
-    let scores = ancilo_web::rank::scores(&texts, query);
     let mut order: Vec<usize> = (0..chunks.len()).filter(|i| scores[*i] > 0.0).collect();
     order.sort_by(|a, b| scores[*b].total_cmp(&scores[*a]).then(a.cmp(b)));
     // Nothing matches the words of the question ("summarise this"): the
@@ -506,29 +664,52 @@ pub fn choose(docs: &[(String, Vec<Part>)], query: &str, budget: usize) -> Vec<S
     if order.is_empty() {
         let mut firsts: Vec<usize> = Vec::new();
         let mut seen = HashSet::new();
-        for (i, (label, _)) in chunks.iter().enumerate() {
-            let doc = label.split(',').next().unwrap_or(label).to_string();
-            if seen.insert(doc) {
+        for (i, c) in chunks.iter().enumerate() {
+            if seen.insert(c.document.clone()) {
                 firsts.push(i);
             }
         }
         let rest = (0..chunks.len()).filter(|i| !firsts.contains(i));
         order = firsts.iter().copied().chain(rest).collect();
     }
-    let mut picked = Vec::new();
-    let mut used = 0;
-    for i in order {
-        let n = chunks[i].1.chars().count();
-        if used + n > budget {
-            continue;
-        }
-        used += n;
-        picked.push(i);
-    }
-    picked.sort();
-    picked
+    order.into_iter().map(|i| (i, chunks[i].clone())).collect()
+}
+
+/// How Ancilo cuts documents now (FPL-01, `evals/fpl01`): its paragraphs –
+/// the recursive splitter was measured and found no better.
+pub const SEGMENTER: Segmenter = Segmenter {
+    cut: Cut::Paragraphs,
+    header: Header::None,
+};
+
+/// Ancilo's paragraph passages (`ancilo_web::rank::passages`: the same
+/// cuts, the same lengths) – with their lines kept and where each starts in
+/// the text, so a source can show the passage as it stands there.
+fn paragraphs(text: &str) -> Vec<(Option<usize>, String)> {
+    let joined = ancilo_web::rank::passages_by_line(text);
+    // Where each starts: its first line, searched on from the last one.
+    let chars: Vec<char> = text.chars().collect();
+    let mut cursor = 0usize;
+    joined
         .into_iter()
-        .map(|i| format!("{}\n{}", chunks[i].0, chunks[i].1))
+        .map(|p| {
+            let first: Vec<char> = p.split('\n').next().unwrap_or_default().chars().collect();
+            let at = (cursor..=chars.len().saturating_sub(first.len()))
+                .find(|&i| !first.is_empty() && chars[i..i + first.len()] == first[..]);
+            if let Some(a) = at {
+                cursor = a + 1;
+            }
+            (at, p)
+        })
+        .collect()
+}
+
+/// Text of documents (name, parts) for a question ([`select`]), each
+/// passage headed by its source.
+pub fn choose(docs: &[(String, Vec<Part>)], query: &str, budget: usize) -> Vec<String> {
+    select(docs, query, budget, SEGMENTER)
+        .into_iter()
+        .map(|p| format!("{}\n{}", source(&p.document, p.at.as_ref()), p.text))
         .collect()
 }
 

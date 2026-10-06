@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use ancilo_core::{Error, EventBus, Result};
 use ancilo_storage::Db;
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -69,6 +69,9 @@ pub struct Library {
     /// What the last pass found besides the database (folder → too many).
     too_many: Arc<Mutex<HashSet<PathBuf>>>,
 }
+
+/// A document read: its path in the folder, its text, what to know about it.
+type Read = (String, Vec<Part>, Vec<extract::Warning>);
 
 /// A supported document found in a folder.
 struct Found {
@@ -248,7 +251,10 @@ impl Library {
             }
             let dir = self.extractor.workdir()?;
             match self.extractor.read(&f.path, &dir).await {
-                Ok(doc) => self.store(&key, &f.rel, f.size, f.mtime, Some(&doc.parts), None)?,
+                Ok(doc) => {
+                    self.store(&key, &f.rel, f.size, f.mtime, Some(&doc.parts), None)?;
+                    self.store_warnings(&key, &f.rel, &doc.warnings)?;
+                }
                 Err(e) => self.store(&key, &f.rel, f.size, f.mtime, None, Some(&e.message()))?,
             }
         }
@@ -270,6 +276,19 @@ impl Library {
                 "INSERT INTO library(folder, path, size, mtime, parts, error, read_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(folder, path) DO UPDATE SET size = excluded.size, mtime = excluded.mtime, parts = excluded.parts, error = excluded.error, read_at = excluded.read_at",
                 params![folder, rel, size as i64, mtime, parts, error, Utc::now().to_rfc3339()],
+            )
+            .map(|_| ())
+        })
+    }
+
+    /// What to know about a document read (recognized text, cut off) – its
+    /// sources show it.
+    fn store_warnings(&self, folder: &str, rel: &str, warnings: &[extract::Warning]) -> Result<()> {
+        let w = serde_json::to_string(warnings)?;
+        self.db.with(|c| {
+            c.execute(
+                "UPDATE library SET warnings = ?3 WHERE folder = ?1 AND path = ?2",
+                params![folder, rel, w],
             )
             .map(|_| ())
         })
@@ -321,21 +340,78 @@ impl Library {
     /// The text for a question: the passages of the folder's documents that
     /// fit it best (all of them when they are short), each with its source.
     pub fn passages(&self, folder: &Path, query: &str) -> Result<Vec<String>> {
+        let docs: Vec<(String, Vec<Part>)> = self
+            .documents(folder)?
+            .into_iter()
+            .map(|(path, parts, _)| (path, parts))
+            .collect();
+        Ok(crate::choose(&docs, query, PASSAGE_BUDGET))
+    }
+
+    /// The folder's documents read: path, parts, what to know about them.
+    fn documents(&self, folder: &Path) -> Result<Vec<Read>> {
         let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
         let key = folder.display().to_string();
-        let rows: Vec<(String, String)> = self.db.with(|c| {
+        type Row = (String, String, Option<String>);
+        let rows: Vec<Row> = self.db.with(|c| {
             let mut s = c.prepare(
-                "SELECT path, parts FROM library WHERE folder = ?1 AND parts IS NOT NULL ORDER BY path",
+                "SELECT path, parts, warnings FROM library WHERE folder = ?1 AND parts IS NOT NULL ORDER BY path",
             )?;
-            s.query_map(params![key], |r| Ok((r.get(0)?, r.get(1)?)))?
+            s.query_map(params![key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
                 .collect()
         })?;
         let mut docs = Vec::new();
-        for (path, parts) in rows {
+        for (path, parts, warnings) in rows {
             let parts: Vec<Part> = serde_json::from_str(&parts)?;
-            docs.push((path, parts));
+            let warnings = warnings
+                .and_then(|w| serde_json::from_str(&w).ok())
+                .unwrap_or_default();
+            docs.push((path, parts, warnings));
         }
-        Ok(crate::choose(&docs, query, PASSAGE_BUDGET))
+        Ok(docs)
+    }
+
+    /// The passages for a question as evidence (marks given by the caller).
+    pub fn evidence(&self, folder: &Path, query: &str) -> Result<Vec<crate::evidence::Evidence>> {
+        let docs = self.documents(folder)?;
+        let canonical = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        let about: HashMap<String, (String, Vec<extract::Warning>)> = docs
+            .iter()
+            .map(|(p, parts, w)| (p.clone(), (crate::evidence::revision(parts), w.clone())))
+            .collect();
+        let docs: Vec<(String, Vec<Part>)> =
+            docs.into_iter().map(|(p, parts, _)| (p, parts)).collect();
+        let passages = crate::select(&docs, query, PASSAGE_BUDGET, crate::SEGMENTER);
+        Ok(crate::evidence::of(passages, |path| {
+            let (rev, warnings) = about.get(path).cloned().unwrap_or_default();
+            (
+                crate::evidence::Origin::Folder {
+                    folder: canonical.clone(),
+                    path: path.to_string(),
+                },
+                rev,
+                warnings,
+            )
+        }))
+    }
+
+    /// A document's text now, as last read (`None`: gone or unreadable).
+    pub fn current(&self, folder: &Path, path: &str) -> Option<Vec<Part>> {
+        let key = folder.display().to_string();
+        let parts: Option<String> = self
+            .db
+            .with(|c| {
+                c.query_row(
+                    "SELECT parts FROM library WHERE folder = ?1 AND path = ?2",
+                    params![key, path],
+                    |r| r.get(0),
+                )
+                .optional()
+            })
+            .ok()
+            .flatten()
+            .flatten();
+        serde_json::from_str(&parts?).ok()
     }
 
     /// The project is gone from the list: its text goes too.

@@ -38,6 +38,9 @@ pub enum Access {
 pub struct ToolOutput {
     pub content: String,
     pub is_error: bool,
+    /// The whole output, when `content` had to be shortened (a long command
+    /// output) – kept for `read_result`.
+    pub full: Option<String>,
 }
 
 impl ToolOutput {
@@ -45,12 +48,14 @@ impl ToolOutput {
         Self {
             content: content.into(),
             is_error: false,
+            full: None,
         }
     }
     pub fn err(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
             is_error: true,
+            full: None,
         }
     }
 }
@@ -203,7 +208,7 @@ struct SearchArgs {
 const READ_DEFAULT_LINES: usize = 400;
 const MAX_LINE_CHARS: usize = 500;
 const MAX_MATCHES: usize = 100;
-const MAX_OUTPUT_CHARS: usize = 20_000;
+pub(crate) const MAX_OUTPUT_CHARS: usize = 20_000;
 
 /// Writes a file the path resolved to – never through a link put there
 /// since (`O_NOFOLLOW`: a link at the path makes the write fail).
@@ -896,15 +901,24 @@ impl Workspace {
             text.push_str(&err);
         }
         let code = out.status.code().unwrap_or(-1);
-        let body = format!(
-            "{}\n[exit code {code}]",
-            clip(text.trim_end(), MAX_OUTPUT_CHARS)
-        );
-        if out.status.success() {
+        let whole = format!("{}\n[exit code {code}]", text.trim_end());
+        // A long output keeps what matters in a log – its error lines and
+        // its end – and stays whole for `read_result`.
+        let meta = crate::results::Meta {
+            tool: "bash".into(),
+            error: !out.status.success(),
+            id: None,
+        };
+        let body = crate::results::shorten(&meta, &whole, MAX_OUTPUT_CHARS);
+        let mut result = if out.status.success() {
             ToolOutput::ok(body)
         } else {
             ToolOutput::err(body)
+        };
+        if result.content.len() != whole.len() {
+            result.full = Some(whole);
         }
+        result
     }
 
     /// What changed, with line counts and a unified diff.

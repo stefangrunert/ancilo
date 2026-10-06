@@ -20,6 +20,15 @@ pub struct Rejected {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct EvidenceRef {
+    /// Id of the conversation (`c-…`).
+    pub conversation: String,
+    /// The mark in the answer, e.g. `D3`.
+    pub mark: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ConversationRef {
     /// Id of a conversation (`c-…`).
     pub id: String,
@@ -97,6 +106,15 @@ pub fn register(registry: &mut Registry, assistant: Assistant) {
             .handler(move |_ctx, i: ConversationRef| {
                 let a = a.clone();
                 async move { a.conversations().get(&i.id) }
+            }),
+    );
+    let a = assistant.clone();
+    registry.register(
+        OpBuilder::new("open_evidence")
+            .summary("A source of an answer from documents ([D3]): the passage the answer had, and whether its document changed since")
+            .handler(move |_ctx, i: EvidenceRef| {
+                let a = a.clone();
+                async move { a.open_evidence(&i.conversation, &i.mark) }
             }),
     );
     let a = assistant.clone();

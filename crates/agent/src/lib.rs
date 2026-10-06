@@ -4,6 +4,8 @@
 //!
 //! Model calls go through the gateway, so the reliability pipeline applies.
 
+pub mod compress;
+pub mod results;
 pub mod sandbox;
 pub mod tools;
 
@@ -16,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+pub use results::ResultStore;
 pub use tools::{Access, CodeSearch, FileChange, ShellSettings, ToolOutput, Toolbox, Workspace};
 
 /// Instructions for delegated work. Short on purpose: small models do better
@@ -56,6 +59,9 @@ pub struct AgentSpec {
     pub local_only: bool,
     /// Let the model think before it answers (see `CallOpts::think`).
     pub think: bool,
+    /// Where long tool results are kept whole, to be read again
+    /// (`read_result`); `None`: they are only shortened.
+    pub results: Option<ResultStore>,
 }
 
 /// Default sampling temperature for agent work.
@@ -111,22 +117,24 @@ const SHORTEN_TO: [usize; 3] = [2000, 600, 150];
 const SHORTENED: &str = "… (shortened to fit the context)";
 
 /// Cuts tool outputs longer than `cap` – all but those of the latest step,
-/// which the model is working with. Returns whether anything got shorter.
+/// which the model is working with – by what they are (`results::shorten`).
+/// Returns whether anything got shorter.
 fn shorten_tool_outputs(messages: &mut [Value], cap: usize) -> bool {
     let latest = messages
         .iter()
         .rposition(|m| m["role"] == "assistant")
         .unwrap_or(messages.len());
     let mut changed = false;
-    for m in messages[..latest].iter_mut() {
-        if m["role"] != "tool" {
+    for i in 0..latest {
+        if messages[i]["role"] != "tool" {
             continue;
         }
-        if let Some(c) = m["content"].as_str()
+        if let Some(c) = messages[i]["content"].as_str()
             && c.chars().count() > cap + SHORTENED.chars().count()
         {
-            let short: String = c.chars().take(cap).collect();
-            m["content"] = json!(format!("{short}{SHORTENED}"));
+            let meta = results::meta_in(messages, i);
+            let short = results::shorten(&meta, c, cap);
+            messages[i]["content"] = json!(short);
             changed = true;
         }
     }
@@ -142,7 +150,10 @@ pub async fn run(
     cancel: CancellationToken,
     events: Option<(EventBus, String)>,
 ) -> AgentOutcome {
-    let tools = ws.definitions();
+    let mut tools = ws.definitions();
+    if spec.results.is_some() {
+        tools.push(results::definition());
+    }
     // The model stays loaded for the whole turn, also while tools run.
     let _work = gateway.hold(&spec.model);
     let mut messages = vec![json!({"role": "system", "content": spec.system})];
@@ -210,7 +221,7 @@ pub async fn run(
         }
         steps += 1;
         let mut req = json!({
-            "model": spec.model, "messages": messages, "tools": tools,
+            "model": spec.model, "messages": results::for_model(&messages), "tools": tools,
             "temperature": spec.temperature.unwrap_or(DEFAULT_TEMPERATURE),
         });
         if let Some(seed) = spec.seed {
@@ -355,14 +366,46 @@ pub async fn run(
                 "agent.tool_called",
                 json!({"name": name, "arguments": args}),
             );
-            let out = ws.execute(&name, &args).await;
+            let mut out = match &spec.results {
+                // Reading an earlier result again: no new right – it shows
+                // what a tool of this conversation already returned.
+                Some(store) if name == "read_result" => {
+                    let (text, is_error) = results::read(store, &args);
+                    ToolOutput {
+                        content: text,
+                        is_error,
+                        full: None,
+                    }
+                }
+                _ => ws.execute(&name, &args).await,
+            };
+            let whole = out.full.take();
+            let id = spec.results.as_ref().and_then(|store| {
+                store.keep(
+                    &name,
+                    &args,
+                    out.is_error,
+                    whole.as_deref().unwrap_or(&out.content),
+                )
+            });
+            let meta = results::Meta {
+                tool: name.clone(),
+                error: out.is_error,
+                id,
+            };
+            // Shortened at its source: now it can say where the whole is.
+            if let (Some(whole), Some(_)) = (&whole, &meta.id) {
+                out.content = results::shorten(&meta, whole, tools::MAX_OUTPUT_CHARS);
+            }
             emit(
                 &events,
                 "agent.tool_result",
                 json!({"name": name, "is_error": out.is_error, "preview": preview(&out.content)}),
             );
-            messages
-                .push(json!({"role": "tool", "tool_call_id": call["id"], "content": out.content}));
+            let mut message =
+                json!({"role": "tool", "tool_call_id": call["id"], "content": out.content});
+            message[results::META] = json!(meta);
+            messages.push(message);
             // Loop protection: the same call again and again.
             let key = format!("{name}{args}");
             recent.push(key);

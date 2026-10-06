@@ -226,6 +226,11 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX outbound_at ON outbound(at);
     "#,
+    // 14: what to know about a folder's document (recognized text, cut off) –
+    // its sources in answers show it
+    r#"
+    ALTER TABLE library ADD COLUMN warnings TEXT;
+    "#,
 ];
 
 #[cfg(test)]

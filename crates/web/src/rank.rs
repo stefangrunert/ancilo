@@ -20,6 +20,16 @@ pub fn stems(text: &str) -> Vec<String> {
 
 /// Paragraphs joined into passages of about [`PASSAGE_CHARS`].
 pub fn passages(text: &str) -> Vec<String> {
+    cut(text, ' ')
+}
+
+/// The same passages, their lines kept apart (`\n` where [`passages`] has
+/// a space – the same cuts, the same lengths).
+pub fn passages_by_line(text: &str) -> Vec<String> {
+    cut(text, '\n')
+}
+
+fn cut(text: &str, join: char) -> Vec<String> {
     let mut out = Vec::new();
     let mut buf = String::new();
     for para in text
@@ -31,7 +41,7 @@ pub fn passages(text: &str) -> Vec<String> {
             out.push(std::mem::take(&mut buf));
         }
         if !buf.is_empty() {
-            buf.push(' ');
+            buf.push(join);
         }
         buf.push_str(para);
         // A single overlong paragraph is cut.
