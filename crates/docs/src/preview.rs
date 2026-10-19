@@ -25,6 +25,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::extract::{Kind, MAX_BYTES, kind_of};
 
+mod scope;
+
+/// The user's instructions that belong to one named result, in order.
+pub fn task_for_file(task: &str, path: &str, results: &[&str]) -> String {
+    scope::for_file(task, path, results)
+}
+
 /// Rows shown per sheet, blocks of a document.
 pub const MAX_ROWS_SHOWN: usize = 200;
 pub const MAX_BLOCKS_SHOWN: usize = 400;
@@ -2035,7 +2042,7 @@ fn stated_totals(l: &Layout) -> Vec<Vec<Num>> {
 
 static STATED_TOTAL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
-        r"(?i)\b(gesamtsumme|gesamtbetrag|endsumme|summe|insgesamt|grand total|total)\b",
+        r"(?i)\b(gesamtsumme|gesamtbetrag|gesamtkosten|endsumme|summe|insgesamt|grand total|total costs?|total)\b",
     )
     .expect("valid")
 });

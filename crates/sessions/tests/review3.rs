@@ -83,7 +83,7 @@ async fn saving_that_cannot_be_noted_leaves_the_results_open_to_save_again() {
     })
     .unwrap();
     let s = sessions(&db, &home);
-    let task = s.create_task(None, Some("Probe".into())).unwrap();
+    let task = s.create_task(None, Some("Probe".into()), None).unwrap();
     std::fs::write(task.workdir.join("a.csv"), "Item,Amount\nA,10\nTotal,10").unwrap();
     let version = s.get(&task.id).unwrap().changes_version.unwrap();
     let dest = home.join("dest");

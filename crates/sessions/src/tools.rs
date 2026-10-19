@@ -145,6 +145,8 @@ pub struct SessionTools {
     pub ws: Box<dyn Toolbox>,
     /// The folder as the agent is told it (the project, not the copy).
     pub shown: std::path::PathBuf,
+    /// Document tools use a virtual folder; an absolute project path misleads small models.
+    pub document_task: bool,
     pub session: String,
     pub permission: Arc<Mutex<Access>>,
     pub approvals: Approvals,
@@ -318,6 +320,9 @@ impl Toolbox for SessionTools {
     }
 
     fn context(&self) -> Option<String> {
+        if self.document_task {
+            return self.ws.context();
+        }
         Some(format!(
             "{CONTEXT_MARK}{} · allowed without asking: {:?})",
             self.shown.display(),

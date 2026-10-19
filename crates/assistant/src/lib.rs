@@ -41,56 +41,30 @@ pub const ASSISTANT_PROMPT: &str = "You are Ancilo's assistant. Ancilo runs loca
 - Answer briefly, in the language of the user.";
 
 /// Plain chats: the local model, no tools.
-pub const CHAT_PROMPT: &str = "You are Ancilo, a helpful AI assistant running on the user's own computer. Answer clearly and warmly, in the language of the user. Format with Markdown where it helps (lists, headings, code blocks). If you are unsure, say so.";
+pub const CHAT_PROMPT: &str = "You are Ancilo, an AI assistant running on the user's own computer.
+Answer in the user's requested language. Lead with the answer or requested text; omit praise, introductions and repeated summaries. Follow the requested format and length.
+For writing: deliver a usable draft. Change wording, not meaning: preserve facts, qualifications and form of address. Do not add unstated background, reasons, agreements or commitments. Ask only if missing information prevents a useful answer.
+For explanations: explain the cause or mechanism accurately in plain language. Use an analogy only when requested, and distinguish it from the actual process. Stop when the question is answered.
+For plans: check durations, sums and start/end times before answering. Keep explicit constraints; if they conflict, explain the conflict rather than silently changing them. Avoid proposing an alternative that violates the same constraints.
+For follow-ups: use the conversation, apply the requested change, and preserve details that were not changed. Correct earlier mistakes rather than repeating them. State uncertainty when facts are not known.";
 
 fn kind_hint(kind: ChatKind) -> &'static str {
     match kind {
         ChatKind::Write => {
-            "\nThe user wants help writing a text. Ask briefly for what is missing (recipient, tone, length) if needed, then write it."
+            "\nThe user wants help writing a text. Write a usable draft from the information given; ask only if an essential detail is missing."
         }
         ChatKind::Explain => {
-            "\nThe user wants something explained. Explain simply, step by step, with an everyday example; avoid jargon or explain it."
+            "\nThe user wants something explained. Explain simply; avoid jargon or explain it. Follow the requested level of detail."
         }
         ChatKind::Summarize => {
-            "\nThe user wants a text summarised. Summarise the essentials in a few bullet points, then one sentence as the bottom line."
+            "\nThe user wants a text summarised. Preserve the essential facts and qualifications; follow the requested length and format."
         }
         ChatKind::Chat | ChatKind::Setup => "",
     }
 }
 
-/// Is a request about Ancilo itself (its models, memory, speed, setup,
-/// connections)? Then a plain chat gets Ancilo's tools for it.
-pub fn about_ancilo(prompt: &str) -> bool {
-    let p = prompt.to_lowercase();
-    const WORDS: &[&str] = &[
-        "ancilo",
-        "modell",
-        "model",
-        "speicher",
-        "memory",
-        " ram",
-        "langsam",
-        "slow",
-        "einricht",
-        "setup",
-        "set up",
-        "claude code",
-        "codex",
-        "cockpit",
-        "herunterlad",
-        "download",
-        "schneller antwort",
-        "faster",
-        "gpu",
-        "rolle",
-        "role",
-        "heiß",
-        "hot",
-        "lüfter",
-        "fan",
-    ];
-    WORDS.iter().any(|w| p.contains(w))
-}
+mod intent;
+pub use intent::about_ancilo;
 
 /// Operations the assistant may run without asking: reading, and these
 /// harmless changes.
@@ -938,8 +912,8 @@ impl Assistant {
             )));
         }
         // Ancilo's tools only where Ancilo is the topic: its own
-        // conversations, a single `ask`, or a request about it – or a
-        // follow-up in a conversation that already used them.
+        // setup conversations, an explicit request about it, or a
+        // referential follow-up to the latest operation.
         let kind = earlier.map(|c| c.kind).or(input.kind).unwrap_or_default();
         // A conversation with text from the web never gets tools: a page
         // could try to give orders.
@@ -948,13 +922,14 @@ impl Assistant {
             && !earlier.is_some_and(Conversation::used_web)
             && (kind == ChatKind::Setup
                 || about_ancilo(&input.prompt)
-                || earlier.is_some_and(|c| {
-                    c.messages
-                        .iter()
-                        .rev()
-                        .take(2)
-                        .any(|m| !m.operations.is_empty() || !m.pending.is_empty())
-                }));
+                || (intent::control_followup(&input.prompt)
+                    && earlier.is_some_and(|c| {
+                        c.messages
+                            .iter()
+                            .rev()
+                            .take(2)
+                            .any(|m| !m.operations.is_empty() || !m.pending.is_empty())
+                    })));
         if !operate {
             return self
                 .chat(
@@ -1033,8 +1008,9 @@ impl Assistant {
             seed: None,
             history,
             local_only: false,
-            // Chats answer at once: thinking would take minutes on a small model.
+            // System controls keep their short, direct tool-calling path.
             think: false,
+            reasoning_budget: None,
             // A few steps at most: nothing grows long enough to be cut.
             results: None,
         };
@@ -1395,9 +1371,11 @@ impl Assistant {
             temperature: Some(if found.is_some() { 0.3 } else { 0.7 }),
             seed: None,
             history,
-            local_only: found.is_some() || used_documents,
-            // Chats answer at once: thinking would take minutes on a small model.
-            think: false,
+            local_only: !cloud,
+            // Small reasoning models need room to check facts and constraints.
+            // Leave most of the gateway's total output allowance for the answer.
+            think: !cloud,
+            reasoning_budget: (!cloud).then_some(1024),
             // A few steps at most: nothing grows long enough to be cut.
             results: None,
         };

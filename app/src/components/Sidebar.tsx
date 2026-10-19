@@ -8,6 +8,7 @@ import { useClient, useOp, useRefresh } from "../state/store";
 import { Icon, type IconName } from "./Icon";
 import { useReorder } from "./reorder";
 import { Dialog, ErrorNote, StatusDot } from "./ui";
+import { writeDraft } from "../state/chat-drafts";
 
 type SessionInfo = OpOutput<"list_sessions">[number];
 type ChatInfo = OpOutput<"list_conversations">[number];
@@ -226,6 +227,7 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
   const projects = useOp("list_projects");
   const sessions = useOp("list_sessions", {});
   const conversations = useOp("list_conversations");
+  const [chatFilter, setChatFilter] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [renaming, setRenaming] = useState<Renaming | null>(null);
   const [confirm, setConfirm] = useState<{ text: string; run: () => Promise<unknown> } | null>(null);
@@ -281,6 +283,7 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
                     text: t("nav.deleteChatConfirm"),
                     run: async () => {
                       await client.op("delete_conversation", { id: c.id });
+                      writeDraft(`${client.base}:${c.id}`, "");
                       if (route.view === "chat" && route.id === c.id) navigate({ view: "chat", id: null }, true);
                     },
                   })
@@ -347,7 +350,8 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
     </Item>
   );
   const chatList = conversations.data ?? [];
-  const plainChats = chatList.filter((c) => !c.folder || !folders.includes(c.folder));
+  const query = chatFilter.trim().toLocaleLowerCase();
+  const plainChats = chatList.filter((c) => query ? c.title.toLocaleLowerCase().includes(query) : !c.folder || !folders.includes(c.folder));
   const currentFolder = route.view === "folder" ? route.path : route.view === "chat" && route.id ? chatList.find((c) => c.id === route.id)?.folder : undefined;
   return (
     <nav className="sidebar" aria-label={t("nav.label")}>
@@ -545,6 +549,30 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
         {area === "chat" && (
           <div className="nav-group">
             <div className="nav-heading">
+              <span>{t("nav.chats")}</span>
+            </div>
+            <div className="nav-chat-filter">
+              <input
+                type="search"
+                aria-label={t("nav.findChat")}
+                placeholder={t("nav.findChat")}
+                value={chatFilter}
+                onChange={(e) => setChatFilter(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setChatFilter("");
+                }}
+              />
+            </div>
+            <ul className="nav-list" aria-label={t("nav.chats")}>
+              {plainChats.map(renderChat)}
+            </ul>
+            {plainChats.length === 0 && <p className="nav-empty">{t(query ? "nav.noMatchingChats" : "nav.noChats")}</p>}
+          </div>
+        )}
+
+        {area === "chat" && !query && (
+          <div className="nav-group">
+            <div className="nav-heading">
               <span>{t("nav.chatProjects")}</span>
               <span className="spacer" />
               <button type="button" className="icon" aria-label={t("nav.addFolder")} title={t("nav.addFolder")} onClick={() => navigate({ view: "add-folder" })}>
@@ -616,17 +644,6 @@ export function Sidebar({ route, area, onArea, showCode }: { route: Route; area:
           </div>
         )}
 
-        {area === "chat" && (
-        <div className="nav-group">
-          <div className="nav-heading">
-            <span>{t("nav.chats")}</span>
-          </div>
-          <ul className="nav-list" aria-label={t("nav.chats")}>
-            {plainChats.map(renderChat)}
-          </ul>
-          {plainChats.length === 0 && <p className="nav-empty">{t("nav.noChats")}</p>}
-        </div>
-        )}
         <ErrorNote error={error} onDismiss={() => setError(null)} />
       </div>
       <Confirm text={confirm?.text ?? null} onClose={() => setConfirm(null)} onYes={() => confirm && void act(confirm.run)} />

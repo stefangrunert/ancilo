@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import { Icon } from "./Icon";
+import { useChatDraft } from "../state/chat-drafts";
 
 /**
  * The input of every chat: grows with its text, Enter sends, Shift+Enter
@@ -16,6 +17,7 @@ export function Composer({
   autoFocus = false,
   extra,
   initial = "",
+  draftKey,
   above,
   onFiles,
 }: {
@@ -29,18 +31,20 @@ export function Composer({
   /** Controls next to the send button (e.g. a model choice). */
   extra?: ReactNode;
   initial?: string;
+  /** Keep unsent text in this window, scoped to one conversation. */
+  draftKey?: string;
   /** Shown above the input (attached documents). */
   above?: ReactNode;
   /** Documents chosen, dropped or pasted – offers the paperclip when set. */
   onFiles?: (files: File[]) => void;
 }) {
   const { t } = useI18n();
-  const [text, setText] = useState(initial);
+  const [text, setText] = useChatDraft(draftKey, initial);
   const [dropping, setDropping] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
   const take = (list: FileList | null | undefined) => {
     const files = Array.from(list ?? []);
-    if (files.length > 0 && onFiles) onFiles(files);
+    if (files.length > 0 && onFiles && !busy && !disabled && !sending) onFiles(files);
   };
   const [sending, setSending] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
@@ -68,7 +72,9 @@ export function Composer({
       setText("");
       await onSend(value);
     } catch {
-      setText(value);
+      // Chat drafts preserve a follow-up typed while waiting. Other callers
+      // keep the exact request for their own idempotent retry protocol.
+      setText((next) => draftKey && next ? `${value}\n\n${next}` : value);
     } finally {
       setSending(false);
       area.current?.focus();
@@ -117,7 +123,7 @@ export function Composer({
       <div className="composer-bar">
         {onFiles && (
           <>
-            <button type="button" className="icon attach" aria-label={t("chat.attach")} title={t("chat.attachHint")} onClick={() => picker.current?.click()}>
+            <button type="button" className="icon attach" disabled={busy || disabled || sending} aria-label={t("chat.attach")} title={t("chat.attachHint")} onClick={() => picker.current?.click()}>
               <Icon name="paperclip" />
             </button>
             <input

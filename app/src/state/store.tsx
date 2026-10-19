@@ -196,7 +196,7 @@ export function ClientProvider({ client, queryClient, children }: { client: Clie
         }
       },
       (up) => {
-        setLive((l) => (l.online === up ? l : { ...l, online: up }));
+        setLive((l) => (l.online === up ? l : { online: up, downloads: {}, activity: {}, turns: {}, loading: {}, phase: {} }));
         if (up) void qc.invalidateQueries();
       },
     );

@@ -1692,3 +1692,327 @@ steps:
     assert_eq!(hash, checks["files"][0]["file"].as_str().unwrap());
     env.stop().await;
 }
+
+// covers: M8-AC-06, M10-AC-04
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn task_requests_survive_lost_replies_and_a_restart_without_duplicate_work() {
+    let script = r#"
+steps:
+  - respond: { text: "not yet", delay_ms: 30000 }
+"#;
+    let (mut env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
+    let folder = env.home.scratch("resume-input").canonicalize().unwrap();
+    let file = folder.join("bill.txt");
+    std::fs::write(&file, "Power: 120 Euro").unwrap();
+    let create = json!({"folder": folder, "title": "Bills", "request_id": "0199bf00-0000-4000-8000-000000000001"});
+    let (a, b) = tokio::join!(
+        env.op("create_task", create.clone()),
+        env.op("create_task", create.clone())
+    );
+    assert_eq!(a["id"], b["id"]);
+    let id = a["id"].as_str().unwrap().to_string();
+    env.op("add_task_file", json!({"session": id, "path": file}))
+        .await;
+    let send = json!({"session": id, "text": "Make an invoice table", "request_id": "0199bf00-0000-4000-8000-000000000002"});
+    let first = env.op("send_message", send.clone()).await;
+    assert_eq!(first["turns"], 1);
+    assert_eq!(
+        first["messages"].as_array().unwrap().len(),
+        1,
+        "the pending request appears once"
+    );
+    let user = &first["messages"][0]["text"];
+    assert!(user.as_str().unwrap().contains("Make an invoice table"));
+    assert!(
+        user.as_str().unwrap().contains("bill.txt"),
+        "input file names are durable before a reply"
+    );
+    let again = env.op("send_message", send.clone()).await;
+    assert_eq!(
+        again["turns"], 1,
+        "a lost acknowledgement cannot start another turn"
+    );
+    let mut different = send.clone();
+    different["text"] = json!("Delete the inputs");
+    assert!(!env.call("send_message", different, true).await.0);
+    // Restore the exact record committed before the acknowledgement, as
+    // if the process had died without its shutdown handler saving a result.
+    let db = ancilo_storage::rusqlite::Connection::open(env.home.paths.db_file()).unwrap();
+    let snapshot: (String, String) = db
+        .query_row(
+            "SELECT meta, history FROM sessions WHERE id = ?1",
+            [&id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&snapshot.1)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    env.d.take().unwrap().stop().await;
+    db.execute(
+        "UPDATE sessions SET meta = ?1, history = ?2, status = 'running' WHERE id = ?3",
+        ancilo_storage::rusqlite::params![snapshot.0, snapshot.1, id],
+    )
+    .unwrap();
+    drop(db);
+    env.d = Some(
+        ancilo_daemon::start(env.home.paths.clone(), env.config.clone(), options())
+            .await
+            .unwrap(),
+    );
+    let recovered = env.op("send_message", send).await;
+    assert_eq!(recovered["status"], "interrupted");
+    assert_eq!(recovered["turns"], 1);
+    assert_eq!(recovered["messages"][0]["text"], *user);
+    assert_eq!(env.op("create_task", create.clone()).await["id"], id);
+    let mut different = create;
+    different["title"] = json!("Other task");
+    assert!(!env.call("create_task", different, true).await.0);
+    env.set_scripts(&[("Chat-Q8_0", r#"
+steps:
+  - expect: { any_message_contains: "bill.txt", last_user_contains: "Continue" }
+    respond: { tool_calls: [{ name: write_file, arguments: { path: "answer.txt", content: "Power: 120 Euro" } }] }
+  - respond: { text: "Resumed." }
+"#)]);
+    let done = env
+        .op(
+            "send_message",
+            json!({"session": id, "text": "Continue from the files already present", "wait": true}),
+        )
+        .await;
+    assert_eq!(done["status"], "idle");
+    assert_eq!(done["turns"], 2);
+    assert!(
+        done["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["text"] == "Resumed.")
+    );
+    assert!(
+        !folder.join("answer.txt").exists(),
+        "the user's folder stays unchanged"
+    );
+    assert_eq!(
+        env.op("list_sessions", json!({"project": folder}))
+            .await
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    env.stop().await;
+}
+
+// covers: M10-AC-04
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn repeated_uploads_do_not_duplicate_inputs_even_when_names_collide() {
+    let (mut env, _, _) = Env::start(&[]).await;
+    let input = env.home.scratch("uploads").join("note.txt");
+    std::fs::write(&input, "new input").unwrap();
+    for free in [false, true] {
+        let folder = env.home.scratch(if free { "free" } else { "folder" });
+        std::fs::write(folder.join("note.txt"), "existing input").unwrap();
+        let s = env
+            .op(
+                "create_task",
+                if free {
+                    json!({})
+                } else {
+                    json!({"folder": folder})
+                },
+            )
+            .await;
+        let a = env
+            .op("add_task_file", json!({"session": s["id"], "path": input}))
+            .await;
+        env.restart().await;
+        let b = env
+            .op("add_task_file", json!({"session": s["id"], "path": input}))
+            .await;
+        assert_eq!(
+            a, b,
+            "lost upload acknowledgements must not add another copy"
+        );
+        let again = env.session(s["id"].as_str().unwrap()).await;
+        assert!(again["changes"].as_array().unwrap().len() <= 1, "{again}");
+        assert_eq!(
+            std::fs::read_to_string(folder.join("note.txt")).unwrap(),
+            "existing input"
+        );
+    }
+    env.stop().await;
+}
+
+// covers: M10-AC-04, FPL-03
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_word_result_is_previewed_kept_undone_and_rechecked_after_corruption() {
+    let script = r##"
+steps:
+  - respond: { tool_calls: [{ name: write_document, arguments: { path: "Brief.docx", text: "# Termin\n\nUnser Termin ist am Dienstag um 14 Uhr." } }] }
+  - respond: { text: "Brief.docx ist fertig." }
+"##;
+    let (env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
+    let folder = env.home.scratch("letters").canonicalize().unwrap();
+    let s = env.op("create_task", json!({"folder": folder})).await;
+    let id = s["id"].as_str().unwrap();
+    let done = env.op("send_message", json!({"session": id, "text": "Schreibe Brief.docx mit dem Termin am Dienstag um 14 Uhr", "wait": true})).await;
+    let preview = env
+        .op(
+            "preview_result",
+            json!({"session": id, "path": "Brief.docx"}),
+        )
+        .await;
+    assert_eq!(preview["layout"]["kind"], "word", "{preview}");
+    assert!(preview["layout"].to_string().contains("Dienstag um 14 Uhr"));
+    assert!(!folder.join("Brief.docx").exists());
+    env.op(
+        "apply_changes",
+        json!({"session": id, "version": preview["version"]}),
+    )
+    .await;
+    assert!(folder.join("Brief.docx").exists());
+    env.op("undo_apply", json!({"session": id})).await;
+    assert!(!folder.join("Brief.docx").exists());
+    // An external edit corrupts the generated file after the preview.
+    std::fs::write(
+        Path::new(done["workdir"].as_str().unwrap()).join("Brief.docx"),
+        b"not a zip document",
+    )
+    .unwrap();
+    let bad = env.op("check_results", json!({"session": id})).await;
+    assert_eq!(bad["files"][0]["worst"], "error", "{bad}");
+    assert_ne!(bad["version"], preview["version"]);
+    assert!(
+        !env.call(
+            "apply_changes",
+            json!({"session": id, "version": preview["version"]}),
+            true
+        )
+        .await
+        .0
+    );
+    assert!(!folder.join("Brief.docx").exists());
+    env.stop().await;
+}
+
+// covers: M10-AC-04, FPL-03
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn combined_results_check_each_files_requirements_after_resume() {
+    let script = r#"
+steps:
+  - respond: { tool_calls: [{ name: write_spreadsheet, arguments: { path: "Kosten.xlsx", sheets: [{ name: "Kosten", rows: [["Posten", "Betrag"], ["Strom", "120"], ["Internet", "80"], ["Summe", "200"]] }] } }] }
+  - respond: { tool_calls: [{ name: write_document, arguments: { path: "Bericht.docx", text: "Strom: 120 Euro. Internet: 80 Euro. Die Gesamtkosten betragen 200 Euro." } }] }
+  - respond: { text: "Fertig." }
+fallback: { text: "Die Dateien sind bereits fertig." }
+"#;
+    let (mut env, _, _) = Env::start(&[("Chat-Q8_0", script)]).await;
+    let s = env.op("create_task", json!({})).await;
+    let id = s["id"].as_str().unwrap();
+    let done = env.op("send_message", json!({"session": id, "text": "Erstelle zuerst Kosten.xlsx aus Belege.txt mit den Spalten Posten und Betrag und einer abschließenden Summe. Erstelle danach Bericht.docx mit einer ausführlichen Erklärung der einzelnen Kosten.", "wait": true})).await;
+    env.restart().await;
+    // The exact continuation from the Air probe, including a legitimate
+    // request for a textual total in the report.
+    env.op("send_message", json!({"session": id, "text": "Setze die unterbrochene Aufgabe fort. Prüfe zuerst die schon vorhandenen Dateien. Kosten.xlsx ist bereits fertig; ändere diese Datei nicht. Erstelle nur den noch fehlenden Bericht.docx über Strom 120 Euro, Internet 80 Euro und die Gesamtsumme 200 Euro.", "wait": true})).await;
+    let checks = env.op("check_results", json!({"session": id})).await;
+    assert_eq!(checks["files"].as_array().unwrap().len(), 2);
+    for path in ["Kosten.xlsx", "Bericht.docx"] {
+        let preview = env
+            .op("preview_result", json!({"session": id, "path": path}))
+            .await;
+        assert_eq!(preview["version"], checks["version"]);
+        assert!(
+            !preview["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["level"] == "error"),
+            "{preview}"
+        );
+        assert_eq!(
+            checks["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["path"] == path)
+                .unwrap()["errors"],
+            0
+        );
+    }
+    // A correction for the report must not remove the spreadsheet's total
+    // requirement. Nor may per-file scoping hide wrong sums or missing columns.
+    env.op(
+        "send_message",
+        json!({"session": id, "text": "In Bericht.docx: keine Summe erforderlich.", "wait": true}),
+    )
+    .await;
+    let work = PathBuf::from(done["workdir"].as_str().unwrap());
+    for (rows, needle) in [
+        (
+            vec![
+                vec!["Posten", "Betrag"],
+                vec!["Strom", "120"],
+                vec!["Internet", "80"],
+            ],
+            "no total",
+        ),
+        (
+            vec![
+                vec!["Posten", "Betrag"],
+                vec!["Strom", "120"],
+                vec!["Internet", "80"],
+                vec!["Summe", "999"],
+            ],
+            "999",
+        ),
+        (
+            vec![
+                vec!["Posten", "Preis"],
+                vec!["Strom", "120"],
+                vec!["Internet", "80"],
+                vec!["Summe", "200"],
+            ],
+            "Betrag",
+        ),
+    ] {
+        let bytes = ancilo_docs::write::xlsx(&[ancilo_docs::write::Sheet {
+            name: "Kosten".into(),
+            rows: rows
+                .into_iter()
+                .map(|r| r.into_iter().map(String::from).collect())
+                .collect(),
+        }])
+        .unwrap();
+        std::fs::write(work.join("Kosten.xlsx"), bytes).unwrap();
+        let preview = env
+            .op(
+                "preview_result",
+                json!({"session": id, "path": "Kosten.xlsx"}),
+            )
+            .await;
+        assert!(
+            preview["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["level"] == "error" && f["message"].as_str().unwrap().contains(needle)),
+            "{preview}"
+        );
+        let checks = env.op("check_results", json!({"session": id})).await;
+        let files = checks["files"].as_array().unwrap();
+        assert_eq!(
+            files.iter().find(|f| f["path"] == "Kosten.xlsx").unwrap()["worst"],
+            "error"
+        );
+        assert_eq!(
+            files.iter().find(|f| f["path"] == "Bericht.docx").unwrap()["errors"],
+            0
+        );
+    }
+    env.stop().await;
+}

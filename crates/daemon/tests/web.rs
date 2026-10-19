@@ -692,18 +692,17 @@ steps:
     env.stop().await;
 }
 
-// covers: M7-AC-16
-/// A chat answers at once: with web search sources too, the model is asked
-/// not to think first – a small reasoning model otherwise thinks until no
-/// room is left for the answer (observed: 8,192 tokens of thinking, 136 s,
-/// "the model ended without an answer").
+// covers: M7-AC-16, M6-AC-14
+/// Search classification stays direct. The answer can reason, but cannot
+/// spend the whole output allowance on thinking (previously observed:
+/// 8,192 tokens of thinking, 136 s, and no answer).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_chat_answers_at_once_without_thinking_first() {
+async fn a_web_answer_has_bounded_reasoning_and_room_for_its_answer() {
     let script = r#"
 steps:
   - expect: { any_message_contains: "Classify the user's last message", thinking: false }
     respond: { text: '{"type": "facts", "query": "types of forests in Europe", "topic": "forest", "lang": "en"}' }
-  - expect: { last_user_contains: "kinds of forests", thinking: false }
+  - expect: { last_user_contains: "kinds of forests", thinking: true, has_tools: false }
     respond: { text: "Europe has boreal, temperate and Mediterranean forests [1]." }
 "#;
     let env = Env::start(script).await;
@@ -726,4 +725,35 @@ steps:
             .starts_with("Europe has boreal"),
         "{r}"
     );
+    let port = env
+        .d
+        .as_ref()
+        .unwrap()
+        .manager
+        .status("chat-q8_0")
+        .await
+        .unwrap()
+        .instance
+        .unwrap()
+        .port
+        .unwrap();
+    let requests: Vec<Value> = reqwest::get(format!("http://127.0.0.1:{port}/__fake/requests"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chats: Vec<_> = requests
+        .iter()
+        .filter(|r| {
+            r["path"]
+                .as_str()
+                .is_some_and(|p| p.ends_with("chat/completions"))
+        })
+        .collect();
+    assert_eq!(chats.len(), 2);
+    assert!(chats[0]["body"]["reasoning_budget_tokens"].is_null());
+    let answer = &chats[1]["body"];
+    assert_eq!(answer["reasoning_budget_tokens"], 1024);
+    assert!(answer["max_tokens"].as_u64().unwrap() >= 4096, "{answer}");
 }

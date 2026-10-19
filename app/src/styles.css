@@ -70,7 +70,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-input[type="text"], select, textarea {
+input[type="text"], input[type="search"], select, textarea {
   font: inherit; color: var(--fg); background: var(--bg);
   border: 1px solid var(--line); border-radius: var(--radius); padding: 7px 10px;
 }
@@ -179,6 +179,8 @@ body.reordering, body.reordering * { cursor: grabbing !important; user-select: n
 .nav-row:hover .item-actions, .nav-row:focus-within .item-actions, .nav-row.active .item-actions { display: flex; }
 .nav-list.nested { margin-left: 18px; border-left: 1px solid var(--line); padding-left: 4px; }
 .nav-empty { padding: 6px 12px; line-height: 1.5; color: var(--muted); font-size: 12px; }
+.nav-chat-filter { padding: 0 8px 6px; }
+.nav-chat-filter input { width: 100%; min-width: 0; font-size: 12px; }
 .add-project { display: flex; flex-direction: column; gap: 6px; padding: 6px 4px 8px; }
 .add-project input { min-width: 0; }
 

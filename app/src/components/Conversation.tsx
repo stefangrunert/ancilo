@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { OpOutput } from "../api/client";
 import { useI18n, type Key } from "../i18n";
 import { usePro } from "../state/prefs";
@@ -13,6 +13,8 @@ import { Icon } from "./Icon";
 import { ErrorNote } from "./ui";
 import { WebSwitch } from "./WebSearch";
 import { DocSources, linkEvidence, SourceDialog, useSource } from "./Sources";
+import { CopyAnswer } from "./CopyAnswer";
+import { readDraft, writeDraft } from "../state/chat-drafts";
 
 type Conversation = OpOutput<"get_conversation">;
 type Message = Conversation["messages"][number];
@@ -242,6 +244,7 @@ function Reply({ m, live, onAsk, conversation }: { m: Message; live: Set<string>
         </>
       )}
       {m.web && <WebSources web={m.web} />}
+      {m.text.trim() && <CopyAnswer text={says(m.text)} />}
       {(m.pending ?? []).length > 0 && <Proposals pending={m.pending ?? []} live={live} onAsk={onAsk} />}
       {ran.length > 0 && !pro && <p className="reply-meta">{t("assistant.lookedAt", { what: lookedAt(ran.map((o) => o.operation), t) })}</p>}
       {ran.length > 0 && pro && (
@@ -309,6 +312,12 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
   const local = Boolean(conversation.data?.folder) || messages.some((m) => m.documents || (m.attachments ?? []).length > 0) || pending.ids.length > 0;
   const liveIds = new Set((pendingActions.data ?? []).map((p) => p.id));
   const greeting = id ? null : greetingOf(kind, t);
+  const draftKey = `${client.base}:${id ?? `new-${kind}`}`;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const ask = async (prompt: string) => {
     setError(null);
@@ -318,7 +327,12 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
       const r = await client.op("ask", id ? { prompt, conversation: id, ...sent } : { prompt, remember: true, kind, greeting: greeting?.text ?? null, ...sent });
       pending.clear();
       await refresh("get_conversation", "list_conversations", "pending_actions");
-      if (!id && r.conversation) navigate({ view: "chat", id: r.conversation }, true);
+      if (!id && r.conversation && mounted.current) {
+        // Carry a follow-up typed during the first answer into the saved chat.
+        writeDraft(`${client.base}:${r.conversation}`, readDraft(draftKey));
+        writeDraft(draftKey, "");
+        navigate({ view: "chat", id: r.conversation }, true);
+      }
     } catch (e) {
       setError(e);
       throw e;
@@ -350,6 +364,7 @@ export function ConversationView({ id, kind = "chat" }: { id: string | null; kin
       label={t("assistant.placeholder")}
       placeholder={t(greeting ? "assistant.placeholderReply" : "assistant.placeholderLong")}
       onSend={ask}
+      draftKey={draftKey}
       busy={inflight !== null || searching || pending.reading}
       autoFocus
       extra={webSwitch}

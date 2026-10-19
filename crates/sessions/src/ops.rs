@@ -68,6 +68,9 @@ pub struct CreateInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskInput {
+    /// Reuse this UUID after a lost response to avoid starting duplicate work.
+    #[serde(default)]
+    pub request_id: Option<String>,
     /// A folder of the user's to work on (changes in a copy, kept or not).
     /// Without one: a free task – files given to it are material, its results
     /// are saved where the user wants (`save_results`).
@@ -121,6 +124,9 @@ pub struct SessionRef {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MessageInput {
+    /// Reuse this UUID after a lost response to avoid starting duplicate work.
+    #[serde(default)]
+    pub request_id: Option<String>,
     pub session: String,
     pub text: String,
     /// Wait until the turn is done (default: return at once, follow events).
@@ -312,7 +318,7 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
         "Start a task: with a folder, the agent works in a copy of it and the user keeps the changes or not; without one, files given to it are material and its results are saved where the user wants",
         manage = true,
         conseq = false,
-        |s, i: TaskInput| s.create_task(i.folder.as_deref(), i.title)
+        |s, i: TaskInput| s.create_task(i.folder.as_deref(), i.title, i.request_id.as_deref())
     );
     op!(
         "open_task_folder",
@@ -369,7 +375,9 @@ pub fn register(registry: &mut Registry, sessions: Sessions) {
         "Tell the coding agent what to do next in a session",
         manage = true,
         conseq = false,
-        |s, i: MessageInput| s.send(&i.session, &i.text, i.wait).await
+        |s, i: MessageInput| s
+            .send(&i.session, &i.text, i.wait, i.request_id.as_deref())
+            .await
     );
     op!(
         "approve",

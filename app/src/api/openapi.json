@@ -7931,6 +7931,14 @@
                       "null"
                     ]
                   },
+                  "request_id": {
+                    "default": null,
+                    "description": "Reuse this UUID after a lost response to avoid starting duplicate work.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "title": {
                     "default": null,
                     "type": [
@@ -15213,6 +15221,14 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "request_id": {
+                    "default": null,
+                    "description": "Reuse this UUID after a lost response to avoid starting duplicate work.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "session": {
                     "type": "string"
                   },

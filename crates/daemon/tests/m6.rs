@@ -677,7 +677,10 @@ async fn cloud_models_work_keep_their_key_secret_and_never_get_code() {
         .op("ask", json!({"prompt": "Wie viele Eier brauche ich für den Kuchen?", "model": id, "kind": "chat", "remember": true}))
         .await;
     assert!(r["web"].is_null(), "{r}");
-    let sent = cloud.requests().last().unwrap().body.to_string();
+    let request = cloud.requests().last().unwrap().body.clone();
+    assert!(request["reasoning_budget_tokens"].is_null(), "{request}");
+    assert!(request["chat_template_kwargs"].is_null(), "{request}");
+    let sent = request.to_string();
     assert!(sent.contains("Wie viele Eier"), "{sent}");
     assert!(
         !sent.contains("drei Eier"),
@@ -983,6 +986,100 @@ steps:
         .map(|c| c["kind"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(kinds, ["setup", "write"]);
+    env.stop().await;
+}
+
+// covers: M6-AC-11, M6-AC-12
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn everyday_questions_and_topic_changes_do_not_inherit_system_tools() {
+    let script = r#"
+steps:
+  - expect: { last_user_contains: "photo", has_tools: false, thinking: true }
+    respond: { text: "Walk to the park and take photos.", reasoning: "private reasoning sentinel" }
+  - expect: { last_user_contains: "Modelle", has_tools: true, thinking: false }
+    respond: { tool_calls: [{ name: list_models, arguments: {} }] }
+  - respond: { text: "Du hast chat-q8_0." }
+  - expect: { last_user_contains: "Internet", has_tools: false }
+    respond: { text: "Das Internet verbindet Computernetze." }
+  - expect: { last_user_contains: "Schreibe", has_tools: false, any_message_contains: "Du hast chat-q8_0." }
+    respond: { text: "Bitte sende den Entwurf bis Freitag." }
+  - expect: { last_user_contains: "kürzer", has_tools: false, any_message_contains: "bis Freitag" }
+    respond: { text: "Entwurf bitte bis Freitag." }
+"#;
+    let (env, model, _) = with_models(&[("Chat-Q8_0", script)]).await;
+    let first = env
+        .op(
+            "ask",
+            json!({"prompt": "Plan a photo walk", "remember": true, "kind": "chat"}),
+        )
+        .await;
+    assert_eq!(first["answer"], "Walk to the park and take photos.");
+    let id = first["conversation"].clone();
+    let saved = env.op("get_conversation", json!({"id": id})).await;
+    assert!(!saved.to_string().contains("private reasoning sentinel"));
+    let control = env
+        .op(
+            "ask",
+            json!({"prompt": "Welche Modelle habe ich?", "conversation": id}),
+        )
+        .await;
+    assert_eq!(control["operations"][0]["operation"], "list_models");
+    for (prompt, answer) in [
+        (
+            "Was ist das Internet?",
+            "Das Internet verbindet Computernetze.",
+        ),
+        (
+            "Schreibe freundlich um: Die Arbeit ist langsam, schick den Entwurf bis Freitag.",
+            "Bitte sende den Entwurf bis Freitag.",
+        ),
+        ("Noch kürzer bitte.", "Entwurf bitte bis Freitag."),
+    ] {
+        let reply = env
+            .op("ask", json!({"prompt": prompt, "conversation": id}))
+            .await;
+        assert_eq!(reply["answer"], answer, "{reply}");
+        assert!(reply["operations"].as_array().unwrap().is_empty());
+        assert!(reply["pending"].as_array().unwrap().is_empty());
+    }
+    let port = env
+        .d()
+        .manager
+        .status(&model)
+        .await
+        .unwrap()
+        .instance
+        .unwrap()
+        .port
+        .unwrap();
+    let requests: Vec<Value> = reqwest::get(format!("http://127.0.0.1:{port}/__fake/requests"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chats: Vec<_> = requests
+        .iter()
+        .filter(|r| {
+            r["path"]
+                .as_str()
+                .is_some_and(|p| p.ends_with("chat/completions"))
+        })
+        .collect();
+    assert_eq!(chats.len(), 6, "{chats:?}");
+    for (i, request) in chats.iter().enumerate() {
+        let body = &request["body"];
+        if i == 1 || i == 2 {
+            assert!(body["reasoning_budget_tokens"].is_null(), "{body}");
+            assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+        } else {
+            assert_eq!(body["reasoning_budget_tokens"], 1024);
+            assert!(
+                body["max_tokens"].as_u64().unwrap() >= 4096,
+                "leave room for the answer: {body}"
+            );
+        }
+    }
     env.stop().await;
 }
 

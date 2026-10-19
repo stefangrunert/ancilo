@@ -5802,6 +5802,11 @@ export interface operations {
                      * @default null
                      */
                     folder?: string | null;
+                    /**
+                     * @description Reuse this UUID after a lost response to avoid starting duplicate work.
+                     * @default null
+                     */
+                    request_id?: string | null;
                     /** @default null */
                     title?: string | null;
                 };
@@ -9791,6 +9796,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /**
+                     * @description Reuse this UUID after a lost response to avoid starting duplicate work.
+                     * @default null
+                     */
+                    request_id?: string | null;
                     session: string;
                     text: string;
                     /**

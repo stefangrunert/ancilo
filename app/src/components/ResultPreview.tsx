@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { OpOutput } from "../api/client";
 import { useI18n, type Key } from "../i18n";
 import { basenameOf, loaded, markStale, previewKindFor, type PreviewState } from "../state/preview";
-import { useClient, useOp, useRefresh } from "../state/store";
+import { useClient, useRefresh } from "../state/store";
 import { Icon } from "./Icon";
 import { Dialog, ErrorNote } from "./ui";
 
@@ -20,15 +21,30 @@ type Block = NonNullable<Layout["blocks"]>[number];
  * again whenever the task changes its results.
  */
 export function useChecks(session: string, version: string | null | undefined, enabled: boolean) {
-  const checks = useOp("check_results", { session }, enabled);
+  const client = useClient();
+  // A new revision gets its own request. A failed or mismatched response
+  // must not trigger a render/refetch loop or reuse the previous badges.
+  const checks = useQuery<Checks>({
+    queryKey: ["check_results", { session }, version ?? null],
+    queryFn: () => client.op("check_results", { session }),
+    enabled,
+    retry: false,
+  });
   const refresh = useRefresh();
-  useEffect(() => {
-    if (enabled && version && checks.data && checks.data.version !== version) void refresh("check_results");
-  }, [enabled, version, checks.data, refresh]);
   // Keeping waits for the checks of exactly the results there are now: not
   // while they run, not when they failed, not for an older version.
-  const ready = Boolean(checks.data) && !checks.isFetching && !checks.error && (!version || checks.data?.version === version);
-  return { ...checks, ready };
+  const ready = enabled && Boolean(checks.data) && !checks.isFetching && !checks.error && (!version || checks.data?.version === version);
+  return { ...checks, ready, retry: () => refresh("get_session", "check_results") };
+}
+
+/** A failed check is recoverable without leaving the task. */
+export function ChecksStatus({ checks }: { checks: ReturnType<typeof useChecks> }) {
+  const { t } = useI18n();
+  if (checks.ready) return null;
+  if (checks.isFetching) return <p className="muted small" role="status">{t("check.checking")}</p>;
+  const action = <button type="button" className="secondary" onClick={() => void checks.retry()}>{t("check.retry")}</button>;
+  if (checks.error) return <ErrorNote error={checks.error} action={action} />;
+  return <div className="note warn row" role="alert"><span>{t("check.outdated")}</span>{action}</div>;
 }
 
 /**

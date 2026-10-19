@@ -986,3 +986,155 @@ async fn web_search_answers_from_wikipedia_on_a_small_model() {
         d.stop().await;
     }
 }
+
+// covers: M10-AC-04, FPL-03
+/// A bounded, local-only everyday-task probe. Reuses existing model files;
+/// no downloads, installed daemon or external agent accounts involved.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "real local 4B model: run explicitly with --ignored"]
+async fn small_local_model_completes_two_document_tasks() {
+    let shared = home();
+    let model = shared
+        .home()
+        .join("models/unsloth/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf");
+    let llama = shared
+        .home()
+        .join("bin/llama-b11270/llama-b11270/llama-server");
+    assert!(
+        model.is_file() && llama.is_file(),
+        "this probe requires the already downloaded 4B model and llama.cpp"
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let paths = Paths::from_home(temp.path().join("ancilo"));
+    let config = Config {
+        port: 0,
+        llama_server_bin: Some(llama),
+        model_search_dirs: Some(vec![]),
+        ancilo_bin: Some(env!("CARGO_BIN_EXE_ancilo").into()),
+        ..Config::default()
+    };
+    let options = DaemonOptions {
+        llama_build: Some(None),
+        manager: ancilo_models::ManagerOptions {
+            measure_speed: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let d = ancilo_daemon::start(paths, config, options).await.unwrap();
+    let setup = call(
+        d.url(),
+        &d.token,
+        "add_model",
+        json!({"address": model, "context": "small", "start": false}),
+    )
+    .await;
+    let id = setup["id"].as_str().unwrap();
+    call(
+        d.url(),
+        &d.token,
+        "assign_role",
+        json!({"role": "default", "model": id}),
+    )
+    .await;
+    standard_resources(d.url(), &d.token).await;
+    let cases = [
+        (
+            "bills",
+            "Belege.txt",
+            "Strom: 120 Euro. Internet: 80 Euro.",
+            "Erstelle aus Belege.txt eine Excel-Datei Kosten.xlsx mit den Spalten Posten und Betrag und einer abschließenden Summe. Verändere die Eingabedatei nicht.",
+            "Kosten.xlsx",
+            vec!["120", "80", "200"],
+        ),
+        (
+            "letter",
+            "Termin.txt",
+            "Empfänger: Frau Meyer. Termin: Dienstag um 14 Uhr.",
+            "Schreibe aus Termin.txt eine kurze höfliche Terminbestätigung als Brief.docx. Verändere die Eingabedatei nicht.",
+            "Brief.docx",
+            vec!["Dienstag", "14", "Meyer"],
+        ),
+    ];
+    let mut report = Vec::new();
+    for (case, source, facts, prompt, output, expected) in cases {
+        let folder = temp.path().join(case);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(source), facts).unwrap();
+        let s = call(d.url(), &d.token, "create_task", json!({"folder": folder})).await;
+        let sid = s["id"].as_str().unwrap();
+        let started = std::time::Instant::now();
+        call(
+            d.url(),
+            &d.token,
+            "send_message",
+            json!({"session": sid, "text": prompt}),
+        )
+        .await;
+        let done = tokio::time::timeout(Duration::from_secs(90), async {
+            loop {
+                let s = call(d.url(), &d.token, "get_session", json!({"session": sid})).await;
+                if s["status"] != "running" {
+                    break s;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+        .await;
+        let seconds = started.elapsed().as_secs_f64();
+        if done.is_err() {
+            call(d.url(), &d.token, "cancel_turn", json!({"session": sid})).await;
+            report.push(json!({"case": case, "passed": false, "seconds": seconds, "reason": "90 second limit"}));
+            break;
+        }
+        let done = done.unwrap();
+        let exists = done["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["path"] == output);
+        let preview = if exists {
+            call(
+                d.url(),
+                &d.token,
+                "preview_result",
+                json!({"session": sid, "path": output}),
+            )
+            .await
+        } else {
+            Value::Null
+        };
+        let content = preview["layout"].to_string();
+        let readable_paragraphs = !preview["layout"]["blocks"].as_array().is_some_and(|bs| {
+            bs.iter()
+                .any(|b| b["text"].as_str().is_some_and(|t| t.contains("\\n")))
+        });
+        let passed = exists
+            && readable_paragraphs
+            && expected.iter().all(|s| content.contains(s))
+            && !preview["findings"]
+                .as_array()
+                .is_some_and(|fs| fs.iter().any(|f| f["level"] == "error"))
+            && !folder.join(output).exists()
+            && std::fs::read_to_string(folder.join(source)).unwrap() == facts;
+        report.push(json!({"case": case, "passed": passed, "seconds": seconds, "session": done, "preview": preview}));
+    }
+    let resource = call(d.url(), &d.token, "resource_status", json!({})).await;
+    d.stop().await;
+    let result = json!({"model": model.file_name().unwrap().to_string_lossy(), "cases": report, "resources": resource});
+    let target = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/small-model-document-probe.json");
+    std::fs::write(&target, serde_json::to_string_pretty(&result).unwrap()).unwrap();
+    println!("probe report: {}", target.display());
+    assert!(
+        report.len() == 2 && report.iter().all(|r| r["passed"] == true),
+        "document task probe failed: {}",
+        serde_json::to_string(
+            &report
+                .iter()
+                .map(|r| json!({"case": r["case"], "passed": r["passed"], "seconds": r["seconds"]}))
+                .collect::<Vec<_>>()
+        )
+        .unwrap()
+    );
+}

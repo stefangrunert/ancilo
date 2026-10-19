@@ -11,14 +11,14 @@ ancilo-core.workspace = true
 ancilo-storage.workspace = true
 ancilo-agent.workspace = true
 ancilo-web.workspace = true
-calamine = "0.36"
+calamine = "0.37"
 chrono.workspace = true
 hex.workspace = true
 pdf-extract = "0.12"
 quick-xml = "0.42"
 regex.workspace = true
 rusqlite.workspace = true
-rust_xlsxwriter = { version = "0.99", default-features = false }
+rust_xlsxwriter = { version = "0.100", default-features = false }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,7 +26,7 @@ sha2.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 lopdf = "0.42"

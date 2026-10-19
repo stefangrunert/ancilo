@@ -59,6 +59,9 @@ pub struct AgentSpec {
     pub local_only: bool,
     /// Let the model think before it answers (see `CallOpts::think`).
     pub think: bool,
+    /// Optional cap on local reasoning within the total output allowance.
+    /// Requires `local_only`; cloud providers have their own controls.
+    pub reasoning_budget: Option<u32>,
     /// Where long tool results are kept whole, to be read again
     /// (`read_result`); `None`: they are only shortened.
     pub results: Option<ResultStore>,
@@ -230,6 +233,12 @@ pub async fn run(
         });
         if let Some(seed) = spec.seed {
             req["seed"] = json!(seed);
+        }
+        if spec.think
+            && spec.local_only
+            && let Some(budget) = spec.reasoning_budget
+        {
+            req["reasoning_budget_tokens"] = json!(budget);
         }
         let opts = CallOpts {
             priority: spec.priority,

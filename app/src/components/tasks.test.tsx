@@ -1,5 +1,6 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Client } from "../api/client";
 import { useState } from "react";
 import { renderWithDaemon } from "../test-utils";
 import { ResultPreview } from "./ResultPreview";
@@ -30,6 +31,72 @@ function task(extra: Record<string, unknown> = {}) {
 
 // covers: M10-AC-04
 describe("A task", () => {
+  it("retains an interrupted task during a stream outage and refreshes its status on reconnect", async () => {
+    let state: (up: boolean) => void = () => {};
+    const spy = vi.spyOn(Client.prototype, "events").mockImplementation((_event, onState) => { state = onState; return () => {}; });
+    let status = "interrupted";
+    try {
+      renderWithDaemon(<TaskView id="s-1" />, {
+        get_session: () => task({ status }),
+        get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }),
+      });
+      const resume = await screen.findByRole("button", { name: "Continue task" });
+      act(() => state(false));
+      expect(resume).toBeDisabled();
+      expect(screen.getByTestId("messages")).toHaveTextContent("Mach eine Tabelle");
+      status = "idle"; // Another client finished it while the stream was down.
+      act(() => state(true));
+      await waitFor(() => expect(screen.getByTestId("task")).toHaveAttribute("data-status", "idle"));
+      expect(screen.queryByRole("button", { name: "Continue task" })).toBeNull();
+    } finally { spy.mockRestore(); }
+  });
+
+  it.each([false, true])("stops after a failed check of changed results and lets the user retry (free=%s)", async (free) => {
+    let version = "v1";
+    let fail = false;
+    const { calls, queryClient } = renderWithDaemon(<TaskView id="s-1" />, {
+      get_session: () => task({ free, changes_version: version, changes: [{ path: "Kosten.xlsx", added: 0, removed: 0, runs: false, change: "added" }] }),
+      get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }),
+      check_results: () => {
+        if (fail) throw { code: "conflict", message: "Could not read the results" };
+        return { version, files: [{ path: "Kosten.xlsx", file: "aa", worst: "ok", errors: 0, warnings: 0 }] };
+      },
+    });
+    const card = await screen.findByTestId(free ? "task-results" : "task-changes");
+    const save = within(card).getByRole("button", { name: free ? "Save to Documents" : "Keep" });
+    await waitFor(() => expect(save).toBeEnabled());
+    version = "v2";
+    fail = true;
+    await queryClient.invalidateQueries({ queryKey: ["get_session"] });
+    await within(card).findByText("Could not read the results");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(calls.filter((c) => c.op === "check_results")).toHaveLength(2);
+    expect(save).toBeDisabled();
+    expect(within(card).queryByTestId("check-badge")).toBeNull();
+    fail = false;
+    await userEvent.click(within(card).getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(save).toBeEnabled());
+    expect(within(card).getByTestId("check-badge")).toHaveTextContent("checked");
+  });
+
+  it("does not loop or offer to keep a check for a different revision", async () => {
+    let checked = "v1";
+    const { calls } = renderWithDaemon(<TaskView id="s-1" />, {
+      get_session: () => task({ changes_version: "v2", changes: [{ path: "Kosten.xlsx", added: 0, removed: 0, runs: false, change: "added" }] }),
+      get_preferences: () => ({ view: "simple", purposes: ["chat"], setup: {}, documents: [] }),
+      check_results: () => ({ version: checked, files: [{ path: "Kosten.xlsx", file: "aa", worst: "ok", errors: 0, warnings: 0 }] }),
+    });
+    const card = await screen.findByTestId("task-changes");
+    await within(card).findByText("The results have changed. Check them again before saving or keeping them.");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(calls.filter((c) => c.op === "check_results")).toHaveLength(1);
+    expect(within(card).getByRole("button", { name: "Keep" })).toBeDisabled();
+    expect(within(card).queryByTestId("check-badge")).toBeNull();
+    checked = "v2";
+    await userEvent.click(within(card).getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(within(card).getByRole("button", { name: "Keep" })).toBeEnabled());
+  });
+
   it("shows what changed in the copy, keeps exactly what was shown, and drops only after asking", async () => {
     const s = task({
       changes_version: "v-1",

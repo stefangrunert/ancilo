@@ -11,7 +11,8 @@ import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
 import { WebSwitch } from "./WebSearch";
 import { Dialog, ErrorNote } from "./ui";
-import { CheckBadge, problems, ResultPreview, useChecks, useLooked } from "./ResultPreview";
+import { CheckBadge, ChecksStatus, problems, ResultPreview, useChecks, useLooked } from "./ResultPreview";
+import { PendingFilesChanged, pendingTaskMessage, pendingTaskStart, sendTaskMessage, startTask } from "../state/task-requests";
 import { previewKindFor } from "../state/preview";
 
 type Session = OpOutput<"get_session">;
@@ -70,13 +71,14 @@ function GivenFiles({ files }: { files: string[] }) {
 function useStartTask() {
   const client = useClient();
   const refresh = useRefresh();
+  const { t } = useI18n();
   return async (text: string, folder: string, files: File[]) => {
-    const title = (text.trim().split("\n")[0] ?? "").slice(0, 60);
-    const s = await client.op("create_task", { folder, title });
-    for (const f of files) await client.addTaskFile(s.id, f.name, f);
-    await client.op("send_message", { session: s.id, text });
-    await refresh("list_sessions", "list_projects");
-    navigate({ view: "task", id: s.id });
+    try {
+      const id = await startTask(client, text, folder, files, t("tasks.reselect"));
+      navigate({ view: "task", id });
+    } finally {
+      await refresh("list_sessions", "list_projects");
+    }
   };
 }
 
@@ -103,10 +105,12 @@ export function TasksAreaPage({ folder: preset = null }: { folder?: string | nul
   const { t } = useI18n();
   const start = useStartTask();
   const choose = useChooseFolder();
-  const [folder, setFolder] = useState<string | null>(preset);
+  const [pending] = useState(() => pendingTaskStart());
+  const restored = !preset || pending?.folder === preset ? pending : null;
+  const [folder, setFolder] = useState<string | null>(preset ?? restored?.folder ?? null);
   const [files, setFiles] = useState<File[]>([]);
   // A chosen example fills the input (a new key starts it with that text).
-  const [draft, setDraft] = useState({ text: "", n: 0 });
+  const [draft, setDraft] = useState({ text: restored?.text ?? "", n: 0 });
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const pick = async () => {
@@ -174,7 +178,7 @@ export function TasksAreaPage({ folder: preset = null }: { folder?: string | nul
             try {
               await start(text, folder, files);
             } catch (e) {
-              setError(e);
+              setError(e instanceof PendingFilesChanged ? new Error(t("tasks.pendingFiles")) : e);
               throw e;
             } finally {
               setBusy(false);
@@ -338,11 +342,11 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
       <p className="muted small">{t("task.notYet", { folder: nameOf(s.project) })}</p>
       <ul className="task-change-list">
         {s.changes.map((c) => (
-          <ChangeLine key={c.path} c={c} check={checks.data?.files.find((f) => f.path === c.path)} onLook={setLooking} />
+          <ChangeLine key={c.path} c={c} check={checks.ready ? checks.data?.files.find((f) => f.path === c.path) : undefined} onLook={setLooking} />
         ))}
       </ul>
       <div className="row">
-        <button type="button" data-testid="keep" disabled={!checks.ready} title={checks.ready ? undefined : t("check.checking")} onClick={() => (askFirst ? setAnyway(checks.data?.version ?? null) : keep(checks.data?.version))}>
+        <button type="button" data-testid="keep" disabled={!checks.ready} title={checks.isFetching ? t("check.checking") : undefined} onClick={() => (askFirst ? setAnyway(checks.data?.version ?? null) : keep(checks.data?.version))}>
           {t("task.keep")}
         </button>
         <button type="button" className="secondary" onClick={() => setDropping(true)}>
@@ -379,7 +383,7 @@ function TaskChanges({ s, onError }: { s: Session; onError: (e: unknown) => void
         }}
       />
       <ResultPreview session={s.id} path={looking} current={s.changes_version} onClose={() => setLooking(null)} onSeen={looked.seen} />
-      <ErrorNote error={checks.error} />
+      <ChecksStatus checks={checks} />
     </div>
   );
 }
@@ -445,7 +449,7 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
           <li key={c.path} className="task-change added" data-testid="task-change">
             <Icon name="doc" size={14} />
             <code>{c.path}</code>
-            <CheckBadge check={checks.data?.files.find((f) => f.path === c.path)} />
+            <CheckBadge check={checks.ready ? checks.data?.files.find((f) => f.path === c.path) : undefined} />
             {previewKindFor(c.path) !== "file" && (
               <button type="button" className="link" data-testid="look-at" onClick={() => setLooking(c.path)}>
                 {t("check.look")}
@@ -455,7 +459,7 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
         ))}
       </ul>
       <div className="row">
-        <button type="button" data-testid="save" disabled={!checks.ready} title={checks.ready ? undefined : t("check.checking")} onClick={() => trySave(null, version)}>
+        <button type="button" data-testid="save" disabled={!checks.ready} title={checks.isFetching ? t("check.checking") : undefined} onClick={() => trySave(null, version)}>
           {t("results.save")}
         </button>
         <button
@@ -484,7 +488,7 @@ function TaskResults({ s, onError }: { s: Session; onError: (e: unknown) => void
         }}
       />
       <ResultPreview session={s.id} path={looking} current={s.changes_version} onClose={() => setLooking(null)} onSeen={looked.seen} />
-      <ErrorNote error={checks.error} />
+      <ChecksStatus checks={checks} />
     </div>
   );
 }
@@ -496,31 +500,25 @@ export function TaskView({ id }: { id: string }) {
   const refresh = useRefresh();
   const live = useLive();
   const pro = usePro();
+  const [files, setFiles] = useState<File[]>([]);
+  const [resuming, setResuming] = useState(false);
   const session = useOp("get_session", { session: id });
   const [error, setError] = useState<unknown>(null);
   const s = session.data;
   const parts = useMemo(() => blocks(s?.messages ?? []), [s?.messages]);
-  if (session.error) return <ErrorNote error={session.error} />;
+  if (session.error && !s) return <ErrorNote error={session.error} action={<button type="button" onClick={() => void session.refetch()}>{t("tasks.refresh")}</button>} />;
   if (!s) return <p className="muted" style={{ padding: 20 }}>…</p>;
   const running = s.status === "running";
   const lastSteps = parts.map((p) => p.kind).lastIndexOf("steps");
   const send = async (text: string) => {
     setError(null);
     try {
-      await client.op("send_message", { session: s.id, text });
+      await sendTaskMessage(client, s.id, text, files, t("tasks.reselect"));
+      setFiles([]);
       await refresh("get_session", "list_sessions");
     } catch (e) {
-      setError(e);
+      setError(e instanceof PendingFilesChanged ? new Error(t("tasks.pendingFiles")) : e);
       throw e;
-    }
-  };
-  const addFiles = async (files: File[]) => {
-    setError(null);
-    try {
-      for (const f of files) await client.addTaskFile(s.id, f.name, f);
-      await refresh("get_session");
-    } catch (e) {
-      setError(e);
     }
   };
   return (
@@ -542,9 +540,12 @@ export function TaskView({ id }: { id: string }) {
               label={t("tasks.next")}
               placeholder={t("tasks.nextHint")}
               onSend={send}
-              busy={running}
+              initial={pendingTaskMessage(id)}
+              busy={running || resuming}
+              disabled={!live.online || !!session.error}
+              above={<PendingFiles files={files} onRemove={(i) => setFiles((x) => x.filter((_, j) => i !== j))} />}
               onStop={() => void client.op("cancel_turn", { session: s.id }).catch(setError)}
-              onFiles={(f) => void addFiles(f)}
+              onFiles={(f) => setFiles((x) => [...x, ...f])}
               extra={<WebSwitch onError={setError} />}
               autoFocus
             />
@@ -572,10 +573,18 @@ export function TaskView({ id }: { id: string }) {
               ),
             )}
             {running && <LiveWork id={s.id} label={t("tasks.working")} />}
-            {s.status === "interrupted" && <p className="muted">{t("code.interrupted")}</p>}
+            {s.status === "interrupted" && <div className="note row">
+              <span>{t("tasks.interrupted")}</span>
+              <button type="button" disabled={resuming || !live.online || !!session.error} onClick={async () => {
+                setResuming(true);
+                try { await send(t("tasks.continuePrompt")); } catch { /* send shows the error */ }
+                finally { setResuming(false); }
+              }}>{t("tasks.continue")}</button>
+            </div>}
           </div>
           <Approvals s={s} onError={setError} />
           {s.free ? <TaskResults s={s} onError={setError} /> : <TaskChanges s={s} onError={setError} />}
+          <ErrorNote error={session.error} action={<button type="button" onClick={() => void session.refetch()}>{t("tasks.refresh")}</button>} />
           <ErrorNote error={error} onDismiss={() => setError(null)} />
         </ChatLayout>
       </section>

@@ -11,6 +11,14 @@ A new task has two steps:
 
 Until a folder is chosen there is nothing to type; an example clicked before asks for the folder first. Folders Ancilo worked in are listed in the Tasks area, each with its tasks; a click starts a new task there. Results you want somewhere else? Choose Documents (or any folder) as the task's folder.
 
+## Continuing after an interruption
+
+**Stop** leaves the task's request and working files available. After a restart, an unfinished task is marked interrupted. **Continue task** asks the agent to inspect the existing copy and finish the remaining work. It does not discard the copy or automatically replay the previous steps. Review the results before keeping them.
+
+If a connection fails while a task starts, send the same request again: Ancilo reuses the task and skips confirmed uploads. Reloading the same window retains the pending request; files that have not finished uploading must be selected again. Finish that retry before adding different files. Closing the window can remove this browser draft, but tasks already created remain in the task list.
+
+A result check that fails offers **Check again**. Outdated check badges are hidden, and keeping or saving waits for a successful check of the current files.
+
 ## A folder: always in a copy
 
 Ancilo never works in your folder directly. It works in a **copy** – one that holds only what the task changes, so a task starts at once, whatever the folder's size (Documents included). The task reads your folder as it is; before it changes a file, Ancilo notes the file's content (that is what the change starts from) and, where needed, puts it into the copy (on APFS a clone that takes no extra space). Hidden files, links and files that are only in iCloud are never part of it – and never touched.
@@ -47,6 +55,8 @@ The checks follow fixed rules, by question. A *problem* is only what is sure; wh
 
 They cannot tell whether the content is right – only whether it holds together. Formulas are never calculated: a formula Ancilo was given is written as text (that is on purpose – nothing in a file runs), and the check says so; a workbook's own formulas show the value they had when it was saved. What the view leaves out is said below it: fonts, colours, pictures and charts; only the first 200 rows of a sheet (all of them are checked).
 
+For several results, name the file with its requirements: “Costs.xlsx with columns Item and Amount. Report.docx with sections Summary and Details.” The checks assign those instructions to each named result; “both files” or “all files” applies to all results. Name the file again when correcting its requirements. Unnamed instructions following a named file continue to apply to that file. This is a rule-based reading of explicit instructions; it cannot resolve every ambiguous sentence.
+
 **What you saw is what you keep**: *Keep* (and *Save*) take exactly the version that was checked and shown. If the task changed its results since – say, after another message – nothing is written; Ancilo checks again and you look again. A view of an older version says so and offers the new one; it never changes under your eyes. When a check found problems, *Keep* asks first.
 
 - **Keep** puts the changes into your folder. Before anything is written, Ancilo checks that the folder still holds what the copy started from – if you changed a file there meanwhile, or a file of a new name appeared, **nothing** is written and Ancilo says which files. Originals are backed up first; every step is noted in a journal; files are written next to their place and moved in at once. If a step fails, everything before it is put back. If Ancilo stops in the middle (a crash), it puts things back at the next start.
@@ -64,3 +74,5 @@ ancilo op undo_apply '{"session": "s-…"}' --confirm
 ```
 
 `check_results` checks a task's results (with the `version` they were checked for), `preview_result` shows one of them; `apply_changes` and `save_results` take a `version` and refuse a newer one. `add_task_file` puts a file into a task's copy; `discard_changes` drops a task's changes. Without `folder`, `create_task` still starts a task without a folder of its own (the app no longer offers it; such tasks are listed under *Tasks* and saved with `save_results`, `dir` default Documents).
+
+Clients can pass an optional UUID `request_id` to `create_task` and `send_message`. Reuse that UUID and the same input after an uncertain response; a repeated accepted request returns the existing session without starting new work, including after a daemon restart. Reusing it with different input is rejected. Use a fresh UUID for each intentional new task or message. Receipts live with the session and disappear when it is deleted.

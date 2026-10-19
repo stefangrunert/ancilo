@@ -67,6 +67,16 @@ steps:
   - respond: { text: "I proposed to use **coder-q8_0** for delegated tasks – please confirm." }
 "#;
 
+/// Everyday multi-turn chat: a follow-up must still see the previous answer.
+const CHAT_EVERYDAY: &str = r#"
+cycle: true
+steps:
+  - expect: { last_user_contains: "Plan a picnic" }
+    respond: { text: "Bring **bread**, cheese and fruit. Choose a shady place." }
+  - expect: { last_user_contains: "Make it vegan", any_message_contains: "cheese and fruit" }
+    respond: { text: "Replace the cheese with hummus. Keep the bread and fruit." }
+"#;
+
 /// The chat model with web search (`--web`): plans the lookup, then answers
 /// from the sources.
 const CHAT_WEB: &str = r#"
@@ -103,6 +113,13 @@ steps:
 
 /// The chat model as a task's agent (`--tasks`): looks at the folder, writes
 /// a spreadsheet, moves a file, reports.
+const CHAT_INTERRUPTED: &str = r#"
+steps:
+  - respond: { tool_calls: [{ name: write_file, arguments: { path: "partial.txt", content: "Work already done" } }] }
+  - respond: { text: "delayed", delay_ms: 30000 }
+fallback: { text: "Continued from the existing files." }
+"#;
+
 const CHAT_TASK: &str = r##"
 steps:
   - respond: { tool_calls: [{ name: list_files, arguments: {} }] }
@@ -201,8 +218,14 @@ async fn main() {
                 CHAT_WEB
             } else if flag("--docs") {
                 CHAT_DOCS
+            } else if flag("--everyday-chat") {
+                CHAT_EVERYDAY
             } else if flag("--tasks") {
-                CHAT_TASK
+                if flag("--task-interrupted") {
+                    CHAT_INTERRUPTED
+                } else {
+                    CHAT_TASK
+                }
             } else {
                 CHAT
             },

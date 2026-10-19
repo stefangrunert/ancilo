@@ -2,7 +2,26 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
-## 0.5.1 – 2026-10-06
+## 0.6.0 – 2026-10-19
+
+- **Security maintenance**: updated TLS and ZIP dependencies to versions that fix newly reported vulnerabilities; updated the spreadsheet reader and writer to use the repaired ZIP library.
+
+- **Chat answer quality**: ordinary writing, explanations and plans no longer enter system controls because of fragments such as “hot” in “photo” or inherit tools after changing the topic. Local reasoning models get a bounded thinking allowance to check their answers; this can increase response time. Writing and follow-up instructions now emphasize preserving facts and constraints.
+
+- **Everyday chat**: unsent drafts survive switching views and reloading the same window. Failed sends preserve newly typed follow-ups; a completed answer no longer pulls you back from another view. Filter conversations by title (including chats in folders), and copy a whole answer with one click.
+
+- **Checks distinguish results within one task**: instructions naming a spreadsheet no longer require its columns in a separate Word report. Shared instructions and later corrections retain their file scope in both previews and the combined check. Textual “Gesamtkosten” totals are recognized without claiming their arithmetic was verified.
+- **Interrupted tasks can continue in their existing copy**: accepted requests and file references are saved before the model starts. Lost replies no longer duplicate task creation or messages when retried from the Tasks view. Partial uploads can be retried, including after reloading the window; missing files are requested again.
+- **Task recovery is visible**: interrupted tasks offer **Continue task**, the task view stays available after a refresh error, and stale live progress is cleared when the event connection drops.
+- **Document tasks receive clearer path instructions**: filenames without a directory are written at the top of the working folder. Document tasks no longer receive an unrelated absolute project path; Word text is instructed to use real paragraph breaks.
+
+- **Result checks recover after an error**: a failed check after files changed no longer sends repeated requests. Tasks offer **Check again**, hide outdated check badges, and enable **Keep** or **Save** only when the current results have been checked successfully.
+
+- **Also included from the unpublished 0.5.1 draft:** when the chosen model does not fit in memory, Ancilo tries a smaller context and then another local model that fits, explaining which one answered. It returns to the chosen model when memory allows.
+
+Local model answers can still contain factual, language or planning mistakes. The chat changes do not validate every answer, and this release does not change your selected model.
+
+## 0.5.1 – 2026-10-06 (draft, not published)
 
 - **A model that does not fit no longer stops a conversation**: when the chosen model does not fit in memory right now – after a long session made its context grow, or because other programs took the room – Ancilo first starts it with a smaller context that fits; if even that is too large, the most capable other local model that fits answers, and the conversation says so ("Qwen3.6-35B does not fit in memory right now … so Qwen3.5-4B answered"). It goes back to the chosen model as soon as there is room. Only when nothing fits at all does it ask you to close programs.
 
